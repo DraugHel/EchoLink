@@ -4,7 +4,8 @@ import remarkGfm from 'remark-gfm'
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism'
 
-export default function Message({ role, content, streaming, images }) {
+export default function Message({ role, content, streaming, images, think }) {
+  const [thinkOpen, setThinkOpen] = useState(false)
   let parsedAttachments = []
   if (images) {
     try {
@@ -58,6 +59,19 @@ export default function Message({ role, content, streaming, images }) {
           )
           : (
             <div style={styles.markdown}>
+              {think && (
+                <div style={styles.thinkWrap}>
+                  <button style={styles.thinkToggle} onClick={() => setThinkOpen(o => !o)}>
+                    <span style={{ marginRight: 6 }}>{thinkOpen ? '▾' : '▸'}</span>
+                    Thought process
+                  </button>
+                  {thinkOpen && (
+                    <div style={styles.thinkContent}>
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{think}</ReactMarkdown>
+                    </div>
+                  )}
+                </div>
+              )}
               <ReactMarkdown
                 remarkPlugins={[remarkGfm]}
                 components={{
@@ -196,6 +210,26 @@ const styles = {
   inlineCode: {
     background: 'var(--bg4)', padding: '1px 6px', borderRadius: 4,
     fontFamily: 'var(--font-mono)', fontSize: '0.88em', color: 'var(--green)'
+  },
+  thinkWrap: {
+    marginBottom: 10,
+    borderRadius: 8,
+    border: '1px solid var(--border)',
+    overflow: 'hidden'
+  },
+  thinkToggle: {
+    width: '100%', textAlign: 'left',
+    padding: '7px 12px', fontSize: 12,
+    color: 'var(--text2)', background: 'var(--bg4)',
+    cursor: 'pointer', fontFamily: 'var(--font-mono)',
+    display: 'flex', alignItems: 'center',
+    border: 'none'
+  },
+  thinkContent: {
+    padding: '10px 12px', fontSize: 13,
+    color: 'var(--text2)', background: 'var(--bg3)',
+    lineHeight: 1.5, maxHeight: 300, overflowY: 'auto',
+    fontFamily: 'var(--font-mono)'
   },
   cursor: {
     display: 'inline-block', width: 2, height: '1em',

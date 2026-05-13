@@ -130,11 +130,12 @@ export default function Chat({ user, onLogout }) {
     setMessages(prev => [
       ...prev,
       { id: userId, role: 'user', content, images: attachmentsToSend.length > 0 ? JSON.stringify(attachmentsToSend) : '' },
-      { id: assistantId, role: 'assistant', content: '', streaming: true }
+      { id: assistantId, role: 'assistant', content: '', think: '', streaming: true }
     ])
     setStreaming(true)
 
     let assistantContent = ''
+    let assistantThink = ''
 
     abortControllerRef.current = new AbortController()
 
@@ -157,6 +158,12 @@ export default function Chat({ user, onLogout }) {
         for (const line of lines) {
           try {
             const json = JSON.parse(line.slice(6))
+            if (json.think) {
+              assistantThink += json.think
+              setMessages(prev => prev.map(m =>
+                m.id === assistantId ? { ...m, think: assistantThink } : m
+              ))
+            }
             if (json.token) {
               assistantContent += json.token
               setMessages(prev => prev.map(m =>
@@ -311,7 +318,7 @@ export default function Chat({ user, onLogout }) {
           )}
 
           {activeConvo && !loading && messages.map(m => (
-            <Message key={m.id} role={m.role} content={m.content} streaming={m.streaming} images={m.images} />
+            <Message key={m.id} role={m.role} content={m.content} streaming={m.streaming} images={m.images} think={m.think} />
           ))}
 
           {activeConvo && !loading && messages.length === 0 && (

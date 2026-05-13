@@ -152,6 +152,11 @@ router.post('/:conversationId', requireAuth, async (req, res) => {
     const reader = ollamaRes.body.getReader()
     const decoder = new TextDecoder()
 
+    // Track <think> tag state — send think content separately
+    let inThink = false
+    let buffer = ''
+    let fullThink = ''
+
     while (true) {
       const { done, value } = await reader.read()
       if (done) break
@@ -163,14 +168,62 @@ router.post('/:conversationId', requireAuth, async (req, res) => {
         try {
           const json = JSON.parse(line)
           if (json.message?.content) {
-            fullResponse += json.message.content
-            res.write(`data: ${JSON.stringify({ token: json.message.content })}\n\n`)
+            buffer += json.message.content
+
+            // Process buffer
+            while (true) {
+              if (inThink) {
+                const end = buffer.indexOf('</think>')
+                if (end !== -1) {
+                  const thinkChunk = buffer.slice(0, end)
+                  fullThink += thinkChunk
+                  if (thinkChunk) res.write(`data: ${JSON.stringify({ think: thinkChunk })}\n\n`)
+                  inThink = false
+                  buffer = buffer.slice(end + 8)
+                } else {
+                  // Still in think — send what we have (minus tail in case tag is split)
+                  if (buffer.length > 8) {
+                    const safe = buffer.slice(0, -8)
+                    fullThink += safe
+                    res.write(`data: ${JSON.stringify({ think: safe })}\n\n`)
+                    buffer = buffer.slice(-8)
+                  }
+                  break
+                }
+              } else {
+                const start = buffer.indexOf('<think>')
+                if (start !== -1) {
+                  // Send text before think tag
+                  const before = buffer.slice(0, start)
+                  if (before) {
+                    fullResponse += before
+                    res.write(`data: ${JSON.stringify({ token: before })}\n\n`)
+                  }
+                  inThink = true
+                  buffer = buffer.slice(start + 7)
+                } else {
+                  // No think tag — safe to send minus last 7 chars
+                  if (buffer.length > 7) {
+                    const safe = buffer.slice(0, -7)
+                    fullResponse += safe
+                    res.write(`data: ${JSON.stringify({ token: safe })}\n\n`)
+                    buffer = buffer.slice(-7)
+                  }
+                  break
+                }
+              }
+            }
           }
           if (json.done) {
-            // Save assistant message
+            // Flush remaining buffer
+            if (buffer && !inThink) {
+              fullResponse += buffer
+              if (buffer.trim()) res.write(`data: ${JSON.stringify({ token: buffer })}\n\n`)
+            }
+            // Save clean response (no think tags)
             db.prepare('INSERT INTO messages (conversation_id, role, content) VALUES (?, ?, ?)')
-              .run(convo.id, 'assistant', fullResponse)
-            res.write(`data: ${JSON.stringify({ done: true })}\n\n`)
+              .run(convo.id, 'assistant', fullResponse.trim())
+            res.write(`data: ${JSON.stringify({ done: true, hasThink: !!fullThink })}\n\n`)
           }
         } catch {}
       }
