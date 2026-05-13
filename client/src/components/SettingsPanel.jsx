@@ -125,14 +125,14 @@ const styles = {
   },
   err: { color: 'var(--danger)', fontSize: 13 },
   select: {
-    width: '100%', padding: '10px 12px', fontSize: 14,
+    width: '100%', padding: '10px 12px', fontSize: 16,
     background: 'var(--bg3)', border: '1px solid var(--border)',
     borderRadius: 8, color: 'var(--text)', outline: 'none',
     appearance: 'none', cursor: 'pointer'
   },
   range: { width: '100%', accentColor: 'var(--green)', cursor: 'pointer' },
   textarea: {
-    width: '100%', padding: '12px', fontSize: 14,
+    width: '100%', padding: '12px', fontSize: 16,
     resize: 'vertical', minHeight: 100, borderRadius: 8,
     lineHeight: 1.5
   },

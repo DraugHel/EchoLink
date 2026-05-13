@@ -116,7 +116,7 @@ const styles = {
   input: {
     padding: '12px 14px',
     width: '100%',
-    fontSize: 15
+    fontSize: 16
   },
   btn: {
     marginTop: 4,

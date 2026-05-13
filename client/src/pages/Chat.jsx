@@ -336,7 +336,7 @@ const styles = {
   inputRow: { display: 'flex', gap: 10, alignItems: 'flex-end' },
   textarea: {
     flex: 1, padding: '12px 14px', resize: 'none',
-    borderRadius: 12, lineHeight: 1.5, fontSize: 15,
+    borderRadius: 12, lineHeight: 1.5, fontSize: 16,
     maxHeight: 160, overflowY: 'auto',
     border: '1px solid var(--border)',
     transition: 'border-color var(--transition)'
