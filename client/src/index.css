@@ -22,7 +22,6 @@
   --transition: 150ms ease;
 }
 
-/* Let html/body be neutral — no overflow tricks here */
 html, body {
   height: 100%;
   background: var(--bg);
@@ -33,15 +32,19 @@ html, body {
   -webkit-font-smoothing: antialiased;
 }
 
-/* Root fills the dynamic viewport (accounts for iOS address bar) */
+/* Root: svh keeps height stable even when Safari's address bar toggles.
+   Safe-area insets push content away from notch, home indicator,
+   and rounded corners. */
 #root {
-  /* svh = small viewport height: stable size assuming address bar is visible.
-     Avoids the layout jumps that dvh causes when Safari's bar expands/collapses. */
-  height: 100vh;       /* fallback */
+  height: 100vh;
   height: 100svh;
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  padding-top: env(safe-area-inset-top);
+  padding-right: env(safe-area-inset-right);
+  padding-bottom: env(safe-area-inset-bottom);
+  padding-left: env(safe-area-inset-left);
 }
 
 ::-webkit-scrollbar { width: 4px; }
