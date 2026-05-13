@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
@@ -28,12 +29,7 @@ export default function Message({ role, content, streaming }) {
                   code({ inline, className, children }) {
                     const lang = /language-(\w+)/.exec(className || '')?.[1]
                     return !inline && lang
-                      ? (
-                        <SyntaxHighlighter style={oneDark} language={lang} PreTag="div"
-                          customStyle={{ borderRadius: 8, margin: '8px 0', fontSize: 13 }}>
-                          {String(children).replace(/\n$/, '')}
-                        </SyntaxHighlighter>
-                      )
+                      ? <CodeBlock lang={lang} code={String(children).replace(/\n$/, '')} />
                       : <code style={styles.inlineCode}>{children}</code>
                   },
                   p: ({ children }) => <p style={{ marginBottom: 8 }}>{children}</p>,
@@ -65,6 +61,74 @@ export default function Message({ role, content, streaming }) {
           )
         }
       </div>
+    </div>
+  )
+}
+
+function CodeBlock({ lang, code }) {
+  const [copied, setCopied] = useState(false)
+
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(code)
+    } catch {
+      // Fallback for older browsers / non-HTTPS
+      const ta = document.createElement('textarea')
+      ta.value = code
+      ta.style.position = 'fixed'
+      ta.style.opacity = '0'
+      document.body.appendChild(ta)
+      ta.select()
+      try { document.execCommand('copy') } catch {}
+      document.body.removeChild(ta)
+    }
+    setCopied(true)
+    setTimeout(() => setCopied(false), 1500)
+  }
+
+  return (
+    <div style={{ position: 'relative', margin: '8px 0' }}>
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        padding: '6px 10px 6px 12px', fontSize: 11, color: 'var(--text2)',
+        background: '#1a1a1a', borderRadius: '8px 8px 0 0',
+        fontFamily: 'var(--font-mono)', textTransform: 'lowercase',
+        borderBottom: '1px solid var(--border)'
+      }}>
+        <span>{lang}</span>
+        <button
+          onClick={copy}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 4,
+            color: copied ? 'var(--green)' : 'var(--text2)',
+            fontSize: 11, fontFamily: 'var(--font-mono)',
+            padding: '4px 8px', borderRadius: 4,
+            transition: 'color var(--transition)',
+            background: 'transparent', cursor: 'pointer'
+          }}
+        >
+          {copied ? (
+            <>
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="20 6 9 17 4 12"/>
+              </svg>
+              copied
+            </>
+          ) : (
+            <>
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+              </svg>
+              copy
+            </>
+          )}
+        </button>
+      </div>
+      <SyntaxHighlighter style={oneDark} language={lang} PreTag="div"
+        customStyle={{ borderRadius: '0 0 8px 8px', margin: 0, fontSize: 13 }}>
+        {code}
+      </SyntaxHighlighter>
     </div>
   )
 }
