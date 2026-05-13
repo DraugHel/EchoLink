@@ -43,7 +43,7 @@ router.post('/', requireAuth, (req, res) => {
   `).run(
     req.session.userId,
     title || 'New Conversation',
-    model || 'llama3',
+    model || process.env.DEFAULT_MODEL || 'glm-5.1:cloud',
     effectivePrompt,
     temperature ?? 0.7,
     top_k ?? 40,

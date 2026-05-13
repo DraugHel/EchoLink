@@ -22,6 +22,7 @@ export default function Chat({ user, onLogout }) {
   const [streaming, setStreaming] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
   const [mobileSidebar, setMobileSidebar] = useState(false)
+  const [availableModels, setAvailableModels] = useState([])
   const [loading, setLoading] = useState(false)
   const messagesEndRef = useRef(null)
   const textareaRef = useRef(null)
@@ -29,6 +30,9 @@ export default function Chat({ user, onLogout }) {
 
   useEffect(() => {
     loadConversations()
+    api.get('/api/chat/models/list')
+      .then(m => setAvailableModels(m.map(x => x.name)))
+      .catch(() => {})
   }, [])
 
   useEffect(() => {
@@ -59,7 +63,8 @@ export default function Chat({ user, onLogout }) {
         await api.post(`/api/memory/update/${activeConvo.id}`, {})
       } catch {}
     }
-    const convo = await api.post('/api/conversations', {})
+    const firstModel = availableModels[0] || null
+    const convo = await api.post('/api/conversations', firstModel ? { model: firstModel } : {})
     setConversations(prev => [convo, ...prev])
     await selectConvo(convo)
   }

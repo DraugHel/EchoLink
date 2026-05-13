@@ -67,7 +67,9 @@ router.post('/:conversationId', requireAuth, async (req, res) => {
     })
 
     if (!ollamaRes.ok) {
-      res.write(`data: ${JSON.stringify({ error: 'Ollama error' })}\n\n`)
+      const errBody = await ollamaRes.text()
+      console.error('Ollama error:', ollamaRes.status, errBody)
+      res.write(`data: ${JSON.stringify({ error: `Ollama error ${ollamaRes.status}: ${errBody.slice(0,200)}` })}\n\n`)
       res.end()
       return
     }
