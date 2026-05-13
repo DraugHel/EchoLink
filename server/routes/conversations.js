@@ -1,5 +1,6 @@
 import { Router } from 'express'
 import db from '../db.js'
+import { deleteFilesForConvo } from './uploads.js'
 
 const router = Router()
 
@@ -81,6 +82,8 @@ router.delete('/:id', requireAuth, (req, res) => {
   const convo = db.prepare('SELECT * FROM conversations WHERE id = ? AND user_id = ?')
     .get(req.params.id, req.session.userId)
   if (!convo) return res.status(404).json({ error: 'Not found' })
+  // Clean up images before deleting messages (cascade)
+  deleteFilesForConvo(req.session.userId, convo.id)
   db.prepare('DELETE FROM conversations WHERE id = ?').run(convo.id)
   res.json({ ok: true })
 })
@@ -92,7 +95,7 @@ router.get('/:id/messages', requireAuth, (req, res) => {
   if (!convo) return res.status(404).json({ error: 'Not found' })
 
   const messages = db.prepare(`
-    SELECT id, role, content, created_at FROM messages
+    SELECT id, role, content, images, created_at FROM messages
     WHERE conversation_id = ?
     ORDER BY created_at ASC
   `).all(convo.id)

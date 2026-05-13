@@ -20,9 +20,11 @@ router.post('/:conversationId', requireAuth, async (req, res) => {
 
   // Detect and fetch URLs from user message
   const urls = extractUrls(content)
+  console.log('[chat] extracted URLs:', urls)
   let urlContext = ''
   if (urls.length > 0) {
     const results = await fetchAllUrls(urls)
+    console.log('[chat] fetch results:', results.map(r => ({ url: r.url, error: r.error, contentLen: r.content?.length })))
     const successful = results.filter(r => !r.error)
     if (successful.length > 0) {
       urlContext = '\n\n[Content from URLs in user message:\n' +

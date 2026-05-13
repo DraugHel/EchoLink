@@ -4,7 +4,19 @@ import remarkGfm from 'remark-gfm'
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism'
 
-export default function Message({ role, content, streaming }) {
+export default function Message({ role, content, streaming, images }) {
+  let parsedAttachments = []
+  if (images) {
+    try {
+      const raw = JSON.parse(images)
+      // Backward compat: old format was array of filename strings
+      parsedAttachments = raw.map(it => typeof it === 'string'
+        ? { filename: it, originalName: it, kind: 'image' }
+        : it)
+    } catch {}
+  }
+  const imgAttachments = parsedAttachments.filter(a => a.kind === 'image')
+  const fileAttachments = parsedAttachments.filter(a => a.kind !== 'image')
   const isUser = role === 'user'
 
   return (
@@ -20,7 +32,30 @@ export default function Message({ role, content, streaming }) {
       )}
       <div style={{ ...styles.bubble, ...(isUser ? styles.userBubble : styles.aiBubble) }}>
         {isUser
-          ? <p style={styles.userText}>{content}</p>
+          ? (
+            <>
+              {imgAttachments.length > 0 && (
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: (content || fileAttachments.length > 0) ? 8 : 0 }}>
+                  {imgAttachments.map(att => (
+                    <img key={att.filename} src={`/api/uploads/${att.filename}`} alt="" style={{ maxWidth: 200, maxHeight: 200, borderRadius: 8, objectFit: 'cover' }} />
+                  ))}
+                </div>
+              )}
+              {fileAttachments.length > 0 && (
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: content ? 8 : 0 }}>
+                  {fileAttachments.map(att => (
+                    <a key={att.filename} href={`/api/uploads/${att.filename}`} download={att.originalName}
+                      style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 10px',
+                        background: 'rgba(13,13,13,0.15)', borderRadius: 6, fontSize: 13,
+                        color: '#0d0d0d', textDecoration: 'none', fontFamily: 'var(--font-mono)' }}>
+                      📄 {att.originalName}
+                    </a>
+                  ))}
+                </div>
+              )}
+              {content && <p style={styles.userText}>{content}</p>}
+            </>
+          )
           : (
             <div style={styles.markdown}>
               <ReactMarkdown
