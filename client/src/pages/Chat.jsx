@@ -49,7 +49,9 @@ export default function Chat({ user, onLogout }) {
   }, [mobileSidebar])
 
   useEffect(() => {
-    loadConversations()
+    loadConversations().then(convos => {
+      if (convos && convos.length > 0) selectConvo(convos[0])
+    })
     api.get('/api/chat/models/list')
       .then(m => setAvailableModels(m.map(x => x.name)))
       .catch(() => {})
@@ -62,6 +64,7 @@ export default function Chat({ user, onLogout }) {
   async function loadConversations() {
     const convos = await api.get('/api/conversations')
     setConversations(convos)
+    return convos
   }
 
   async function selectConvo(convo) {
