@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import Sidebar from '../components/Sidebar.jsx'
 import Message from '../components/Message.jsx'
 import SettingsPanel from '../components/SettingsPanel.jsx'
@@ -26,7 +26,27 @@ export default function Chat({ user, onLogout }) {
   const [loading, setLoading] = useState(false)
   const messagesEndRef = useRef(null)
   const textareaRef = useRef(null)
-  const abortRef = useRef(null)
+  const abortControllerRef = useRef(null)
+  const mobile = useIsMobile()
+
+  // Swipe to open/close sidebar
+  const swipeStartX = useRef(null)
+  useEffect(() => {
+    const onTouchStart = e => { swipeStartX.current = e.touches[0].clientX }
+    const onTouchEnd = e => {
+      if (swipeStartX.current === null) return
+      const dx = e.changedTouches[0].clientX - swipeStartX.current
+      if (dx > 60 && swipeStartX.current < 40) setMobileSidebar(true)
+      if (dx < -60 && mobileSidebar) setMobileSidebar(false)
+      swipeStartX.current = null
+    }
+    document.addEventListener('touchstart', onTouchStart, { passive: true })
+    document.addEventListener('touchend', onTouchEnd, { passive: true })
+    return () => {
+      document.removeEventListener('touchstart', onTouchStart)
+      document.removeEventListener('touchend', onTouchEnd)
+    }
+  }, [mobileSidebar])
 
   useEffect(() => {
     loadConversations()
@@ -56,12 +76,8 @@ export default function Chat({ user, onLogout }) {
   }
 
   async function createConvo() {
-    // Update memory from last active conversation BEFORE creating new one
-    // so the memory is available for injection into the new conversation's system prompt
     if (activeConvo) {
-      try {
-        await api.post(`/api/memory/update/${activeConvo.id}`, {})
-      } catch {}
+      try { await api.post(`/api/memory/update/${activeConvo.id}`, {}) } catch {}
     }
     const firstModel = availableModels[0] || null
     const convo = await api.post('/api/conversations', firstModel ? { model: firstModel } : {})
@@ -72,10 +88,7 @@ export default function Chat({ user, onLogout }) {
   async function deleteConvo(id) {
     await api.delete(`/api/conversations/${id}`)
     setConversations(prev => prev.filter(c => c.id !== id))
-    if (activeConvo?.id === id) {
-      setActiveConvo(null)
-      setMessages([])
-    }
+    if (activeConvo?.id === id) { setActiveConvo(null); setMessages([]) }
   }
 
   async function renameConvo(id, title) {
@@ -89,13 +102,20 @@ export default function Chat({ user, onLogout }) {
     setActiveConvo(updated)
   }
 
-  async function sendMessage() {
-    if (!input.trim() || streaming || !activeConvo) return
-    const content = input.trim()
-    setInput('')
-    textareaRef.current?.focus()
+  function stopStreaming() {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort()
+    }
+  }
 
-    // Optimistic user message
+  async function sendMessage(contentOverride) {
+    const content = contentOverride ?? input.trim()
+    if (!content || streaming || !activeConvo) return
+    if (!contentOverride) {
+      setInput('')
+      textareaRef.current?.focus()
+    }
+
     setMessages(prev => [...prev, { id: Date.now(), role: 'user', content }])
     setStreaming(true)
 
@@ -103,11 +123,14 @@ export default function Chat({ user, onLogout }) {
     const assistantId = Date.now() + 1
     setMessages(prev => [...prev, { id: assistantId, role: 'assistant', content: '', streaming: true }])
 
+    abortControllerRef.current = new AbortController()
+
     try {
       const response = await fetch(`/api/chat/${activeConvo.id}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content })
+        body: JSON.stringify({ content }),
+        signal: abortControllerRef.current.signal
       })
 
       const reader = response.body.getReader()
@@ -131,7 +154,6 @@ export default function Chat({ user, onLogout }) {
               setMessages(prev => prev.map(m =>
                 m.id === assistantId ? { ...m, streaming: false } : m
               ))
-              // Refresh convo list (title may have changed)
               loadConversations()
             }
             if (json.error) {
@@ -143,19 +165,43 @@ export default function Chat({ user, onLogout }) {
         }
       }
     } catch (err) {
-      setMessages(prev => prev.map(m =>
-        m.id === assistantId ? { ...m, content: `Connection error: ${err.message}`, streaming: false } : m
-      ))
+      if (err.name === 'AbortError') {
+        // Stopped by user — mark as done
+        setMessages(prev => prev.map(m =>
+          m.id === assistantId ? { ...m, streaming: false, content: assistantContent || '_(stopped)_' } : m
+        ))
+      } else {
+        setMessages(prev => prev.map(m =>
+          m.id === assistantId ? { ...m, content: `Connection error: ${err.message}`, streaming: false } : m
+        ))
+      }
     } finally {
       setStreaming(false)
+      abortControllerRef.current = null
     }
   }
 
+  async function regenerate() {
+    if (streaming || messages.length < 2) return
+    // Find last user message
+    const lastUser = [...messages].reverse().find(m => m.role === 'user')
+    if (!lastUser) return
+    // Remove last assistant message from UI
+    setMessages(prev => {
+      const idx = [...prev].reverse().findIndex(m => m.role === 'assistant')
+      if (idx === -1) return prev
+      const realIdx = prev.length - 1 - idx
+      return prev.slice(0, realIdx)
+    })
+    // Remove last assistant message from DB
+    try {
+      await api.delete(`/api/conversations/${activeConvo.id}/last-assistant`)
+    } catch {}
+    await sendMessage(lastUser.content)
+  }
+
   function handleKeyDown(e) {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault()
-      sendMessage()
-    }
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage() }
   }
 
   function autoResize(e) {
@@ -164,11 +210,10 @@ export default function Chat({ user, onLogout }) {
     el.style.height = Math.min(el.scrollHeight, 160) + 'px'
   }
 
-  const mobile = useIsMobile()
+  const lastAssistantMsg = [...messages].reverse().find(m => m.role === 'assistant')
 
   return (
     <div style={styles.root}>
-      {/* Sidebar: fixed overlay on mobile, in-flow on desktop */}
       {(!mobile || mobileSidebar) && (
         <Sidebar
           conversations={conversations}
@@ -184,11 +229,8 @@ export default function Chat({ user, onLogout }) {
           mobile={mobile}
         />
       )}
-      {mobile && !mobileSidebar && null}
 
-      {/* Main area */}
       <main style={styles.main}>
-        {/* Topbar */}
         <div style={styles.topbar}>
           <button style={styles.menuBtn} onClick={() => setMobileSidebar(v => !v)}>
             <MenuIcon />
@@ -203,7 +245,6 @@ export default function Chat({ user, onLogout }) {
           )}
         </div>
 
-        {/* Messages */}
         <div style={styles.messages}>
           {!activeConvo && (
             <div style={styles.empty} className="fade-in">
@@ -231,17 +272,22 @@ export default function Chat({ user, onLogout }) {
           ))}
 
           {activeConvo && !loading && messages.length === 0 && (
-            <div style={styles.emptyChat}>
-              <p>Start the conversation below.</p>
-            </div>
+            <div style={styles.emptyChat}><p>Start the conversation below.</p></div>
           )}
 
           <div ref={messagesEndRef} />
         </div>
 
-        {/* Input */}
         {activeConvo && (
           <div style={styles.inputWrap}>
+            {/* Regenerate button — shown when not streaming and there's an assistant message */}
+            {!streaming && lastAssistantMsg && messages.length >= 2 && (
+              <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 8 }}>
+                <button style={styles.regenBtn} onClick={regenerate}>
+                  <RefreshIcon /> Regenerate
+                </button>
+              </div>
+            )}
             <div style={styles.inputRow}>
               <textarea
                 ref={textareaRef}
@@ -253,13 +299,19 @@ export default function Chat({ user, onLogout }) {
                 rows={1}
                 disabled={streaming}
               />
-              <button
-                style={{ ...styles.sendBtn, opacity: (!input.trim() || streaming) ? 0.4 : 1 }}
-                onClick={sendMessage}
-                disabled={!input.trim() || streaming}
-              >
-                {streaming ? <StopIcon /> : <SendIcon />}
-              </button>
+              {streaming ? (
+                <button style={styles.stopBtn} onClick={stopStreaming} title="Stop">
+                  <StopIcon />
+                </button>
+              ) : (
+                <button
+                  style={{ ...styles.sendBtn, opacity: !input.trim() ? 0.4 : 1 }}
+                  onClick={() => sendMessage()}
+                  disabled={!input.trim()}
+                >
+                  <SendIcon />
+                </button>
+              )}
             </div>
             <p style={styles.hint}>Enter to send · Shift+Enter for newline</p>
           </div>
@@ -282,30 +334,31 @@ const MenuIcon = () => (
     <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>
   </svg>
 )
-
 const GearIcon = () => (
   <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
     <circle cx="12" cy="12" r="3"/>
     <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
   </svg>
 )
-
 const SendIcon = () => (
   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
     <line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>
   </svg>
 )
-
 const StopIcon = () => (
   <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
     <rect x="4" y="4" width="16" height="16" rx="2"/>
   </svg>
 )
+const RefreshIcon = () => (
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" style={{ marginRight: 5 }}>
+    <polyline points="23 4 23 10 17 10"/>
+    <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+  </svg>
+)
 
 const styles = {
   root: { display: 'flex', flex: 1, overflow: 'hidden', minHeight: 0 },
-  sidebarWrap: { display: 'flex', flexShrink: 0 },
-  sidebarHidden: {},
   main: { flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 0 },
   topbar: {
     display: 'flex', alignItems: 'center', gap: 12,
@@ -320,12 +373,8 @@ const styles = {
   },
   settingsBtn: { color: 'var(--text2)', display: 'flex', alignItems: 'center', flexShrink: 0 },
   messages: {
-    flex: 1,
-    overflowY: 'auto',
-    overflowX: 'hidden',
-    padding: '24px 20px',
-    display: 'flex',
-    flexDirection: 'column',
+    flex: 1, overflowY: 'auto', overflowX: 'hidden',
+    padding: '24px 20px', display: 'flex', flexDirection: 'column',
   },
   empty: {
     flex: 1, display: 'flex', flexDirection: 'column',
@@ -358,6 +407,19 @@ const styles = {
     background: 'var(--green)', color: '#0d0d0d',
     display: 'flex', alignItems: 'center', justifyContent: 'center',
     border: 'none', cursor: 'pointer', transition: 'opacity var(--transition)'
+  },
+  stopBtn: {
+    width: 44, height: 44, borderRadius: 12, flexShrink: 0,
+    background: 'var(--danger)', color: '#fff',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    border: 'none', cursor: 'pointer'
+  },
+  regenBtn: {
+    display: 'flex', alignItems: 'center',
+    padding: '6px 14px', borderRadius: 8, fontSize: 12,
+    color: 'var(--text2)', border: '1px solid var(--border)',
+    background: 'var(--bg3)', cursor: 'pointer',
+    fontFamily: 'var(--font-sans)', transition: 'color var(--transition)'
   },
   hint: { fontSize: 11, color: 'var(--text3)', marginTop: 6, textAlign: 'center' }
 }

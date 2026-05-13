@@ -100,3 +100,19 @@ router.get('/:id/messages', requireAuth, (req, res) => {
 })
 
 export default router
+
+// Delete last assistant message (for regenerate)
+router.delete('/:id/last-assistant', requireAuth, (req, res) => {
+  const convo = db.prepare('SELECT * FROM conversations WHERE id = ? AND user_id = ?')
+    .get(req.params.id, req.session.userId)
+  if (!convo) return res.status(404).json({ error: 'Not found' })
+
+  const last = db.prepare(`
+    SELECT id FROM messages
+    WHERE conversation_id = ? AND role = 'assistant'
+    ORDER BY created_at DESC LIMIT 1
+  `).get(convo.id)
+
+  if (last) db.prepare('DELETE FROM messages WHERE id = ?').run(last.id)
+  res.json({ ok: true })
+})
