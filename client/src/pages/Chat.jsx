@@ -297,7 +297,10 @@ const styles = {
   main: { flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 0 },
   topbar: {
     display: 'flex', alignItems: 'center', gap: 12,
-    padding: '0 16px', height: 54, flexShrink: 0,
+    padding: '0 16px',
+    paddingTop: 'env(safe-area-inset-top)',
+    height: 'calc(54px + env(safe-area-inset-top))',
+    flexShrink: 0,
     borderBottom: '1px solid var(--border)', background: 'var(--bg2)'
   },
   menuBtn: { color: 'var(--text2)', display: 'flex', alignItems: 'center', flexShrink: 0 },
@@ -330,7 +333,9 @@ const styles = {
   },
   emptyChat: { flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text3)', fontSize: 14 },
   inputWrap: {
-    padding: '12px 16px 10px', borderTop: '1px solid var(--border)',
+    padding: '12px 16px 10px',
+    paddingBottom: 'calc(10px + env(safe-area-inset-bottom))',
+    borderTop: '1px solid var(--border)',
     background: 'var(--bg2)', flexShrink: 0
   },
   inputRow: { display: 'flex', gap: 10, alignItems: 'flex-end' },

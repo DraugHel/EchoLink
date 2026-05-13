@@ -151,7 +151,9 @@ const LogoutIcon = () => (
 const styles = {
   header: {
     display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-    padding: '16px 14px', borderBottom: '1px solid var(--border)'
+    padding: '16px 14px',
+    paddingTop: 'calc(16px + env(safe-area-inset-top))',
+    borderBottom: '1px solid var(--border)'
   },
   logo: { display: 'flex', alignItems: 'center', gap: 8 },
   logoText: { fontFamily: 'var(--font-mono)', fontSize: 16, fontWeight: 700 },
@@ -188,7 +190,9 @@ const styles = {
   },
   footer: {
     display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-    padding: '14px', borderTop: '1px solid var(--border)'
+    padding: '14px',
+    paddingBottom: 'calc(14px + env(safe-area-inset-bottom))',
+    borderTop: '1px solid var(--border)'
   },
   username: { fontSize: 13, color: 'var(--text2)', fontFamily: 'var(--font-mono)' },
   logoutBtn: { color: 'var(--text3)', display: 'flex', alignItems: 'center' }
