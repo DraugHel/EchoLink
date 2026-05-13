@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import api from '../lib/api.js'
 
-export default function Sidebar({ conversations, activeId, onSelect, onCreate, onDelete, onRename, user, onLogout, mobileOpen, onMobileClose }) {
+export default function Sidebar({ conversations, activeId, onSelect, onCreate, onDelete, onRename, user, onLogout, mobileOpen, onMobileClose, mobile }) {
   const [editingId, setEditingId] = useState(null)
   const [editTitle, setEditTitle] = useState('')
   const [hoverId, setHoverId] = useState(null)
@@ -41,7 +41,7 @@ export default function Sidebar({ conversations, activeId, onSelect, onCreate, o
       <aside style={{
         // On mobile: fixed overlay, slide in/out
         // On desktop: normal sidebar in flow
-        position: window.innerWidth < 768 ? 'fixed' : 'relative',
+        position: mobile ? 'fixed' : 'relative',
         top: 0, left: 0, height: '100%',
         width: 'var(--sidebar-w)',
         background: 'var(--bg2)',
@@ -49,7 +49,7 @@ export default function Sidebar({ conversations, activeId, onSelect, onCreate, o
         display: 'flex',
         flexDirection: 'column',
         zIndex: 99,
-        transform: window.innerWidth < 768
+        transform: mobile
           ? (mobileOpen ? 'translateX(0)' : 'translateX(-100%)')
           : 'none',
         transition: 'transform 0.25s ease',

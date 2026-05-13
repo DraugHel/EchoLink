@@ -4,6 +4,16 @@ import Message from '../components/Message.jsx'
 import SettingsPanel from '../components/SettingsPanel.jsx'
 import api from '../lib/api.js'
 
+function useIsMobile() {
+  const [mobile, setMobile] = useState(typeof window !== 'undefined' && window.innerWidth < 768)
+  useEffect(() => {
+    const onResize = () => setMobile(window.innerWidth < 768)
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [])
+  return mobile
+}
+
 export default function Chat({ user, onLogout }) {
   const [conversations, setConversations] = useState([])
   const [activeConvo, setActiveConvo] = useState(null)
@@ -142,7 +152,7 @@ export default function Chat({ user, onLogout }) {
     el.style.height = Math.min(el.scrollHeight, 160) + 'px'
   }
 
-  const mobile = window.innerWidth < 768
+  const mobile = useIsMobile()
 
   return (
     <div style={styles.root}>
@@ -159,6 +169,7 @@ export default function Chat({ user, onLogout }) {
           onLogout={onLogout}
           mobileOpen={mobileSidebar}
           onMobileClose={() => setMobileSidebar(false)}
+          mobile={mobile}
         />
       )}
       {mobile && !mobileSidebar && null}
@@ -280,7 +291,7 @@ const StopIcon = () => (
 )
 
 const styles = {
-  root: { display: 'flex', height: '100%', overflow: 'hidden' },
+  root: { display: 'flex', flex: 1, overflow: 'hidden', minHeight: 0 },
   sidebarWrap: { display: 'flex', flexShrink: 0 },
   sidebarHidden: {},
   main: { flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 0 },
@@ -297,11 +308,12 @@ const styles = {
   },
   settingsBtn: { color: 'var(--text2)', display: 'flex', alignItems: 'center', flexShrink: 0 },
   messages: {
-    flex: 1, overflowY: 'auto',
-    WebkitOverflowScrolling: 'touch',
+    flex: 1,
+    overflowY: 'auto',
+    overflowX: 'hidden',
     padding: '24px 20px',
-    display: 'flex', flexDirection: 'column',
-    overflowX: 'hidden'
+    display: 'flex',
+    flexDirection: 'column',
   },
   empty: {
     flex: 1, display: 'flex', flexDirection: 'column',
