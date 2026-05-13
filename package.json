@@ -1,0 +1,19 @@
+{
+  "name": "echolink",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev:server": "node server/index.js",
+    "build": "cd client && npm run build",
+    "start": "node server/index.js",
+    "adduser": "node scripts/adduser.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "better-sqlite3": "^11.10.0",
+    "connect-sqlite3": "^0.9.15",
+    "express": "^4.18.3",
+    "express-session": "^1.18.0",
+    "node-fetch": "^3.3.2"
+  }
+}
