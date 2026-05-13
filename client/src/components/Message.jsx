@@ -70,7 +70,7 @@ export default function Message({ role, content, streaming }) {
 }
 
 const styles = {
-  wrap: { display: 'flex', gap: 10, marginBottom: 16, alignItems: 'flex-start' },
+  wrap: { display: 'flex', gap: 10, marginBottom: 16, alignItems: 'flex-start', maxWidth: '100%', overflow: 'hidden' },
   avatar: {
     width: 28, height: 28, borderRadius: 8, flexShrink: 0,
     display: 'flex', alignItems: 'center', justifyContent: 'center',
