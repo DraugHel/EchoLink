@@ -35,9 +35,10 @@ html, body {
 
 /* Root fills the dynamic viewport (accounts for iOS address bar) */
 #root {
-  /* Set by main.jsx using window.visualViewport.height; falls back to dvh */
-  height: 100dvh;
-  height: var(--app-height, 100dvh);
+  /* svh = small viewport height: stable size assuming address bar is visible.
+     Avoids the layout jumps that dvh causes when Safari's bar expands/collapses. */
+  height: 100vh;       /* fallback */
+  height: 100svh;
   display: flex;
   flex-direction: column;
   overflow: hidden;
