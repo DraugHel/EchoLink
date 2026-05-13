@@ -45,9 +45,8 @@ db.exec(`
   );
 `)
 
-// Add default_system_prompt column if it doesn't exist yet (for existing DBs)
-try {
-  db.exec(`ALTER TABLE users ADD COLUMN default_system_prompt TEXT DEFAULT ''`)
-} catch {}
+// Add columns if they don't exist yet (for existing DBs)
+try { db.exec(`ALTER TABLE users ADD COLUMN default_system_prompt TEXT DEFAULT ''`) } catch {}
+try { db.exec(`ALTER TABLE users ADD COLUMN memory TEXT DEFAULT ''`) } catch {}
 
 export default db

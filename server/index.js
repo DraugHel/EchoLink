@@ -8,6 +8,7 @@ import fs from 'fs'
 import authRoutes from './routes/auth.js'
 import conversationRoutes from './routes/conversations.js'
 import chatRoutes from './routes/chat.js'
+import memoryRoutes from './routes/memory.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const SQLiteStore = connectSqlite3(session)
@@ -37,6 +38,7 @@ app.use(session({
 app.use('/api/auth', authRoutes)
 app.use('/api/conversations', conversationRoutes)
 app.use('/api/chat', chatRoutes)
+app.use('/api/memory', memoryRoutes)
 
 // Serve built frontend
 const distPath = path.join(__dirname, '..', 'dist')
