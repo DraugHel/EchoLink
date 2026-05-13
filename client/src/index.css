@@ -35,7 +35,9 @@ html, body {
 
 /* Root fills the dynamic viewport (accounts for iOS address bar) */
 #root {
+  /* Set by main.jsx using window.visualViewport.height; falls back to dvh */
   height: 100dvh;
+  height: var(--app-height, 100dvh);
   display: flex;
   flex-direction: column;
   overflow: hidden;

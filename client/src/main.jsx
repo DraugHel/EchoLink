@@ -3,12 +3,20 @@ import ReactDOM from 'react-dom/client'
 import App from './App.jsx'
 import './index.css'
 
-// iOS keyboard fix — scroll window back to top when keyboard closes
-if (/iPhone|iPad|iPod/.test(navigator.userAgent)) {
-  window.addEventListener('focusout', () => {
-    setTimeout(() => window.scrollTo(0, 0), 100)
-  })
+// iOS viewport fix: track visualViewport to handle keyboard + address bar
+function updateViewport() {
+  const vv = window.visualViewport
+  const h = vv ? vv.height : window.innerHeight
+  document.documentElement.style.setProperty('--app-height', `${h}px`)
 }
+
+updateViewport()
+if (window.visualViewport) {
+  window.visualViewport.addEventListener('resize', updateViewport)
+  window.visualViewport.addEventListener('scroll', updateViewport)
+}
+window.addEventListener('resize', updateViewport)
+window.addEventListener('orientationchange', updateViewport)
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
