@@ -22,6 +22,12 @@ router.get('/', requireAuth, (req, res) => {
 // Create new conversation
 router.post('/', requireAuth, (req, res) => {
   const { title, model, system_prompt, temperature, top_k, top_p } = req.body
+
+  // Use user's default prompt if none provided
+  const GLOBAL_DEFAULT = process.env.DEFAULT_SYSTEM_PROMPT || ''
+  const user = db.prepare('SELECT default_system_prompt FROM users WHERE id = ?').get(req.session.userId)
+  const defaultPrompt = user.default_system_prompt || GLOBAL_DEFAULT
+
   const result = db.prepare(`
     INSERT INTO conversations (user_id, title, model, system_prompt, temperature, top_k, top_p)
     VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -29,7 +35,7 @@ router.post('/', requireAuth, (req, res) => {
     req.session.userId,
     title || 'New Conversation',
     model || 'llama3',
-    system_prompt || '',
+    system_prompt !== undefined ? system_prompt : defaultPrompt,
     temperature ?? 0.7,
     top_k ?? 40,
     top_p ?? 0.9

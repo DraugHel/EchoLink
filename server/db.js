@@ -1,11 +1,11 @@
 import Database from 'better-sqlite3'
 import path from 'path'
 import { fileURLToPath } from 'url'
+import fs from 'fs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const DB_PATH = path.join(__dirname, '..', 'data', 'echolink.db')
 
-import fs from 'fs'
 fs.mkdirSync(path.dirname(DB_PATH), { recursive: true })
 
 const db = new Database(DB_PATH)
@@ -17,6 +17,7 @@ db.exec(`
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     username TEXT UNIQUE NOT NULL,
     password_hash TEXT NOT NULL,
+    default_system_prompt TEXT DEFAULT '',
     created_at INTEGER DEFAULT (unixepoch())
   );
 
@@ -43,5 +44,10 @@ db.exec(`
     FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
   );
 `)
+
+// Add default_system_prompt column if it doesn't exist yet (for existing DBs)
+try {
+  db.exec(`ALTER TABLE users ADD COLUMN default_system_prompt TEXT DEFAULT ''`)
+} catch {}
 
 export default db

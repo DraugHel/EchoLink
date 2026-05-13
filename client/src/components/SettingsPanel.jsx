@@ -10,17 +10,30 @@ export default function SettingsPanel({ conversation, onUpdate, onClose }) {
     top_k: conversation.top_k,
     top_p: conversation.top_p,
   })
+  const [defaultPrompt, setDefaultPrompt] = useState('')
+  const [savingDefault, setSavingDefault] = useState(false)
+  const [defaultSaved, setDefaultSaved] = useState(false)
   const [saving, setSaving] = useState(false)
   const [modelsError, setModelsError] = useState(false)
 
   useEffect(() => {
-    api.get('/api/chat/models/list')
-      .then(m => setModels(m))
-      .catch(() => setModelsError(true))
+    api.get('/api/chat/models/list').then(m => setModels(m)).catch(() => setModelsError(true))
+    api.get('/api/auth/default-prompt').then(d => setDefaultPrompt(d.prompt))
   }, [])
 
   function set(key, val) {
     setForm(f => ({ ...f, [key]: val }))
+  }
+
+  async function saveDefault() {
+    setSavingDefault(true)
+    try {
+      await api.patch('/api/auth/default-prompt', { prompt: defaultPrompt })
+      setDefaultSaved(true)
+      setTimeout(() => setDefaultSaved(false), 2000)
+    } finally {
+      setSavingDefault(false)
+    }
   }
 
   async function save() {
@@ -43,6 +56,9 @@ export default function SettingsPanel({ conversation, onUpdate, onClose }) {
         </div>
 
         <div style={styles.body}>
+          {/* Conversation settings */}
+          <p style={styles.sectionLabel}>This Conversation</p>
+
           <Field label="Model">
             {modelsError
               ? <p style={styles.err}>Could not fetch models from Ollama.</p>
@@ -70,21 +86,45 @@ export default function SettingsPanel({ conversation, onUpdate, onClose }) {
               onChange={e => set('top_p', parseFloat(e.target.value))} style={styles.range} />
           </Field>
 
-          <Field label="System Prompt">
+          <Field label="System Prompt (this conversation)">
             <textarea
               style={styles.textarea}
               value={form.system_prompt}
               onChange={e => set('system_prompt', e.target.value)}
-              placeholder="You are a helpful assistant..."
+              placeholder="Override default prompt for this conversation…"
+              rows={4}
+            />
+          </Field>
+
+          {/* Divider */}
+          <div style={styles.divider} />
+
+          {/* Default prompt */}
+          <p style={styles.sectionLabel}>Your Default Prompt</p>
+          <p style={styles.sectionSub}>Applied to all new conversations automatically.</p>
+
+          <Field label="">
+            <textarea
+              style={styles.textarea}
+              value={defaultPrompt}
+              onChange={e => setDefaultPrompt(e.target.value)}
+              placeholder="You are a helpful assistant…"
               rows={5}
             />
           </Field>
+          <button
+            style={{ ...styles.saveDefaultBtn, opacity: savingDefault ? 0.6 : 1 }}
+            onClick={saveDefault}
+            disabled={savingDefault}
+          >
+            {defaultSaved ? '✓ Saved' : savingDefault ? 'Saving…' : 'Save as Default'}
+          </button>
         </div>
 
         <div style={styles.footer}>
           <button style={styles.cancelBtn} onClick={onClose}>Cancel</button>
           <button style={{ ...styles.saveBtn, opacity: saving ? 0.6 : 1 }} onClick={save} disabled={saving}>
-            {saving ? 'Saving…' : 'Save'}
+            {saving ? 'Saving…' : 'Save Conversation'}
           </button>
         </div>
       </div>
@@ -94,10 +134,12 @@ export default function SettingsPanel({ conversation, onUpdate, onClose }) {
 
 function Field({ label, children }) {
   return (
-    <div style={{ marginBottom: 20 }}>
-      <label style={{ display:'block', fontSize:12, color:'var(--text2)', marginBottom:8, textTransform:'uppercase', letterSpacing:'0.05em', fontFamily:'var(--font-mono)' }}>
-        {label}
-      </label>
+    <div style={{ marginBottom: 18 }}>
+      {label ? (
+        <label style={{ display:'block', fontSize:11, color:'var(--text2)', marginBottom:7, textTransform:'uppercase', letterSpacing:'0.05em', fontFamily:'var(--font-mono)' }}>
+          {label}
+        </label>
+      ) : null}
       {children}
     </div>
   )
@@ -119,27 +161,34 @@ const styles = {
   },
   title: { fontFamily: 'var(--font-mono)', fontSize: 16, fontWeight: 700 },
   closeBtn: { color: 'var(--text2)', fontSize: 18, lineHeight: 1 },
-  body: { flex: 1, overflowY: 'auto', padding: '24px' },
-  footer: {
-    display: 'flex', gap: 10, padding: '16px 24px', borderTop: '1px solid var(--border)'
+  body: { flex: 1, overflowY: 'auto', padding: '20px 24px' },
+  sectionLabel: {
+    fontSize: 12, fontWeight: 600, color: 'var(--text)',
+    fontFamily: 'var(--font-mono)', marginBottom: 4
   },
+  sectionSub: { fontSize: 12, color: 'var(--text2)', marginBottom: 16 },
+  divider: { borderTop: '1px solid var(--border)', margin: '24px 0' },
+  footer: { display: 'flex', gap: 10, padding: '16px 24px', borderTop: '1px solid var(--border)' },
   err: { color: 'var(--danger)', fontSize: 13 },
   select: {
     width: '100%', padding: '10px 12px', fontSize: 16,
     background: 'var(--bg3)', border: '1px solid var(--border)',
-    borderRadius: 8, color: 'var(--text)', outline: 'none',
-    appearance: 'none', cursor: 'pointer'
+    borderRadius: 8, color: 'var(--text)', outline: 'none', cursor: 'pointer'
   },
   range: { width: '100%', accentColor: 'var(--green)', cursor: 'pointer' },
   textarea: {
     width: '100%', padding: '12px', fontSize: 16,
-    resize: 'vertical', minHeight: 100, borderRadius: 8,
-    lineHeight: 1.5
+    resize: 'vertical', minHeight: 90, borderRadius: 8, lineHeight: 1.5
+  },
+  saveDefaultBtn: {
+    width: '100%', padding: '10px', borderRadius: 8, fontSize: 14,
+    background: 'var(--green-bg)', color: 'var(--green)',
+    border: '1px solid var(--green-dim)', cursor: 'pointer',
+    fontFamily: 'var(--font-sans)', marginTop: -8, marginBottom: 4
   },
   cancelBtn: {
     flex: 1, padding: '11px', borderRadius: 8, fontSize: 14,
-    color: 'var(--text2)', border: '1px solid var(--border)',
-    background: 'var(--bg3)'
+    color: 'var(--text2)', border: '1px solid var(--border)', background: 'var(--bg3)'
   },
   saveBtn: {
     flex: 1, padding: '11px', borderRadius: 8, fontSize: 14,
