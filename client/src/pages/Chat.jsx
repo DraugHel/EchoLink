@@ -298,8 +298,10 @@ const styles = {
   settingsBtn: { color: 'var(--text2)', display: 'flex', alignItems: 'center', flexShrink: 0 },
   messages: {
     flex: 1, overflowY: 'auto',
+    WebkitOverflowScrolling: 'touch',
     padding: '24px 20px',
-    display: 'flex', flexDirection: 'column'
+    display: 'flex', flexDirection: 'column',
+    overflowX: 'hidden'
   },
   empty: {
     flex: 1, display: 'flex', flexDirection: 'column',
