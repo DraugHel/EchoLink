@@ -1,5 +1,6 @@
 import { Router } from 'express'
 import db from '../db.js'
+import { extractUrls, fetchAllUrls } from '../lib/fetchUrl.js'
 
 const router = Router()
 const OLLAMA_URL = process.env.OLLAMA_URL || 'http://localhost:11434'
@@ -17,7 +18,25 @@ router.post('/:conversationId', requireAuth, async (req, res) => {
   const { content } = req.body
   if (!content?.trim()) return res.status(400).json({ error: 'Empty message' })
 
-  // Save user message
+  // Detect and fetch URLs from user message
+  const urls = extractUrls(content)
+  let urlContext = ''
+  if (urls.length > 0) {
+    const results = await fetchAllUrls(urls)
+    const successful = results.filter(r => !r.error)
+    if (successful.length > 0) {
+      urlContext = '\n\n[Content from URLs in user message:\n' +
+        successful.map(r =>
+          `--- ${r.url} ---\n` +
+          (r.title ? `Title: ${r.title}\n\n` : '') +
+          r.content +
+          (r.truncated ? '\n...[truncated]' : '')
+        ).join('\n\n') +
+        '\n]'
+    }
+  }
+
+  // Save original user message (without URL context — keep DB clean)
   db.prepare('INSERT INTO messages (conversation_id, role, content) VALUES (?, ?, ?)')
     .run(convo.id, 'user', content)
 
@@ -42,6 +61,14 @@ router.post('/:conversationId', requireAuth, async (req, res) => {
     ollamaMessages.push({ role: 'system', content: convo.system_prompt })
   }
   ollamaMessages.push(...history.map(m => ({ role: m.role, content: m.content })))
+
+  // Append URL context to the last user message (only for this request, not stored)
+  if (urlContext && ollamaMessages.length > 0) {
+    const last = ollamaMessages[ollamaMessages.length - 1]
+    if (last.role === 'user') {
+      last.content = last.content + urlContext
+    }
+  }
 
   // Stream from Ollama
   res.setHeader('Content-Type', 'text/event-stream')
