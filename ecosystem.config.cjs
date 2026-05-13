@@ -2,6 +2,7 @@ module.exports = {
   apps: [{
     name: 'echolink',
     script: 'server/index.js',
+        cwd: '/root/echolink',
     env: {
       PORT: 3000,
       SESSION_SECRET: 'aender-mich',

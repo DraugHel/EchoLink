@@ -1,6 +1,9 @@
 import { Router } from 'express'
 import db from '../db.js'
 import { extractUrls, fetchAllUrls } from '../lib/fetchUrl.js'
+import { UPLOAD_DIR, isImage, extractTextFromFile } from './uploads.js'
+import fs from 'fs'
+import path from 'path'
 
 const router = Router()
 const OLLAMA_URL = process.env.OLLAMA_URL || 'http://localhost:11434'
@@ -15,8 +18,11 @@ router.post('/:conversationId', requireAuth, async (req, res) => {
     .get(req.params.conversationId, req.session.userId)
   if (!convo) return res.status(404).json({ error: 'Not found' })
 
-  const { content } = req.body
-  if (!content?.trim()) return res.status(400).json({ error: 'Empty message' })
+  const { content, attachments } = req.body
+  console.log('[chat] received attachments:', JSON.stringify(attachments))
+  if (!content?.trim() && (!attachments || attachments.length === 0)) {
+    return res.status(400).json({ error: 'Empty message' })
+  }
 
   // Detect and fetch URLs from user message
   const urls = extractUrls(content)
@@ -38,9 +44,11 @@ router.post('/:conversationId', requireAuth, async (req, res) => {
     }
   }
 
-  // Save original user message (without URL context — keep DB clean)
-  db.prepare('INSERT INTO messages (conversation_id, role, content) VALUES (?, ?, ?)')
-    .run(convo.id, 'user', content)
+  // Save original user message with attachments
+  // attachments is array of { filename, originalName, size, kind }
+  const attachmentsJson = attachments && attachments.length > 0 ? JSON.stringify(attachments) : ''
+  db.prepare('INSERT INTO messages (conversation_id, role, content, images) VALUES (?, ?, ?, ?)')
+    .run(convo.id, 'user', content || '', attachmentsJson)
 
   // Auto-title from first message
   const msgCount = db.prepare('SELECT COUNT(*) as c FROM messages WHERE conversation_id = ?').get(convo.id).c
@@ -53,7 +61,7 @@ router.post('/:conversationId', requireAuth, async (req, res) => {
 
   // Build message history for Ollama
   const history = db.prepare(`
-    SELECT role, content FROM messages
+    SELECT role, content, images FROM messages
     WHERE conversation_id = ?
     ORDER BY created_at ASC
   `).all(convo.id)
@@ -62,7 +70,45 @@ router.post('/:conversationId', requireAuth, async (req, res) => {
   if (convo.system_prompt) {
     ollamaMessages.push({ role: 'system', content: convo.system_prompt })
   }
-  ollamaMessages.push(...history.map(m => ({ role: m.role, content: m.content })))
+
+  for (const m of history) {
+    const msg = { role: m.role, content: m.content }
+    if (m.images) {
+      try {
+        const items = JSON.parse(m.images)
+        // items: array of either old-format strings (filenames) or new-format objects
+        const normalized = items.map(it => typeof it === 'string'
+          ? { filename: it, originalName: it, kind: 'image' }
+          : it)
+
+        const base64Images = []
+        const textParts = []
+
+        for (const att of normalized) {
+          if (att.kind === 'image') {
+            const filepath = path.join(UPLOAD_DIR, String(req.session.userId), att.filename)
+            if (fs.existsSync(filepath)) {
+              base64Images.push(fs.readFileSync(filepath).toString('base64'))
+            }
+          } else {
+            const text = await extractTextFromFile(req.session.userId, att.filename, att.originalName)
+            if (text) {
+              const truncated = text.length > 50000 ? text.slice(0, 50000) + '\n...[truncated]' : text
+              textParts.push(`--- File: ${att.originalName} ---\n${truncated}`)
+            }
+          }
+        }
+
+        if (textParts.length > 0) {
+          msg.content = (msg.content ? msg.content + '\n\n' : '') + textParts.join('\n\n')
+        }
+        if (base64Images.length > 0) msg.images = base64Images
+      } catch (err) {
+        console.error('Attachment processing failed:', err.message)
+      }
+    }
+    ollamaMessages.push(msg)
+  }
 
   // Append URL context to the last user message (only for this request, not stored)
   if (urlContext && ollamaMessages.length > 0) {

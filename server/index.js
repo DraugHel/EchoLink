@@ -53,6 +53,9 @@ if (fs.existsSync(distPath)) {
   app.get('/', (req, res) => res.send('Run "npm run build" first to build the frontend.'))
 }
 
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`EchoLink running on http://localhost:${PORT}`)
 })
+
+// 10 minute timeout for slow cloud models
+server.setTimeout(10 * 60 * 1000)
