@@ -40,21 +40,21 @@ html.theme-sakura {
 
 /* ── Void ── */
 html.theme-void {
-  --bg:        #060611;
-  --bg2:       #0a0a1a;
-  --bg3:       #0e0e24;
-  --bg4:       #14142e;
-  --border:    #1e1e45;
-  --border2:   #28285a;
-  --accent:     #00e5ff;
-  --accent-dim: #006a80;
-  --accent-bg:  rgba(0,229,255,0.07);
-  --text:      #d0d8f0;
-  --text2:     #6070a0;
-  --text3:     #303060;
+  --bg:        #080808;
+  --bg2:       #0f0f0f;
+  --bg3:       #151515;
+  --bg4:       #1c1c1c;
+  --border:    #252525;
+  --border2:   #303030;
+  --accent:     #a78bfa;
+  --accent-dim: #5b3fa8;
+  --accent-bg:  rgba(167,139,250,0.07);
+  --text:      #e0ddf0;
+  --text2:     #7060a0;
+  --text3:     #403060;
   --danger:    #ff4f6e;
   --user-bubble: #7c3aed;
-  --user-text:   #e0d0ff;
+  --user-text:   #ede9fe;
 }
 
 /* Rename green vars to accent for backward compat */

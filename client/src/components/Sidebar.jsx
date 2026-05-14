@@ -59,7 +59,7 @@ export default function Sidebar({ conversations, activeId, onSelect, onCreate, o
         <div style={styles.header}>
           <div style={styles.logo}>
             <svg width="22" height="22" viewBox="0 0 32 32" fill="none">
-              <rect width="32" height="32" rx="8" fill="#2ecc71"/>
+              <rect width="32" height="32" rx="8" fill="var(--accent)"/>
               <path d="M8 22 L14 10 L20 18 L24 14" stroke="#0d0d0d" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
               <circle cx="24" cy="14" r="2" fill="#0d0d0d"/>
             </svg>
