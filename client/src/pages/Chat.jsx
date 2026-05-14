@@ -504,7 +504,7 @@ const styles = {
   },
   sendBtn: {
     width: 44, height: 44, borderRadius: 12, flexShrink: 0,
-    background: 'var(--green)', color: '#0d0d0d',
+    background: 'var(--accent)', color: 'var(--user-text, #0d0d0d)',
     display: 'flex', alignItems: 'center', justifyContent: 'center',
     border: 'none', cursor: 'pointer', transition: 'opacity var(--transition)'
   },
