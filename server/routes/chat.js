@@ -8,7 +8,7 @@ import path from 'path'
 
 const router = Router()
 const OLLAMA_URL = process.env.OLLAMA_URL || 'http://localhost:11434'
-const MAX_TOOL_ITERATIONS = 3
+const MAX_TOOL_ITERATIONS = 10
 
 const requireAuth = (req, res, next) => {
   if (!req.session.userId) return res.status(401).json({ error: 'Not authenticated' })
