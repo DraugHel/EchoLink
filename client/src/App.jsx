@@ -1,9 +1,11 @@
+import { useTheme } from './components/ThemePicker.jsx'
 import { useState, useEffect } from 'react'
 import Login from './pages/Login.jsx'
 import Chat from './pages/Chat.jsx'
 import api from './lib/api.js'
 
 export default function App() {
+  useTheme()
   const [user, setUser] = useState(null)
   const [loading, setLoading] = useState(true)
 
