@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import api from '../lib/api.js'
-import { TEMPLATES } from '../lib/templates.js'
+import { TEMPLATES } from '../lib/templates.jsx'
 
 export default function SettingsPanel({ conversation, onUpdate, onClose }) {
   const [models, setModels] = useState([])
@@ -99,7 +99,7 @@ export default function SettingsPanel({ conversation, onUpdate, onClose }) {
                   onClick={() => set('system_prompt', t.prompt)}
                   title={t.description}
                 >
-                  <span>{t.icon}</span>
+                  <span style={{ color: form.system_prompt === t.prompt ? 'var(--accent)' : 'var(--text2)' }}>{t.icon}</span>
                   <span style={{ fontSize: 11 }}>{t.label}</span>
                 </button>
               ))}
@@ -134,7 +134,7 @@ export default function SettingsPanel({ conversation, onUpdate, onClose }) {
                   onClick={() => setDefaultPrompt(t.prompt)}
                   title={t.description}
                 >
-                  <span>{t.icon}</span>
+                  <span style={{ color: defaultPrompt === t.prompt ? 'var(--accent)' : 'var(--text2)' }}>{t.icon}</span>
                   <span style={{ fontSize: 11 }}>{t.label}</span>
                 </button>
               ))}
@@ -211,10 +211,10 @@ const styles = {
     display: 'flex', flexWrap: 'wrap', gap: 6
   },
   templateBtn: {
-    display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3,
+    display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
     padding: '8px 10px', borderRadius: 8, cursor: 'pointer',
     border: '1px solid var(--border)', background: 'var(--bg3)',
-    color: 'var(--text2)', fontSize: 18, minWidth: 56,
+    color: 'var(--text2)', minWidth: 60,
     transition: 'all var(--transition)'
   },
   templateActive: {
