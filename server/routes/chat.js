@@ -66,9 +66,20 @@ router.post('/:conversationId', requireAuth, async (req, res) => {
     ORDER BY created_at ASC
   `).all(convo.id)
 
+  // Build system prompt with live memory injection
+  const user = db.prepare('SELECT memory FROM users WHERE id = ?').get(req.session.userId)
+  const memory = user?.memory || ''
+
+  let systemContent = convo.system_prompt || ''
+  if (memory) {
+    systemContent = systemContent
+      ? `${systemContent}\n\n[What you know about the user from past conversations:\n${memory}]`
+      : `[What you know about the user from past conversations:\n${memory}]`
+  }
+
   const ollamaMessages = []
-  if (convo.system_prompt) {
-    ollamaMessages.push({ role: 'system', content: convo.system_prompt })
+  if (systemContent) {
+    ollamaMessages.push({ role: 'system', content: systemContent })
   }
 
   for (const m of history) {

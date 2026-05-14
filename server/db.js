@@ -50,4 +50,16 @@ try { db.exec(`ALTER TABLE users ADD COLUMN default_system_prompt TEXT DEFAULT '
 try { db.exec(`ALTER TABLE users ADD COLUMN memory TEXT DEFAULT ''`) } catch {}
 try { db.exec(`ALTER TABLE messages ADD COLUMN images TEXT DEFAULT ''`) } catch {}
 
+// One-time migration: strip memory blocks from existing system_prompts
+try {
+  const convos = db.prepare(`SELECT id, system_prompt FROM conversations WHERE system_prompt LIKE '%[What you know about the user%'`).all()
+  for (const c of convos) {
+    const cleaned = c.system_prompt
+      .replace(/\n*\[What you know about the user[\s\S]*?\]/g, '')
+      .trim()
+    db.prepare('UPDATE conversations SET system_prompt = ? WHERE id = ?').run(cleaned, c.id)
+  }
+  if (convos.length > 0) console.log(`Migrated ${convos.length} conversations to remove memory from system_prompt`)
+} catch (e) { console.error('Migration error:', e.message) }
+
 export default db
