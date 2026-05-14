@@ -160,16 +160,27 @@ export default function Chat({ user, onLogout }) {
         for (const line of lines) {
           try {
             const json = JSON.parse(line.slice(6))
+            if (json.tool) {
+              if (json.status === 'running') {
+                setMessages(prev => prev.map(m =>
+                  m.id === assistantId ? { ...m, toolStatus: `Searching: "${json.query}"` } : m
+                ))
+              } else if (json.status === 'done') {
+                setMessages(prev => prev.map(m =>
+                  m.id === assistantId ? { ...m, toolStatus: `Searched: "${json.query}" (${json.resultCount} results)` } : m
+                ))
+              }
+            }
             if (json.think) {
               assistantThink += json.think
               setMessages(prev => prev.map(m =>
-                m.id === assistantId ? { ...m, think: assistantThink } : m
+                m.id === assistantId ? { ...m, think: assistantThink, toolStatus: null } : m
               ))
             }
             if (json.token) {
               assistantContent += json.token
               setMessages(prev => prev.map(m =>
-                m.id === assistantId ? { ...m, content: assistantContent } : m
+                m.id === assistantId ? { ...m, content: assistantContent, toolStatus: null } : m
               ))
             }
             if (json.done) {
@@ -321,7 +332,7 @@ export default function Chat({ user, onLogout }) {
           )}
 
           {activeConvo && !loading && messages.map(m => (
-            <Message key={m.id} role={m.role} content={m.content} streaming={m.streaming} images={m.images} think={m.think} />
+            <Message key={m.id} role={m.role} content={m.content} streaming={m.streaming} images={m.images} think={m.think} toolStatus={m.toolStatus} />
           ))}
 
           {activeConvo && !loading && messages.length === 0 && (

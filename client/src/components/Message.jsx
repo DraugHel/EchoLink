@@ -4,7 +4,7 @@ import remarkGfm from 'remark-gfm'
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism'
 
-export default function Message({ role, content, streaming, images, think }) {
+export default function Message({ role, content, streaming, images, think, toolStatus }) {
   const [thinkOpen, setThinkOpen] = useState(false)
   const [copied, setCopied] = useState(false)
   let parsedAttachments = []
@@ -60,6 +60,12 @@ export default function Message({ role, content, streaming, images, think }) {
           )
           : (
             <div style={styles.markdown}>
+              {toolStatus && (
+                <div style={styles.toolStatus}>
+                  <span style={styles.toolDot} />
+                  {toolStatus}
+                </div>
+              )}
               <div style={styles.msgHeader}>
                 <button style={{ ...styles.copyBtn, color: copied ? 'var(--green)' : 'var(--text3)' }}
                   onClick={async () => {
@@ -234,6 +240,19 @@ const styles = {
   inlineCode: {
     background: 'var(--bg4)', padding: '1px 6px', borderRadius: 4,
     fontFamily: 'var(--font-mono)', fontSize: '0.88em', color: 'var(--green)'
+  },
+  toolStatus: {
+    display: 'inline-flex', alignItems: 'center', gap: 8,
+    padding: '6px 10px', marginBottom: 8,
+    fontSize: 12, color: 'var(--text2)',
+    background: 'var(--accent-bg)',
+    border: '1px solid var(--accent-dim)',
+    borderRadius: 6, fontFamily: 'var(--font-mono)'
+  },
+  toolDot: {
+    width: 6, height: 6, borderRadius: '50%',
+    background: 'var(--accent)',
+    animation: 'pulse 1.4s ease-in-out infinite'
   },
   msgHeader: {
     display: 'flex', justifyContent: 'flex-end',
