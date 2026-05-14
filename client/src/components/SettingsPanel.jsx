@@ -184,6 +184,7 @@ function Field({ label, children }) {
 
 const styles = {
   overlay: {
+    paddingTop: 'env(safe-area-inset-top)',
     position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)',
     zIndex: 200, display: 'flex', alignItems: 'flex-start', justifyContent: 'flex-end'
   },
