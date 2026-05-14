@@ -1,5 +1,6 @@
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
+/* ── EchoLink (default) ── */
 :root {
   --bg:        #0d0d0d;
   --bg2:       #141414;
@@ -7,14 +8,61 @@
   --bg4:       #222222;
   --border:    #2a2a2a;
   --border2:   #333333;
-  --green:     #2ecc71;
-  --green-dim: #1a7a44;
-  --green-bg:  rgba(46,204,113,0.08);
-  --green-glow:rgba(46,204,113,0.15);
+  --accent:     #2ecc71;
+  --accent-dim: #1a7a44;
+  --accent-bg:  rgba(46,204,113,0.08);
   --text:      #e8e8e8;
   --text2:     #999999;
   --text3:     #555555;
   --danger:    #e74c3c;
+  --user-bubble: var(--accent);
+  --user-text:   #0d0d0d;
+}
+
+/* ── Sakura ── */
+html.theme-sakura {
+  --bg:        #0f0a0d;
+  --bg2:       #170d12;
+  --bg3:       #1f1118;
+  --bg4:       #29151f;
+  --border:    #3a1f2b;
+  --border2:   #4a2535;
+  --accent:     #f472b6;
+  --accent-dim: #9d2a5e;
+  --accent-bg:  rgba(244,114,182,0.08);
+  --text:      #f0e0e8;
+  --text2:     #a07080;
+  --text3:     #5a3545;
+  --danger:    #f87171;
+  --user-bubble: var(--accent);
+  --user-text:   #0f0a0d;
+}
+
+/* ── Void ── */
+html.theme-void {
+  --bg:        #060611;
+  --bg2:       #0a0a1a;
+  --bg3:       #0e0e24;
+  --bg4:       #14142e;
+  --border:    #1e1e45;
+  --border2:   #28285a;
+  --accent:     #00e5ff;
+  --accent-dim: #006a80;
+  --accent-bg:  rgba(0,229,255,0.07);
+  --text:      #d0d8f0;
+  --text2:     #6070a0;
+  --text3:     #303060;
+  --danger:    #ff4f6e;
+  --user-bubble: #7c3aed;
+  --user-text:   #e0d0ff;
+}
+
+/* Rename green vars to accent for backward compat */
+:root, html.theme-sakura, html.theme-void {
+  --green:      var(--accent);
+  --green-dim:  var(--accent-dim);
+  --green-bg:   var(--accent-bg);
+  --green-glow: var(--accent-bg);
   --font-mono: 'Space Mono', monospace;
   --font-sans: 'DM Sans', sans-serif;
   --radius:    10px;
@@ -32,19 +80,12 @@ html, body {
   -webkit-font-smoothing: antialiased;
 }
 
-/* Root: svh keeps height stable even when Safari's address bar toggles.
-   Safe-area insets push content away from notch, home indicator,
-   and rounded corners. */
 #root {
   height: 100vh;
   height: 100svh;
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  padding-top: env(safe-area-inset-top);
-  padding-right: env(safe-area-inset-right);
-  padding-bottom: env(safe-area-inset-bottom);
-  padding-left: env(safe-area-inset-left);
 }
 
 ::-webkit-scrollbar { width: 4px; }
@@ -70,9 +111,9 @@ input, textarea {
   transition: border-color var(--transition);
 }
 
-input:focus, textarea:focus { border-color: var(--green); }
+input:focus, textarea:focus { border-color: var(--accent); }
 
-a { color: var(--green); text-decoration: none; }
+a { color: var(--accent); text-decoration: none; }
 
 @keyframes fadeIn {
   from { opacity: 0; transform: translateY(6px); }

@@ -216,8 +216,8 @@ const styles = {
   },
   bubble: { maxWidth: '80%', borderRadius: 12, padding: '12px 16px', fontSize: 15, lineHeight: 1.65 },
   userBubble: {
-    background: 'var(--green)',
-    color: '#0d0d0d',
+    background: 'var(--user-bubble, var(--accent))',
+    color: 'var(--user-text, #0d0d0d)',
     borderBottomRightRadius: 4,
     fontWeight: 400
   },

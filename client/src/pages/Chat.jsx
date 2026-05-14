@@ -3,6 +3,7 @@ import Sidebar from '../components/Sidebar.jsx'
 import Message from '../components/Message.jsx'
 import SettingsPanel from '../components/SettingsPanel.jsx'
 import api from '../lib/api.js'
+import ThemePicker, { useTheme } from '../components/ThemePicker.jsx'
 
 function useIsMobile() {
   const [mobile, setMobile] = useState(typeof window !== 'undefined' && window.innerWidth < 768)
@@ -31,6 +32,7 @@ export default function Chat({ user, onLogout }) {
   const textareaRef = useRef(null)
   const abortControllerRef = useRef(null)
   const mobile = useIsMobile()
+  useTheme()
 
   // Swipe to open/close sidebar
   const swipeStartX = useRef(null)
@@ -288,6 +290,7 @@ export default function Chat({ user, onLogout }) {
           <span style={styles.convoTitle}>
             {activeConvo ? activeConvo.title : 'EchoLink'}
           </span>
+          <ThemePicker />
           {activeConvo && (
             <button style={styles.settingsBtn} onClick={() => setShowSettings(true)} title="Settings">
               <GearIcon />
