@@ -131,7 +131,8 @@ export default function Chat({ user, onLogout }) {
     const assistantId = `a_${Date.now()}_${Math.random().toString(36).slice(2)}`
     setMessages(prev => [
       ...prev,
-      { id: userId, role: 'user', content, images: attachmentsToSend.length > 0 ? JSON.stringify(attachmentsToSend) : '' },
+      // On regenerate (skipSave=true), don't add user message to UI again
+      ...(skipSave ? [] : [{ id: userId, role: 'user', content, images: attachmentsToSend.length > 0 ? JSON.stringify(attachmentsToSend) : '' }]),
       { id: assistantId, role: 'assistant', content: '', think: '', streaming: true }
     ])
     setStreaming(true)
