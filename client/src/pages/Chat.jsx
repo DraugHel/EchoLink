@@ -486,7 +486,7 @@ const styles = {
   emptySub: { color: 'var(--text2)', fontSize: 15 },
   emptyBtn: {
     marginTop: 8, padding: '12px 24px', borderRadius: 10,
-    background: 'var(--green)', color: '#0d0d0d', fontWeight: 600,
+    background: 'var(--accent)', color: 'var(--user-text, #0d0d0d)', fontWeight: 600,
     fontSize: 15, cursor: 'pointer', border: 'none', fontFamily: 'var(--font-sans)'
   },
   emptyChat: { flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text3)', fontSize: 14 },
