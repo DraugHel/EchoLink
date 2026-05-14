@@ -20,6 +20,14 @@ const DATA_DIR = path.join(__dirname, '..', 'data')
 
 fs.mkdirSync(DATA_DIR, { recursive: true })
 
+// Clear all sessions on startup to avoid stale cache issues
+try {
+  const sessDb = new (await import('better-sqlite3')).default(path.join(DATA_DIR, 'sessions.db'))
+  sessDb.exec('DELETE FROM sessions')
+  sessDb.close()
+  console.log('Sessions cleared on startup')
+} catch {}
+
 const app = express()
 app.use(express.json())
 

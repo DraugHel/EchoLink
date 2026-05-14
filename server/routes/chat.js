@@ -152,10 +152,9 @@ router.post('/:conversationId', requireAuth, async (req, res) => {
     const reader = ollamaRes.body.getReader()
     const decoder = new TextDecoder()
 
-    // Track <think> tag state — send think content separately
-    let inThink = false
-    let buffer = ''
-    let fullThink = ''
+    // Collect full response — handle both <think> tags and json.message.thinking field
+    let rawResponse = ''
+    let rawThinking = ''
 
     while (true) {
       const { done, value } = await reader.read()
@@ -167,63 +166,40 @@ router.post('/:conversationId', requireAuth, async (req, res) => {
       for (const line of lines) {
         try {
           const json = JSON.parse(line)
+          if (json.message?.thinking) {
+            rawThinking += json.message.thinking
+          }
           if (json.message?.content) {
-            buffer += json.message.content
-
-            // Process buffer
-            while (true) {
-              if (inThink) {
-                const end = buffer.indexOf('</think>')
-                if (end !== -1) {
-                  const thinkChunk = buffer.slice(0, end)
-                  fullThink += thinkChunk
-                  if (thinkChunk) res.write(`data: ${JSON.stringify({ think: thinkChunk })}\n\n`)
-                  inThink = false
-                  buffer = buffer.slice(end + 8)
-                } else {
-                  // Still in think — send what we have (minus tail in case tag is split)
-                  if (buffer.length > 8) {
-                    const safe = buffer.slice(0, -8)
-                    fullThink += safe
-                    res.write(`data: ${JSON.stringify({ think: safe })}\n\n`)
-                    buffer = buffer.slice(-8)
-                  }
-                  break
-                }
-              } else {
-                const start = buffer.indexOf('<think>')
-                if (start !== -1) {
-                  // Send text before think tag
-                  const before = buffer.slice(0, start)
-                  if (before) {
-                    fullResponse += before
-                    res.write(`data: ${JSON.stringify({ token: before })}\n\n`)
-                  }
-                  inThink = true
-                  buffer = buffer.slice(start + 7)
-                } else {
-                  // No think tag — safe to send minus last 7 chars
-                  if (buffer.length > 7) {
-                    const safe = buffer.slice(0, -7)
-                    fullResponse += safe
-                    res.write(`data: ${JSON.stringify({ token: safe })}\n\n`)
-                    buffer = buffer.slice(-7)
-                  }
-                  break
-                }
-              }
-            }
+            rawResponse += json.message.content
           }
           if (json.done) {
-            // Flush remaining buffer
-            if (buffer && !inThink) {
-              fullResponse += buffer
-              if (buffer.trim()) res.write(`data: ${JSON.stringify({ token: buffer })}\n\n`)
+            // Extract <think> tags if present in response
+            const thinkTagMatch = rawResponse.match(/<think>([\s\S]*?)<\/think>/g)
+            const thinkFromTags = thinkTagMatch
+              ? thinkTagMatch.map(m => m.replace(/<\/?think>/g, '')).join('\n\n')
+              : ''
+            const cleanResponse = rawResponse.replace(/<think>[\s\S]*?<\/think>/g, '').trim()
+
+            // Combine thinking sources
+            const allThinking = [rawThinking, thinkFromTags].filter(Boolean).join('\n\n')
+
+            // Send think block first if present
+            if (allThinking.trim()) {
+              res.write(`data: ${JSON.stringify({ think: allThinking })}\n\n`)
             }
-            // Save clean response (no think tags)
+
+            // Stream clean response in chunks
+            const chunkSize = 20
+            for (let i = 0; i < cleanResponse.length; i += chunkSize) {
+              const t = cleanResponse.slice(i, i + chunkSize)
+              fullResponse += t
+              res.write(`data: ${JSON.stringify({ token: t })}\n\n`)
+            }
+
+            // Save to DB
             db.prepare('INSERT INTO messages (conversation_id, role, content) VALUES (?, ?, ?)')
-              .run(convo.id, 'assistant', fullResponse.trim())
-            res.write(`data: ${JSON.stringify({ done: true, hasThink: !!fullThink })}\n\n`)
+              .run(convo.id, 'assistant', cleanResponse)
+            res.write(`data: ${JSON.stringify({ done: true })}\n\n`)
           }
         } catch {}
       }

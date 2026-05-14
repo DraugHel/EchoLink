@@ -6,6 +6,7 @@ import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism'
 
 export default function Message({ role, content, streaming, images, think }) {
   const [thinkOpen, setThinkOpen] = useState(false)
+  const [copied, setCopied] = useState(false)
   let parsedAttachments = []
   if (images) {
     try {
@@ -59,6 +60,18 @@ export default function Message({ role, content, streaming, images, think }) {
           )
           : (
             <div style={styles.markdown}>
+              <div style={styles.msgHeader}>
+                <button style={{ ...styles.copyBtn, color: copied ? 'var(--green)' : 'var(--text3)' }}
+                  onClick={async () => {
+                    try { await navigator.clipboard.writeText(content) }
+                    catch { const t = document.createElement('textarea'); t.value = content; document.body.appendChild(t); t.select(); document.execCommand('copy'); document.body.removeChild(t) }
+                    setCopied(true); setTimeout(() => setCopied(false), 1500)
+                  }}
+                  title="Copy response"
+                >
+                  {copied ? <CheckIcon /> : <CopyIcon />}
+                </button>
+              </div>
               {think && (
                 <div style={styles.thinkWrap}>
                   <button style={styles.thinkToggle} onClick={() => setThinkOpen(o => !o)}>
@@ -113,6 +126,17 @@ export default function Message({ role, content, streaming, images, think }) {
     </div>
   )
 }
+
+const CopyIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+  </svg>
+)
+const CheckIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points="20 6 9 17 4 12"/>
+  </svg>
+)
 
 function CodeBlock({ lang, code }) {
   const [copied, setCopied] = useState(false)
@@ -210,6 +234,16 @@ const styles = {
   inlineCode: {
     background: 'var(--bg4)', padding: '1px 6px', borderRadius: 4,
     fontFamily: 'var(--font-mono)', fontSize: '0.88em', color: 'var(--green)'
+  },
+  msgHeader: {
+    display: 'flex', justifyContent: 'flex-end',
+    marginBottom: 4
+  },
+  copyBtn: {
+    background: 'none', border: 'none', cursor: 'pointer',
+    padding: '2px 4px', borderRadius: 4,
+    transition: 'color var(--transition)',
+    display: 'flex', alignItems: 'center'
   },
   thinkWrap: {
     marginBottom: 10,
