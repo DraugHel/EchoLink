@@ -116,7 +116,7 @@ export default function Chat({ user, onLogout }) {
     }
   }
 
-  async function sendMessage(contentOverride) {
+  async function sendMessage(contentOverride, skipSave = false) {
     const content = contentOverride ?? input.trim()
     const hasAttachments = attachments.length > 0
     if ((!content && !hasAttachments) || streaming || !activeConvo) return
@@ -145,7 +145,7 @@ export default function Chat({ user, onLogout }) {
       const response = await fetch(`/api/chat/${activeConvo.id}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content, attachments: attachmentsToSend }),
+        body: JSON.stringify({ content, attachments: attachmentsToSend, skipSave }),
         signal: abortControllerRef.current.signal
       })
 
@@ -230,7 +230,7 @@ export default function Chat({ user, onLogout }) {
     try {
       await api.delete(`/api/conversations/${activeConvo.id}/last-assistant`)
     } catch {}
-    await sendMessage(lastUser.content)
+    await sendMessage(lastUser.content, true)
   }
 
   async function handleFileSelect(e) {

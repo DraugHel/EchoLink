@@ -58,7 +58,7 @@ router.post('/:conversationId', requireAuth, async (req, res) => {
     .get(req.params.conversationId, req.session.userId)
   if (!convo) return res.status(404).json({ error: 'Not found' })
 
-  const { content, attachments } = req.body
+  const { content, attachments, skipSave } = req.body
   if (!content?.trim() && (!attachments || attachments.length === 0)) {
     return res.status(400).json({ error: 'Empty message' })
   }
@@ -81,10 +81,12 @@ router.post('/:conversationId', requireAuth, async (req, res) => {
     }
   }
 
-  // Save user message
+  // Save user message (skip on regenerate)
   const attachmentsJson = attachments && attachments.length > 0 ? JSON.stringify(attachments) : ''
-  db.prepare('INSERT INTO messages (conversation_id, role, content, images) VALUES (?, ?, ?, ?)')
-    .run(convo.id, 'user', content || '', attachmentsJson)
+  if (!skipSave) {
+    db.prepare('INSERT INTO messages (conversation_id, role, content, images) VALUES (?, ?, ?, ?)')
+      .run(convo.id, 'user', content || '', attachmentsJson)
+  }
 
   // System prompt with memory
   const user = db.prepare('SELECT memory FROM users WHERE id = ?').get(req.session.userId)
