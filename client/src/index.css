@@ -21,21 +21,21 @@
 
 /* ── Sakura ── */
 html.theme-sakura {
-  --bg:        #0f0a0d;
-  --bg2:       #170d12;
-  --bg3:       #1f1118;
-  --bg4:       #29151f;
-  --border:    #3a1f2b;
-  --border2:   #4a2535;
-  --accent:     #f472b6;
-  --accent-dim: #9d2a5e;
-  --accent-bg:  rgba(244,114,182,0.08);
-  --text:      #f0e0e8;
-  --text2:     #a07080;
-  --text3:     #5a3545;
+  --bg:        #0d0d10;
+  --bg2:       #13121a;
+  --bg3:       #19182200;
+  --bg4:       #201f2e;
+  --border:    #2e2a3e;
+  --border2:   #3a3550;
+  --accent:     #f9a8d4;
+  --accent-dim: #9d5a85;
+  --accent-bg:  rgba(249,168,212,0.07);
+  --text:      #ede8f5;
+  --text2:     #9085a8;
+  --text3:     #50456a;
   --danger:    #f87171;
-  --user-bubble: var(--accent);
-  --user-text:   #0f0a0d;
+  --user-bubble: #e879a0;
+  --user-text:   #fff0f7;
 }
 
 /* ── Void ── */
