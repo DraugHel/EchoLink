@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import api from '../lib/api.js'
+import { TEMPLATES } from '../lib/templates.js'
 
 export default function SettingsPanel({ conversation, onUpdate, onClose }) {
   const [models, setModels] = useState([])
@@ -86,6 +87,25 @@ export default function SettingsPanel({ conversation, onUpdate, onClose }) {
               onChange={e => set('top_p', parseFloat(e.target.value))} style={styles.range} />
           </Field>
 
+          <Field label="Prompt Template">
+            <div style={styles.templates}>
+              {TEMPLATES.map(t => (
+                <button
+                  key={t.id}
+                  style={{
+                    ...styles.templateBtn,
+                    ...(form.system_prompt === t.prompt ? styles.templateActive : {})
+                  }}
+                  onClick={() => set('system_prompt', t.prompt)}
+                  title={t.description}
+                >
+                  <span>{t.icon}</span>
+                  <span style={{ fontSize: 11 }}>{t.label}</span>
+                </button>
+              ))}
+            </div>
+          </Field>
+
           <Field label="System Prompt (this conversation)">
             <textarea
               style={styles.textarea}
@@ -102,6 +122,23 @@ export default function SettingsPanel({ conversation, onUpdate, onClose }) {
           {/* Default prompt */}
           <p style={styles.sectionLabel}>Your Default Prompt</p>
           <p style={styles.sectionSub}>Applied to all new conversations automatically.</p>
+
+          <div style={styles.templates}>
+              {TEMPLATES.map(t => (
+                <button
+                  key={t.id}
+                  style={{
+                    ...styles.templateBtn,
+                    ...(defaultPrompt === t.prompt ? styles.templateActive : {})
+                  }}
+                  onClick={() => setDefaultPrompt(t.prompt)}
+                  title={t.description}
+                >
+                  <span>{t.icon}</span>
+                  <span style={{ fontSize: 11 }}>{t.label}</span>
+                </button>
+              ))}
+            </div>
 
           <Field label="">
             <textarea
@@ -170,6 +207,21 @@ const styles = {
   divider: { borderTop: '1px solid var(--border)', margin: '24px 0' },
   footer: { display: 'flex', gap: 10, padding: '16px 24px', borderTop: '1px solid var(--border)' },
   err: { color: 'var(--danger)', fontSize: 13 },
+  templates: {
+    display: 'flex', flexWrap: 'wrap', gap: 6
+  },
+  templateBtn: {
+    display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3,
+    padding: '8px 10px', borderRadius: 8, cursor: 'pointer',
+    border: '1px solid var(--border)', background: 'var(--bg3)',
+    color: 'var(--text2)', fontSize: 18, minWidth: 56,
+    transition: 'all var(--transition)'
+  },
+  templateActive: {
+    border: '1px solid var(--accent-dim)',
+    background: 'var(--accent-bg)',
+    color: 'var(--text)'
+  },
   select: {
     width: '100%', padding: '10px 12px', fontSize: 16,
     background: 'var(--bg3)', border: '1px solid var(--border)',
