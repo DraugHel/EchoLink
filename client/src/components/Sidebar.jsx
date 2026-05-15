@@ -65,8 +65,14 @@ export default function Sidebar({ conversations, activeId, onSelect, onCreate, o
             </svg>
             <span style={styles.logoText}>Echo<span style={{ color:'var(--green)' }}>Link</span></span>
           </div>
-          <button style={styles.newBtn} onClick={onCreate} title="New conversation">
-            <PlusIcon />
+          <button style={{ ...styles.newBtn, opacity: creating ? 0.6 : 1 }} onClick={async () => {
+            if (creating) return
+            setCreating(true)
+            try { await onCreate() } finally { setCreating(false) }
+          }} title="New conversation" disabled={creating}>
+            {creating
+              ? <div style={{ width: 14, height: 14, border: '2px solid var(--accent)', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 0.7s linear infinite' }} />
+              : <PlusIcon />}
           </button>
         </div>
 
