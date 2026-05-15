@@ -151,7 +151,8 @@ const LogoutIcon = () => (
 const styles = {
   header: {
     display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-    padding: '16px 14px', borderBottom: '1px solid var(--border)'
+    padding: '16px 14px', paddingTop: 'calc(16px + env(safe-area-inset-top))',
+    borderBottom: '1px solid var(--border)'
   },
   logo: { display: 'flex', alignItems: 'center', gap: 8 },
   logoText: { fontFamily: 'var(--font-mono)', fontSize: 16, fontWeight: 700 },
