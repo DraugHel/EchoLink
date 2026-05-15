@@ -41,7 +41,7 @@ export default function Chat({ user, onLogout }) {
     const onTouchEnd = e => {
       if (swipeStartX.current === null) return
       const dx = e.changedTouches[0].clientX - swipeStartX.current
-      if (dx > 50 && swipeStartX.current < 200) setMobileSidebar(true)
+      if (dx > 50 && swipeStartX.current < window.innerWidth * 0.2) setMobileSidebar(true)
       if (dx < -60 && mobileSidebar) setMobileSidebar(false)
       swipeStartX.current = null
     }
