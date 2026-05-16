@@ -18,6 +18,8 @@ const requireAuth = (req, res, next) => {
 
 const IMAGE_TYPES = /^image\/(jpeg|jpg|png|gif|webp)$/i
 const TEXT_EXTS = new Set([
+  '.zip', '.tar', '.gz', '.7z', '.rar',
+  '.docx', '.xlsx', '.xls', '.pptx',
   '.txt', '.md', '.csv', '.json', '.xml', '.html', '.css', '.js', '.jsx', '.ts', '.tsx',
   '.py', '.rb', '.go', '.rs', '.java', '.c', '.cpp', '.h', '.hpp', '.sh', '.bash',
   '.yml', '.yaml', '.toml', '.ini', '.conf', '.log', '.sql', '.php', '.swift', '.kt'
@@ -41,7 +43,7 @@ const upload = multer({
   limits: { fileSize: 20 * 1024 * 1024 }, // 20 MB
   fileFilter: (req, file, cb) => {
     const ext = path.extname(file.originalname).toLowerCase()
-    if (IMAGE_TYPES.test(file.mimetype) || TEXT_EXTS.has(ext) || ext === '.pdf') {
+    if (IMAGE_TYPES.test(file.mimetype) || TEXT_EXTS.has(ext) || ext === '.pdf' || ['.zip','.tar','.gz','.7z','.rar','.docx','.xlsx','.xls','.pptx'].includes(ext)) {
       cb(null, true)
     } else {
       cb(new Error('Unsupported file type'))
@@ -58,6 +60,8 @@ function getFileKind(filename) {
   const ext = path.extname(filename).toLowerCase()
   if (isImage(filename)) return 'image'
   if (ext === '.pdf') return 'pdf'
+  if (['.zip', '.tar', '.gz', '.7z', '.rar'].includes(ext)) return 'archive'
+  if (['.docx', '.xlsx', '.xls', '.pptx'].includes(ext)) return 'text'
   return 'text'
 }
 
@@ -92,6 +96,22 @@ export async function extractTextFromFile(userId, filename, originalName) {
       const pdfParse = (await import('pdf-parse')).default
       const data = await pdfParse(fs.readFileSync(filepath))
       return data.text
+    } else if (ext === '.docx') {
+      const mammoth = (await import('mammoth')).default
+      const result = await mammoth.extractRawText({ path: filepath })
+      return result.value
+    } else if (ext === '.xlsx' || ext === '.xls') {
+      const XLSX = await import('xlsx')
+      const wb = XLSX.readFile(filepath)
+      return wb.SheetNames.map(name => {
+        const ws = wb.Sheets[name]
+        return `[Sheet: ${name}]\n` + XLSX.utils.sheet_to_csv(ws)
+      }).join('\n\n')
+    } else if (ext === '.pptx') {
+      // Basic PPTX text extraction — not supported, return notice
+      return '[PPTX: text extraction not supported, file attached as reference]'
+    } else if (['.zip', '.tar', '.gz', '.7z', '.rar'].includes(ext)) {
+      return null // Archives not extracted
     } else {
       return fs.readFileSync(filepath, 'utf-8')
     }

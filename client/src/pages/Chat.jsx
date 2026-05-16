@@ -370,7 +370,7 @@ export default function Chat({ user, onLogout }) {
               </div>
             )}
             <div style={styles.inputRow}>
-              <input type="file" accept="image/*,.txt,.md,.csv,.json,.xml,.html,.css,.js,.jsx,.ts,.tsx,.py,.rb,.go,.rs,.java,.c,.cpp,.h,.hpp,.sh,.bash,.yml,.yaml,.toml,.ini,.conf,.log,.sql,.php,.swift,.kt,.pdf" multiple ref={fileInputRef} onChange={handleFileSelect} style={{ display: 'none' }} />
+              <input type="file" accept="image/*,.txt,.md,.csv,.json,.xml,.html,.css,.js,.jsx,.ts,.tsx,.py,.rb,.go,.rs,.java,.c,.cpp,.h,.hpp,.sh,.bash,.yml,.yaml,.toml,.ini,.conf,.log,.sql,.php,.swift,.kt,.pdf,.zip,.tar,.gz,.7z,.rar,.docx,.xlsx,.xls,.pptx" multiple ref={fileInputRef} onChange={handleFileSelect} style={{ display: 'none' }} />
               <button
                 style={{ ...styles.attachBtn, opacity: uploading ? 0.5 : 1 }}
                 onClick={() => fileInputRef.current?.click()}
