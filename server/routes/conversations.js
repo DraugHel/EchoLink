@@ -1,6 +1,6 @@
 import { Router } from 'express'
 import db from '../db.js'
-import { deleteFilesForConvo } from './uploads.js'
+import { deleteFilesForConvo, deleteFilesForMessage } from './uploads.js'
 
 const router = Router()
 
@@ -96,8 +96,6 @@ router.get('/:id/messages', requireAuth, (req, res) => {
   res.json(messages)
 })
 
-export default router
-
 // Delete last assistant message (for regenerate)
 router.delete('/:id/last-assistant', requireAuth, (req, res) => {
   const convo = db.prepare('SELECT * FROM conversations WHERE id = ? AND user_id = ?')
@@ -105,11 +103,17 @@ router.delete('/:id/last-assistant', requireAuth, (req, res) => {
   if (!convo) return res.status(404).json({ error: 'Not found' })
 
   const last = db.prepare(`
-    SELECT id FROM messages
+    SELECT id, images FROM messages
     WHERE conversation_id = ? AND role = 'assistant'
     ORDER BY created_at DESC LIMIT 1
   `).get(convo.id)
 
-  if (last) db.prepare('DELETE FROM messages WHERE id = ?').run(last.id)
+  if (last) {
+    // Clean up any files attached to this message
+    deleteFilesForMessage(req.session.userId, last.images)
+    db.prepare('DELETE FROM messages WHERE id = ?').run(last.id)
+  }
   res.json({ ok: true })
 })
+
+export default router

@@ -9,7 +9,7 @@ import authRoutes from './routes/auth.js'
 import conversationRoutes from './routes/conversations.js'
 import chatRoutes from './routes/chat.js'
 import memoryRoutes from './routes/memory.js'
-import uploadRoutes from './routes/uploads.js'
+import uploadRoutes, { cleanupOrphanedFiles } from './routes/uploads.js'
 import hermesRoutes from './routes/hermes.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -65,7 +65,14 @@ if (fs.existsSync(distPath)) {
 
 const server = app.listen(PORT, () => {
   console.log(`EchoLink running on http://localhost:${PORT}`)
+  // Clean up orphaned uploads on startup
+  try { cleanupOrphanedFiles() } catch (e) { console.error('Upload cleanup failed:', e.message) }
 })
+
+// Clean up orphaned files every 6 hours
+setInterval(() => {
+  try { cleanupOrphanedFiles() } catch (e) { console.error('Upload cleanup failed:', e.message) }
+}, 6 * 60 * 60 * 1000)
 
 // 10 minute timeout for slow cloud models
 server.setTimeout(10 * 60 * 1000)

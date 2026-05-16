@@ -21,11 +21,11 @@ router.delete('/', requireAuth, (req, res) => {
   res.json({ ok: true })
 })
 
-// Update memory from a conversation (called when starting a new one)
-router.post('/update/:conversationId', requireAuth, async (req, res) => {
+// Update memory from a conversation — called directly by chat.js or via HTTP
+export async function extractMemory(userId, conversationId, model) {
   const convo = db.prepare('SELECT * FROM conversations WHERE id = ? AND user_id = ?')
-    .get(req.params.conversationId, req.session.userId)
-  if (!convo) return res.status(404).json({ error: 'Not found' })
+    .get(conversationId, userId)
+  if (!convo) return { ok: true, skipped: true }
 
   // Get messages from this conversation
   const messages = db.prepare(`
@@ -33,12 +33,12 @@ router.post('/update/:conversationId', requireAuth, async (req, res) => {
     WHERE conversation_id = ?
     ORDER BY created_at ASC
     LIMIT 40
-  `).all(convo.id)
+  `).all(conversationId)
 
-  if (messages.length < 2) return res.json({ ok: true, skipped: true })
+  if (messages.length < 2) return { ok: true, skipped: true }
 
   // Get existing memory
-  const user = db.prepare('SELECT memory FROM users WHERE id = ?').get(req.session.userId)
+  const user = db.prepare('SELECT memory FROM users WHERE id = ?').get(userId)
   const existingMemory = user.memory || ''
 
   // Build prompt for memory extraction
@@ -64,30 +64,31 @@ Extract a concise, updated list of facts about the user. Rules:
 - If nothing new or useful, return the existing memory unchanged
 - Return ONLY the bullet list, nothing else`
 
-  try {
-    const model = convo.model || 'llama3'
-    const ollamaRes = await fetch(`${OLLAMA_URL}/api/chat`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model,
-        messages: [{ role: 'user', content: extractPrompt }],
-        stream: false,
-        options: { temperature: 0.3, top_p: 0.9 }
-      })
+  const useModel = model || convo.model || 'llama3'
+  const ollamaRes = await fetch(`${OLLAMA_URL}/api/chat`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: useModel,
+      messages: [{ role: 'user', content: extractPrompt }],
+      stream: false,
+      options: { temperature: 0.3, top_p: 0.9 }
     })
+  })
 
-    if (!ollamaRes.ok) return res.json({ ok: true, skipped: true })
+  if (!ollamaRes.ok) return { ok: true, skipped: true }
 
-    const data = await ollamaRes.json()
-    const newMemory = data.message?.content?.trim() || existingMemory
+  const data = await ollamaRes.json()
+  const newMemory = data.message?.content?.trim() || existingMemory
 
-    db.prepare('UPDATE users SET memory = ? WHERE id = ?').run(newMemory, req.session.userId)
-    res.json({ ok: true, memory: newMemory })
-  } catch (err) {
-    // Memory update failing shouldn't break anything
-    res.json({ ok: true, skipped: true, error: err.message })
-  }
+  db.prepare('UPDATE users SET memory = ? WHERE id = ?').run(newMemory, userId)
+  return { ok: true, memory: newMemory }
+}
+
+// Update memory from a conversation (HTTP endpoint)
+router.post('/update/:conversationId', requireAuth, async (req, res) => {
+  const result = await extractMemory(req.session.userId, req.params.conversationId)
+  res.json(result)
 })
 
 export default router

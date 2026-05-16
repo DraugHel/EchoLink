@@ -29,6 +29,7 @@ router.post('/logout', (req, res) => {
 router.get('/me', (req, res) => {
   if (!req.session.userId) return res.status(401).json({ error: 'Not authenticated' })
   const user = db.prepare('SELECT username, default_system_prompt FROM users WHERE id = ?').get(req.session.userId)
+  if (!user) return res.status(401).json({ error: 'Not authenticated' })
   res.json({
     username: user.username,
     defaultSystemPrompt: user.default_system_prompt || GLOBAL_DEFAULT

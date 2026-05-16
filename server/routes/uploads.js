@@ -43,7 +43,7 @@ const upload = multer({
   limits: { fileSize: 100 * 1024 * 1024 }, // 100 MB
   fileFilter: (req, file, cb) => {
     const ext = path.extname(file.originalname).toLowerCase()
-    if (IMAGE_TYPES.test(file.mimetype) || TEXT_EXTS.has(ext) || ext === '.pdf' || ['.zip','.tar','.gz','.7z','.rar','.docx','.xlsx','.xls','.pptx'].includes(ext)) {
+    if (IMAGE_TYPES.test(file.mimetype) || TEXT_EXTS.has(ext) || ext === '.pdf') {
       cb(null, true)
     } else {
       cb(new Error('Unsupported file type'))
@@ -135,6 +135,53 @@ export function deleteFilesForConvo(userId, conversationId) {
         if (fs.existsSync(filepath)) fs.unlinkSync(filepath)
       }
     } catch {}
+  }
+}
+
+// Delete files attached to a single message
+export function deleteFilesForMessage(userId, images) {
+  if (!images) return
+  try {
+    const items = JSON.parse(images)
+    for (const it of items) {
+      const fn = typeof it === 'string' ? it : it.filename
+      const filepath = path.join(UPLOAD_DIR, String(userId), fn)
+      if (fs.existsSync(filepath)) fs.unlinkSync(filepath)
+    }
+  } catch {}
+}
+
+// Clean up orphaned files (not referenced by any message)
+export function cleanupOrphanedFiles() {
+  const userDirs = fs.readdirSync(UPLOAD_DIR).filter(d => {
+    const p = path.join(UPLOAD_DIR, d)
+    return fs.statSync(p).isDirectory()
+  })
+
+  for (const userId of userDirs) {
+    const userDir = path.join(UPLOAD_DIR, userId)
+    const filesOnDisk = fs.readdirSync(userDir)
+
+    // Get all referenced filenames from DB for this user
+    const referenced = new Set()
+    const messages = db.prepare('SELECT images FROM messages WHERE images != "" AND images IS NOT NULL').all()
+    for (const msg of messages) {
+      try {
+        const items = JSON.parse(msg.images)
+        for (const it of items) {
+          referenced.add(typeof it === 'string' ? it : it.filename)
+        }
+      } catch {}
+    }
+
+    let removed = 0
+    for (const file of filesOnDisk) {
+      if (!referenced.has(file)) {
+        fs.unlinkSync(path.join(userDir, file))
+        removed++
+      }
+    }
+    if (removed > 0) console.log(`Cleaned ${removed} orphaned files for user ${userId}`)
   }
 }
 

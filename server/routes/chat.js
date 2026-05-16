@@ -36,12 +36,13 @@ async function executeTool(toolCall, res) {
   return `Unknown tool: ${name}`
 }
 
-async function chatNonStreaming(model, messages, options) {
+// Stream from Ollama, collecting tokens and forwarding to client
+async function streamOllama(model, messages, options, res) {
   const r = await fetch(`${OLLAMA_URL}/api/chat`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      model, messages, stream: false,
+      model, messages, stream: true,
       tools: [SEARCH_TOOL],
       options
     })
@@ -50,7 +51,73 @@ async function chatNonStreaming(model, messages, options) {
     const errBody = await r.text()
     throw new Error(`Ollama ${r.status}: ${errBody.slice(0,200)}`)
   }
-  return r.json()
+
+  let fullContent = ''
+  let fullThinking = ''
+  let toolCalls = null
+
+  const reader = r.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+
+    const lines = buffer.split('\n')
+    buffer = lines.pop() // keep incomplete line
+
+    for (const line of lines) {
+      if (!line.trim()) continue
+      try {
+        const data = JSON.parse(line)
+
+        if (data.done) {
+          // Final event — may contain tool calls
+          if (data.message?.tool_calls && data.message.tool_calls.length > 0) {
+            toolCalls = data.message.tool_calls
+          }
+          break
+        }
+
+        // Collect content tokens
+        if (data.message?.content) {
+          fullContent += data.message.content
+          res.write(`data: ${JSON.stringify({ token: data.message.content })}\n\n`)
+        }
+
+        // Collect thinking tokens
+        if (data.message?.thinking) {
+          fullThinking += data.message.thinking
+          res.write(`data: ${JSON.stringify({ think: data.message.thinking })}\n\n`)
+        }
+
+        // Tool calls may arrive on a message event before done
+        if (data.message?.tool_calls && data.message.tool_calls.length > 0) {
+          toolCalls = data.message.tool_calls
+        }
+      } catch {}
+    }
+  }
+
+  return { fullContent, fullThinking, toolCalls }
+}
+
+// Auto-update memory after response (direct function call instead of HTTP)
+async function updateMemory(userId, conversationId, model) {
+  const msgCount = db.prepare('SELECT COUNT(*) as count FROM messages WHERE conversation_id = ? AND role = ?')
+    .get(conversationId, 'assistant').count
+
+  // Only update every ~10 assistant messages to avoid hammering
+  if (msgCount % 10 !== 0) return
+
+  try {
+    const { extractMemory } = await import('./memory.js')
+    await extractMemory(userId, conversationId, model)
+  } catch {
+    // Memory update failure is non-critical
+  }
 }
 
 router.post('/:conversationId', requireAuth, async (req, res) => {
@@ -163,49 +230,50 @@ router.post('/:conversationId', requireAuth, async (req, res) => {
 
     while (iterations < MAX_TOOL_ITERATIONS) {
       iterations++
-      const response = await chatNonStreaming(convo.model, workingMessages, options)
-      const message = response.message
 
-      if (message.tool_calls && message.tool_calls.length > 0) {
+      const { fullContent, fullThinking, toolCalls } = await streamOllama(convo.model, workingMessages, options, res)
+
+      // Handle tool calls
+      if (toolCalls && toolCalls.length > 0) {
         workingMessages.push({
           role: 'assistant',
-          content: message.content || '',
-          tool_calls: message.tool_calls
+          content: fullContent || '',
+          tool_calls: toolCalls
         })
 
-        for (const tc of message.tool_calls) {
+        for (const tc of toolCalls) {
           const result = await executeTool(tc, res)
           workingMessages.push({
             role: 'tool',
             content: result
           })
         }
-      } else {
-        // Final response
-        const thinking = message.thinking || ''
-        const rawContent = message.content || ''
-        const thinkTagMatch = rawContent.match(/<think>([\s\S]*?)<\/think>/g)
-        const thinkFromTags = thinkTagMatch
-          ? thinkTagMatch.map(m => m.replace(/<\/?think>/g, '')).join('\n\n')
-          : ''
-        const cleanResponse = rawContent.replace(/<think>[\s\S]*?<\/think>/g, '').trim()
-        const allThinking = [thinking, thinkFromTags].filter(Boolean).join('\n\n')
-
-        if (allThinking.trim()) {
-          res.write(`data: ${JSON.stringify({ think: allThinking })}\n\n`)
-        }
-
-        const chunkSize = 20
-        for (let i = 0; i < cleanResponse.length; i += chunkSize) {
-          const t = cleanResponse.slice(i, i + chunkSize)
-          res.write(`data: ${JSON.stringify({ token: t })}\n\n`)
-        }
-
-        db.prepare('INSERT INTO messages (conversation_id, role, content) VALUES (?, ?, ?)')
-          .run(convo.id, 'assistant', cleanResponse)
-        res.write(`data: ${JSON.stringify({ done: true })}\n\n`)
-        break
+        continue // Next iteration with tool results
       }
+
+      // Final response — extract thinking from tags if native thinking is empty
+      const THINK_TAG_RE = /<think>([\s\S]*?)<\/think>/g
+      const thinkTagMatch = fullContent.match(THINK_TAG_RE)
+      let cleanResponse = fullContent.replace(THINK_TAG_RE, '').trim()
+
+      // Deduplicate: prefer native thinking, only fall back to tags
+      let allThinking = fullThinking.trim()
+      if (!allThinking && thinkTagMatch) {
+        allThinking = thinkTagMatch.map(m => m.replace(/<\/?think>/g, '').trim()).filter(Boolean).join('\n\n')
+      }
+
+      // Thinking was already streamed token-by-token above, so we don't need to resend it
+      // Just send the final "done" signal
+
+      db.prepare('INSERT INTO messages (conversation_id, role, content) VALUES (?, ?, ?)')
+        .run(convo.id, 'assistant', cleanResponse)
+
+      res.write(`data: ${JSON.stringify({ done: true })}\n\n`)
+
+      // Auto-update memory periodically (non-blocking)
+      updateMemory(req.session.userId, convo.id, convo.model).catch(err => console.error('Memory update failed:', err.message))
+
+      break
     }
 
     if (iterations >= MAX_TOOL_ITERATIONS) {

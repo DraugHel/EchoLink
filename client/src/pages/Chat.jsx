@@ -132,11 +132,13 @@ export default function Chat({ user, onLogout }) {
 
     const userId = `u_${Date.now()}_${Math.random().toString(36).slice(2)}`
     const assistantId = `a_${Date.now()}_${Math.random().toString(36).slice(2)}`
+    // Track pending actions for this response
+    const responseActions = []
     setMessages(prev => [
       ...prev,
       // On regenerate (skipSave=true), don't add user message to UI again
       ...(skipSave ? [] : [{ id: userId, role: 'user', content, images: attachmentsToSend.length > 0 ? JSON.stringify(attachmentsToSend) : '' }]),
-      { id: assistantId, role: 'assistant', content: '', think: '', streaming: true }
+      { id: assistantId, role: 'assistant', content: '', think: '', streaming: true, actionRequests: [] }
     ])
     setStreaming(true)
 
@@ -198,6 +200,13 @@ export default function Chat({ user, onLogout }) {
                 m.id === assistantId ? { ...m, content: `Error: ${json.error}`, streaming: false } : m
               ))
             }
+            if (json.actionRequest) {
+              const action = { actionId: json.actionId, description: json.description, command: json.command, type: json.type }
+              responseActions.push(action)
+              setMessages(prev => prev.map(m =>
+                m.id === assistantId ? { ...m, actionRequests: [...(m.actionRequests || []), action] } : m
+              ))
+            }
           } catch {}
         }
       }
@@ -216,6 +225,42 @@ export default function Chat({ user, onLogout }) {
       setStreaming(false)
       abortControllerRef.current = null
       loadConversations()
+      // Refocus input so user can keep typing without clicking
+      setTimeout(() => textareaRef.current?.focus(), 0)
+    }
+  }
+
+  async function handleActionApprove(actionId, actionRequest) {
+    try {
+      await fetch('/api/hermes/action/' + actionId + '/approve', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ conversationId: activeConvo.id })
+      })
+      // Reload messages to show the result
+      if (activeConvo) {
+        const msgs = await api.get('/api/conversations/' + activeConvo.id + '/messages')
+        setMessages(msgs)
+      }
+    } catch (err) {
+      console.error('Approve error:', err)
+    }
+  }
+
+  async function handleActionDeny(actionId) {
+    try {
+      await fetch('/api/hermes/action/' + actionId + '/deny', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ conversationId: activeConvo.id })
+      })
+      // Reload messages to show the denial
+      if (activeConvo) {
+        const msgs = await api.get('/api/conversations/' + activeConvo.id + '/messages')
+        setMessages(msgs)
+      }
+    } catch (err) {
+      console.error('Deny error:', err)
     }
   }
 
@@ -354,7 +399,18 @@ export default function Chat({ user, onLogout }) {
           )}
 
           {activeConvo && !loading && messages.map(m => (
-            <Message key={m.id} role={m.role} content={m.content} streaming={m.streaming} images={m.images} think={m.think} toolStatus={m.toolStatus} />
+            <Message
+              key={m.id}
+              role={m.role}
+              content={m.content}
+              streaming={m.streaming}
+              images={m.images}
+              think={m.think}
+              toolStatus={m.toolStatus}
+              actionRequest={m.actionRequests?.[0]}
+              onApprove={m.actionRequests?.[0] ? () => handleActionApprove(m.actionRequests[0].actionId, m.actionRequests[0]) : undefined}
+              onDeny={m.actionRequests?.[0] ? () => handleActionDeny(m.actionRequests[0].actionId) : undefined}
+            />
           ))}
 
           {activeConvo && !loading && messages.length === 0 && (

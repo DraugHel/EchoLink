@@ -4,9 +4,10 @@ import remarkGfm from 'remark-gfm'
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism'
 
-export default function Message({ role, content, streaming, images, think, toolStatus }) {
+export default function Message({ role, content, streaming, images, think, toolStatus, actionRequest, onApprove, onDeny }) {
   const [thinkOpen, setThinkOpen] = useState(false)
   const [copied, setCopied] = useState(false)
+  const [actionState, setActionState] = useState(null) // null | 'approved' | 'denied'
   let parsedAttachments = []
   if (images) {
     try {
@@ -20,6 +21,16 @@ export default function Message({ role, content, streaming, images, think, toolS
   const imgAttachments = parsedAttachments.filter(a => a.kind === 'image')
   const fileAttachments = parsedAttachments.filter(a => a.kind !== 'image')
   const isUser = role === 'user'
+
+  function handleApprove() {
+    setActionState('approved')
+    if (onApprove) onApprove()
+  }
+
+  function handleDeny() {
+    setActionState('denied')
+    if (onDeny) onDeny()
+  }
 
   return (
     <div style={{ ...styles.wrap, justifyContent: isUser ? 'flex-end' : 'flex-start' }} className="fade-in">
@@ -64,6 +75,36 @@ export default function Message({ role, content, streaming, images, think, toolS
                 <div style={styles.toolStatus}>
                   <span style={styles.toolDot} />
                   {toolStatus}
+                </div>
+              )}
+              {actionRequest && !actionState && (
+                <div style={styles.actionCard}>
+                  <div style={styles.actionHeader}>
+                    <ShieldIcon />
+                    <span style={styles.actionTitle}>Action requires approval</span>
+                  </div>
+                  <p style={styles.actionDesc}>{actionRequest.description}</p>
+                  {actionRequest.command && (
+                    <code style={styles.actionCmd}>{actionRequest.command}</code>
+                  )}
+                  <div style={styles.actionBtns}>
+                    <button style={styles.approveBtn} onClick={handleApprove}>
+                      <CheckIcon2 /> Approve
+                    </button>
+                    <button style={styles.denyBtn} onClick={handleDeny}>
+                      <XIcon2 /> Deny
+                    </button>
+                  </div>
+                </div>
+              )}
+              {actionState === 'approved' && (
+                <div style={{ ...styles.actionCard, borderLeft: '3px solid var(--green)' }}>
+                  <span style={{ color: 'var(--green)', fontWeight: 600 }}>Approved</span>
+                </div>
+              )}
+              {actionState === 'denied' && (
+                <div style={{ ...styles.actionCard, borderLeft: '3px solid var(--danger)' }}>
+                  <span style={{ color: 'var(--danger)', fontWeight: 600 }}>Denied</span>
                 </div>
               )}
               <div style={styles.msgHeader}>
@@ -132,6 +173,22 @@ export default function Message({ role, content, streaming, images, think, toolS
     </div>
   )
 }
+
+const ShieldIcon = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+  </svg>
+)
+const CheckIcon2 = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points="20 6 9 17 4 12"/>
+  </svg>
+)
+const XIcon2 = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+  </svg>
+)
 
 const CopyIcon = () => (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -253,6 +310,53 @@ const styles = {
     width: 6, height: 6, borderRadius: '50%',
     background: 'var(--accent)',
     animation: 'pulse 1.4s ease-in-out infinite'
+  },
+  actionCard: {
+    marginBottom: 10, padding: '10px 12px',
+    borderRadius: 8,
+    border: '1px solid var(--border)',
+    borderLeft: '3px solid var(--accent)',
+    background: 'var(--bg4)'
+  },
+  actionHeader: {
+    display: 'flex', alignItems: 'center', gap: 8,
+    marginBottom: 6
+  },
+  actionTitle: {
+    fontWeight: 600, fontSize: 13,
+    color: 'var(--accent)', fontFamily: 'var(--font-mono)'
+  },
+  actionDesc: {
+    margin: 0, fontSize: 13, color: 'var(--text2)',
+    marginBottom: 8
+  },
+  actionCmd: {
+    display: 'block',
+    padding: '6px 10px', borderRadius: 6,
+    background: 'var(--bg3)', fontSize: 12,
+    fontFamily: 'var(--font-mono)',
+    color: 'var(--text2)',
+    marginBottom: 10,
+    wordBreak: 'break-all'
+  },
+  actionBtns: {
+    display: 'flex', gap: 8
+  },
+  approveBtn: {
+    display: 'inline-flex', alignItems: 'center', gap: 5,
+    padding: '6px 14px', borderRadius: 6,
+    background: 'var(--green-bg)', color: 'var(--green)',
+    border: '1px solid var(--green-dim)',
+    fontSize: 12, fontWeight: 600, cursor: 'pointer',
+    fontFamily: 'var(--font-mono)', transition: 'all var(--transition)'
+  },
+  denyBtn: {
+    display: 'inline-flex', alignItems: 'center', gap: 5,
+    padding: '6px 14px', borderRadius: 6,
+    background: 'transparent', color: 'var(--danger)',
+    border: '1px solid var(--danger)',
+    fontSize: 12, fontWeight: 600, cursor: 'pointer',
+    fontFamily: 'var(--font-mono)', transition: 'all var(--transition)'
   },
   msgHeader: {
     display: 'flex', justifyContent: 'flex-end',
