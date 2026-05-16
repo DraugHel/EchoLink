@@ -24,6 +24,8 @@ export default function Chat({ user, onLogout }) {
   const [showSettings, setShowSettings] = useState(false)
   const [mobileSidebar, setMobileSidebar] = useState(false)
   const [availableModels, setAvailableModels] = useState([])
+  const [agentMode, setAgentMode] = useState(false)
+  const [agentEnabled, setAgentEnabled] = useState(false)
   const [attachments, setAttachments] = useState([])  // array of {filename, originalName, size, kind}
   const [uploading, setUploading] = useState(false)
   const fileInputRef = useRef(null)
@@ -54,6 +56,7 @@ export default function Chat({ user, onLogout }) {
   }, [mobileSidebar])
 
   useEffect(() => {
+    api.get("/api/hermes/access").then(d => setAgentEnabled(d.enabled)).catch(() => {})
     loadConversations().then(convos => {
       if (convos && convos.length > 0) selectConvo(convos[0])
     })
@@ -84,7 +87,7 @@ export default function Chat({ user, onLogout }) {
   }
 
   async function createConvo() {
-    if (activeConvo) {
+    if (activeConvo && !agentMode) {
       try { await api.post(`/api/memory/update/${activeConvo.id}`, {}) } catch {}
     }
     const firstModel = availableModels[0] || null
@@ -143,7 +146,8 @@ export default function Chat({ user, onLogout }) {
     abortControllerRef.current = new AbortController()
 
     try {
-      const response = await fetch(`/api/chat/${activeConvo.id}`, {
+      const endpoint = agentMode ? `/api/hermes/${activeConvo.id}` : `/api/chat/${activeConvo.id}`
+      const response = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ content, attachments: attachmentsToSend, skipSave }),
@@ -302,6 +306,23 @@ export default function Chat({ user, onLogout }) {
           <span style={styles.convoTitle}>
             {activeConvo ? activeConvo.title : 'EchoLink'}
           </span>
+          {agentEnabled && (
+            <button
+              style={{
+                display: "inline-flex", alignItems: "center", gap: 4,
+                padding: "6px 10px", borderRadius: 8,
+                border: "1px solid " + (agentMode ? "var(--accent)" : "var(--border)"),
+                background: agentMode ? "var(--accent)" : "transparent",
+                color: agentMode ? "var(--user-text, #0d0d0d)" : "var(--text2)",
+                fontSize: 12, fontWeight: 600, cursor: "pointer",
+                fontFamily: "var(--font-mono)", transition: "all var(--transition)"
+              }}
+              onClick={() => setAgentMode(m => !m)}
+              title={agentMode ? "Agent mode ON" : "Agent mode OFF"}
+            >
+              <BoltIcon /> Agent
+            </button>
+          )}
           <ThemePicker />
           {activeConvo && (
             <button style={styles.settingsBtn} onClick={() => setShowSettings(true)} title="Settings">
@@ -428,6 +449,11 @@ const FileIcon = () => (
 const AttachIcon = () => (
   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
+  </svg>
+)
+const BoltIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style={{ marginRight: 4, verticalAlign: -2 }}>
+    <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
   </svg>
 )
 const MenuIcon = () => (
