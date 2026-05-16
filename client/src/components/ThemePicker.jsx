@@ -4,6 +4,7 @@ const THEMES = [
   { id: 'echolink', label: 'EchoLink', color: '#2ecc71', bg: '#0d0d0d' },
   { id: 'sakura',   label: 'Sakura',   color: '#f472b6', bg: '#0f0a0d' },
   { id: 'void',     label: 'Void',     color: '#a78bfa', bg: '#080808' },
+  { id: 'blossom',  label: 'Blossom',  color: '#c2185b', bg: '#fdf6f9' },
 ]
 
 function applyTheme(id) {

@@ -57,8 +57,27 @@ html.theme-void {
   --user-text:   #ede9fe;
 }
 
+/* ── Blossom (light) ── */
+html.theme-blossom {
+  --bg:        #fdf6f9;
+  --bg2:       #f7edf3;
+  --bg3:       #efe0ea;
+  --bg4:       #e8d0e2;
+  --border:    #d9bdd0;
+  --border2:   #c9a8be;
+  --accent:     #c2185b;
+  --accent-dim: #880e4f;
+  --accent-bg:  rgba(194,24,91,0.08);
+  --text:      #2d1a24;
+  --text2:     #7a4a62;
+  --text3:     #b08898;
+  --danger:    #d32f2f;
+  --user-bubble: #c2185b;
+  --user-text:   #fff0f5;
+}
+
 /* Rename green vars to accent for backward compat */
-:root, html.theme-sakura, html.theme-void {
+:root, html.theme-sakura, html.theme-void, html.theme-blossom {
   --green:      var(--accent);
   --green-dim:  var(--accent-dim);
   --green-bg:   var(--accent-bg);
