@@ -5,7 +5,6 @@ export default function Sidebar({ conversations, activeId, onSelect, onCreate, o
   const [editingId, setEditingId] = useState(null)
   const [editTitle, setEditTitle] = useState('')
   const [hoverId, setHoverId] = useState(null)
-  const [creating, setCreating] = useState(false)
 
   function startEdit(e, c) {
     e.stopPropagation()
@@ -28,7 +27,7 @@ export default function Sidebar({ conversations, activeId, onSelect, onCreate, o
   return (
     <>
       {/* Overlay for mobile */}
-      {mobileOpen && (
+      {mobileOpen && mobile && (
         <div
           onClick={onMobileClose}
           style={{
