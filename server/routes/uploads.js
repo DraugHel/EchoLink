@@ -40,7 +40,7 @@ const storage = multer.diskStorage({
 
 const upload = multer({
   storage,
-  limits: { fileSize: 20 * 1024 * 1024 }, // 20 MB
+  limits: { fileSize: 100 * 1024 * 1024 }, // 100 MB
   fileFilter: (req, file, cb) => {
     const ext = path.extname(file.originalname).toLowerCase()
     if (IMAGE_TYPES.test(file.mimetype) || TEXT_EXTS.has(ext) || ext === '.pdf' || ['.zip','.tar','.gz','.7z','.rar','.docx','.xlsx','.xls','.pptx'].includes(ext)) {

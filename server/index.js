@@ -29,7 +29,7 @@ try {
 } catch {}
 
 const app = express()
-app.use(express.json())
+app.use(express.json({ limit: '100mb' }))
 
 // Sessions stored in SQLite
 app.use(session({
