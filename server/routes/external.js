@@ -34,21 +34,12 @@ router.post('/briefing', requireApiKey, async (req, res) => {
 
   const model = req.body.model || process.env.DEFAULT_MODEL || 'glm-5.1:cloud'
 
-  // Create conversation
-  const convoResult = db.prepare(`
-    INSERT INTO conversations (user_id, title, model, system_prompt, temperature, top_k, top_p)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-  `).run(
-    userId,
-    title || 'Morning Briefing',
-    model,
-    '',
-    0.7,
-    40,
-    0.9
-  )
-
-  const convo = db.prepare('SELECT * FROM conversations WHERE id = ?').get(convoResult.lastInsertRowid)
+  // Always post to the fixed Loomy conversation (id 21)
+  const LOOMY_CONVO_ID = 21
+  const convo = db.prepare('SELECT * FROM conversations WHERE id = ?').get(LOOMY_CONVO_ID)
+  if (!convo) {
+    return res.status(404).json({ error: 'Loomy conversation not found' })
+  }
 
   // Insert briefing as assistant message
   const msgResult = db.prepare(`
