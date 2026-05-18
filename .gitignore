@@ -3,4 +3,6 @@ dist/
 data/*.db
 data/*.db-journal
 .env
-*.log
+*.logdata/*.db-shm
+data/*.db-wal
+data/uploads/
