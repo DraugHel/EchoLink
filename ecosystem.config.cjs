@@ -6,6 +6,7 @@ module.exports = {
     env: {
       PORT: 3000,
       SESSION_SECRET: 'aender-mich',
+      ECHO_API_KEY: '3ee7d1f6015f1bde4bc4570029087c733d60edd9308fdd43a0e489de27038a88',
       DEFAULT_SYSTEM_PROMPT: `You are Echo, an AI assistant — relaxed, direct, no filler.
 
 Talk like a smart friend, not a service bot. No "Certainly!", no "Great question!", no "I'd be happy to help!" Just answer.

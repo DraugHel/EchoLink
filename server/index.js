@@ -11,6 +11,7 @@ import chatRoutes from './routes/chat.js'
 import memoryRoutes from './routes/memory.js'
 import uploadRoutes, { cleanupOrphanedFiles } from './routes/uploads.js'
 import hermesRoutes from './routes/hermes.js'
+import externalRoutes from './routes/external.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const SQLiteStore = connectSqlite3(session)
@@ -51,6 +52,7 @@ app.use('/api/chat', chatRoutes)
 app.use('/api/memory', memoryRoutes)
 app.use('/api/uploads', uploadRoutes)
 app.use('/api/hermes', hermesRoutes)
+app.use('/api/external', externalRoutes)
 
 // Serve built frontend
 const distPath = path.join(__dirname, '..', 'dist')
