@@ -8,7 +8,7 @@ const API_KEY = process.env.ECHO_API_KEY || 'echolink-external-key'
 
 // API Key auth — X-API-Key header or api_key query param
 const requireApiKey = (req, res, next) => {
-  const key = req.headers['x-api-key'] || req.query.api_key
+  const key = req.headers['x-api-key'] || req.headers['x-external-api-key'] || req.query.api_key
   if (!key || key !== API_KEY) {
     return res.status(401).json({ error: 'Invalid API key' })
   }

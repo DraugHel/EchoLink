@@ -25,7 +25,7 @@ export default function Chat({ user, onLogout }) {
   const [mobileSidebar, setMobileSidebar] = useState(false)
   const [availableModels, setAvailableModels] = useState([])
   const [attachments, setAttachments] = useState([])
-  const [agentMode, setAgentMode] = useState(false)
+  const [agentMode, setAgentMode] = useState(true)
   const [agentEnabled, setAgentEnabled] = useState(false)  // array of {filename, originalName, size, kind}
   const [uploading, setUploading] = useState(false)
   const fileInputRef = useRef(null)
