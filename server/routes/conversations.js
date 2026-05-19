@@ -40,7 +40,7 @@ router.post('/', requireAuth, (req, res) => {
     title || 'New Conversation',
     model || process.env.DEFAULT_MODEL || 'glm-5.1:cloud',
     effectivePrompt,
-    temperature ?? 0.7,
+    temperature ?? 0.5,
     top_k ?? 40,
     top_p ?? 0.9
   )
