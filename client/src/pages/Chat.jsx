@@ -192,7 +192,7 @@ export default function Chat({ user, onLogout }) {
             }
             if (json.done) {
               setMessages(prev => prev.map(m =>
-                m.id === assistantId ? { ...m, streaming: false } : m
+                m.id === assistantId ? { ...m, streaming: false, tokens: json.tokens || m.tokens } : m
               ))
             }
             if (json.error) {
@@ -408,6 +408,7 @@ export default function Chat({ user, onLogout }) {
               think={m.think}
               toolStatus={m.toolStatus}
               actionRequest={m.actionRequests?.[0]}
+              tokens={m.tokens}
               onApprove={m.actionRequests?.[0] ? () => handleActionApprove(m.actionRequests[0].actionId, m.actionRequests[0]) : undefined}
               onDeny={m.actionRequests?.[0] ? () => handleActionDeny(m.actionRequests[0].actionId) : undefined}
             />

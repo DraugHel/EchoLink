@@ -55,6 +55,7 @@ async function streamOllama(model, messages, options, res) {
   let fullContent = ''
   let fullThinking = ''
   let toolCalls = null
+  let tokenUsage = null
 
   const reader = r.body.getReader()
   const decoder = new TextDecoder()
@@ -74,9 +75,15 @@ async function streamOllama(model, messages, options, res) {
         const data = JSON.parse(line)
 
         if (data.done) {
-          // Final event — may contain tool calls
+          // Final event — may contain tool calls and token usage
           if (data.message?.tool_calls && data.message.tool_calls.length > 0) {
             toolCalls = data.message.tool_calls
+          }
+          // Extract token usage from Ollama's final event
+          tokenUsage = {
+            promptTokens: data.prompt_eval_count ?? null,
+            completionTokens: data.eval_count ?? null,
+            totalTokens: (data.prompt_eval_count ?? 0) + (data.eval_count ?? 0) || null
           }
           break
         }
@@ -101,7 +108,7 @@ async function streamOllama(model, messages, options, res) {
     }
   }
 
-  return { fullContent, fullThinking, toolCalls }
+  return { fullContent, fullThinking, toolCalls, tokenUsage }
 }
 
 // Auto-update memory after response (direct function call instead of HTTP)
@@ -231,7 +238,7 @@ router.post('/:conversationId', requireAuth, async (req, res) => {
     while (iterations < MAX_TOOL_ITERATIONS) {
       iterations++
 
-      const { fullContent, fullThinking, toolCalls } = await streamOllama(convo.model, workingMessages, options, res)
+      const { fullContent, fullThinking, toolCalls, tokenUsage } = await streamOllama(convo.model, workingMessages, options, res)
 
       // Handle tool calls
       if (toolCalls && toolCalls.length > 0) {
@@ -268,7 +275,7 @@ router.post('/:conversationId', requireAuth, async (req, res) => {
       db.prepare('INSERT INTO messages (conversation_id, role, content) VALUES (?, ?, ?)')
         .run(convo.id, 'assistant', cleanResponse)
 
-      res.write(`data: ${JSON.stringify({ done: true })}\n\n`)
+      res.write(`data: ${JSON.stringify({ done: true, ...(tokenUsage ? { tokens: tokenUsage } : {}) })}\n\n`)
 
       // Auto-update memory periodically (non-blocking)
       updateMemory(req.session.userId, convo.id, convo.model).catch(err => console.error('Memory update failed:', err.message))
