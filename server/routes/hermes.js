@@ -47,18 +47,6 @@ router.post('/:conversationId', requireAuth, requireAgentAccess, async (req, res
     WHERE conversation_id = ? ORDER BY created_at ASC
   `).all(convo.id)
 
-  // Inject user memory into system prompt (same as chat.js)
-  const user = db.prepare('SELECT memory FROM users WHERE id = ?').get(req.session.userId)
-  const memory = user?.memory || ''
-  let systemContent = convo.system_prompt || ''
-  if (memory) {
-    systemContent = systemContent
-      ? systemContent + '\n\n[What you know about the user from past conversations:\n' + memory + ']'
-      : '[What you know about the user from past conversations:\n' + memory + ']'
-  }
-
-  const messages = []
-  if (systemContent) messages.push({ role: 'system', content: systemContent })
   messages.push(...history.map(m => ({ role: m.role, content: m.content })))
 
   res.setHeader('Content-Type', 'text/event-stream')
