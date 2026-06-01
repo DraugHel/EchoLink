@@ -1,4 +1,5 @@
 import { Router } from 'express'
+import fs from 'fs'
 import { exec } from 'child_process'
 import { randomUUID } from 'crypto'
 import db from '../db.js'
@@ -34,21 +35,56 @@ router.post('/:conversationId', requireAuth, requireAgentAccess, async (req, res
     .get(req.params.conversationId, req.session.userId)
   if (!convo) return res.status(404).json({ error: 'Not found' })
 
-  const { content } = req.body
-  if (!content?.trim()) return res.status(400).json({ error: 'Empty message' })
+  const { content, attachments } = req.body
+  if (!content?.trim() && (!attachments || attachments.length === 0)) return res.status(400).json({ error: 'Empty message' })
 
   // Save user message
-  db.prepare('INSERT INTO messages (conversation_id, role, content) VALUES (?, ?, ?)')
-    .run(convo.id, 'user', content)
+  const attachmentsJson = attachments && attachments.length > 0 ? JSON.stringify(attachments) : ''
+  db.prepare('INSERT INTO messages (conversation_id, role, content, images) VALUES (?, ?, ?, ?)')
+    .run(convo.id, 'user', content || '', attachmentsJson)
 
   // Build conversation history for hermes
   const history = db.prepare(`
-    SELECT role, content FROM messages
+    SELECT role, content, images FROM messages
     WHERE conversation_id = ? ORDER BY created_at ASC
   `).all(convo.id)
 
   const messages = []
-  messages.push(...history.map(m => ({ role: m.role, content: m.content })))
+  for (const m of history) {
+    const msg = { role: m.role, content: m.content || '' }
+    if (m.images) {
+      try {
+        const items = JSON.parse(m.images)
+        const base64Images = []
+        for (const it of items) {
+          const isImg = typeof it === 'string' || it.kind === 'image'
+          if (isImg) {
+            const fn = typeof it === 'string' ? it : it.filename
+            const filepath = `/root/echolink/data/uploads/${req.session.userId}/${fn}`
+            if (fs.existsSync(filepath)) {
+              try {
+                const sharp = (await import('sharp')).default
+                const resized = await sharp(filepath)
+                  .resize({ width: 512, withoutEnlargement: true })
+                  .jpeg({ quality: 60 })
+                  .toBuffer()
+                base64Images.push(resized.toString('base64'))
+              } catch {
+                base64Images.push(fs.readFileSync(filepath).toString('base64'))
+              }
+            }
+          }
+        }
+        if (base64Images.length > 0) {
+          msg.content = [
+            { type: 'text', text: m.content || '' },
+            ...base64Images.map(b64 => ({ type: 'image_url', image_url: { url: `data:image/jpeg;base64,${b64}` } }))
+          ]
+        }
+      } catch {}
+    }
+    messages.push(msg)
+  }
 
   res.setHeader('Content-Type', 'text/event-stream')
   res.setHeader('Cache-Control', 'no-cache')
