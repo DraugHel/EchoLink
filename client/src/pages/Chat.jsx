@@ -408,7 +408,7 @@ export default function Chat({ user, onLogout }) {
               think={m.think}
               toolStatus={m.toolStatus}
               actionRequest={m.actionRequests?.[0]}
-              tokens={m.tokens}
+              usage={m.usage}
               onApprove={m.actionRequests?.[0] ? () => handleActionApprove(m.actionRequests[0].actionId, m.actionRequests[0]) : undefined}
               onDeny={m.actionRequests?.[0] ? () => handleActionDeny(m.actionRequests[0].actionId) : undefined}
             />

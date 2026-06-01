@@ -164,7 +164,7 @@ export function cleanupOrphanedFiles() {
 
     // Get all referenced filenames from DB for this user
     const referenced = new Set()
-    const messages = db.prepare('SELECT images FROM messages WHERE images != "" AND images IS NOT NULL').all()
+    const messages = db.prepare("SELECT images FROM messages WHERE images IS NOT NULL AND images != ''").all()
     for (const msg of messages) {
       try {
         const items = JSON.parse(msg.images)

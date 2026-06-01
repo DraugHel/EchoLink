@@ -168,6 +168,11 @@ router.post('/:conversationId', requireAuth, requireAgentAccess, async (req, res
             continue
           }
 
+          // Token usage in final chunk
+          if (json.usage) {
+            res.write('data: ' + JSON.stringify({ usage: json.usage }) + '\n\n')
+          }
+
           // Standard chat completion chunk
           const delta = json.choices?.[0]?.delta?.content
           if (delta) {

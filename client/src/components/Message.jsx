@@ -4,7 +4,7 @@ import remarkGfm from 'remark-gfm'
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism'
 
-export default function Message({ role, content, streaming, images, think, toolStatus, actionRequest, onApprove, onDeny }) {
+export default function Message({ role, content, streaming, images, think, toolStatus, actionRequest, onApprove, onDeny, usage }) {
   const [thinkOpen, setThinkOpen] = useState(false)
   const [copied, setCopied] = useState(false)
   const [actionState, setActionState] = useState(null) // null | 'approved' | 'denied'
@@ -166,6 +166,11 @@ export default function Message({ role, content, streaming, images, think, toolS
                 {content}
               </ReactMarkdown>
               {streaming && <span style={styles.cursor} />}
+              {!streaming && usage && (
+                <div style={{ fontSize: 10, color: 'var(--text3)', marginTop: 6, fontFamily: 'var(--font-mono)' }}>
+                  {usage.prompt_tokens} in→{usage.completion_tokens} out ({usage.total_tokens} total)
+                </div>
+              )}
             </div>
           )
         }
