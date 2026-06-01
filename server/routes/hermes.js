@@ -169,7 +169,9 @@ router.post('/:conversationId', requireAuth, requireAgentAccess, async (req, res
           }
 
           // Token usage in final chunk
+          console.log('[hermes] json keys:', Object.keys(json))
           if (json.usage) {
+            console.log('[hermes] usage:', JSON.stringify(json.usage))
             res.write('data: ' + JSON.stringify({ usage: json.usage }) + '\n\n')
           }
 

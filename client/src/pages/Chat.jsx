@@ -190,6 +190,11 @@ export default function Chat({ user, onLogout }) {
                 m.id === assistantId ? { ...m, content: assistantContent, toolStatus: null } : m
               ))
             }
+            if (json.usage) {
+              setMessages(prev => prev.map(m =>
+                m.id === assistantId ? { ...m, usage: json.usage } : m
+              ))
+            }
             if (json.done) {
               setMessages(prev => prev.map(m =>
                 m.id === assistantId ? { ...m, streaming: false, tokens: json.tokens || m.tokens } : m
