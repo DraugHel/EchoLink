@@ -47,6 +47,7 @@ router.post('/:conversationId', requireAuth, requireAgentAccess, async (req, res
     WHERE conversation_id = ? ORDER BY created_at ASC
   `).all(convo.id)
 
+  const messages = []
   messages.push(...history.map(m => ({ role: m.role, content: m.content })))
 
   res.setHeader('Content-Type', 'text/event-stream')
