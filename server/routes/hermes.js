@@ -89,7 +89,7 @@ router.post('/:conversationId', requireAuth, requireAgentAccess, async (req, res
   // Inject SOUL.md after chat history as a reminder
   try {
     const soulContent = fs.readFileSync('/root/.hermes/SOUL.md', 'utf-8')
-    if (soulContent) messages.push({ role: 'system', content: soulContent })
+      if (soulContent) messages.push({ role: 'system', content: soulContent })
   } catch {}
 
   res.setHeader('Content-Type', 'text/event-stream')
@@ -175,9 +175,7 @@ router.post('/:conversationId', requireAuth, requireAgentAccess, async (req, res
           }
 
           // Token usage in final chunk
-          console.log('[hermes] json keys:', Object.keys(json))
           if (json.usage) {
-            console.log('[hermes] usage:', JSON.stringify(json.usage))
             res.write('data: ' + JSON.stringify({ usage: json.usage }) + '\n\n')
           }
 
