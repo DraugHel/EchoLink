@@ -86,6 +86,12 @@ router.post('/:conversationId', requireAuth, requireAgentAccess, async (req, res
     messages.push(msg)
   }
 
+  // Inject SOUL.md after chat history as a reminder
+  try {
+    const soulContent = fs.readFileSync('/root/.hermes/SOUL.md', 'utf-8')
+    if (soulContent) messages.push({ role: 'system', content: soulContent })
+  } catch {}
+
   res.setHeader('Content-Type', 'text/event-stream')
   res.setHeader('Cache-Control', 'no-cache')
   res.setHeader('Connection', 'keep-alive')
