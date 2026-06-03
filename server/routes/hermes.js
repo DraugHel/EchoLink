@@ -189,9 +189,11 @@ router.post('/:conversationId', requireAuth, requireAgentAccess, async (req, res
       }
     }
 
+    console.log('[hermes] saving response, length:', fullResponse.length)
     db.prepare('INSERT INTO messages (conversation_id, role, content) VALUES (?, ?, ?)')
       .run(convo.id, 'assistant', fullResponse)
     res.write('data: ' + JSON.stringify({ done: true }) + '\n\n')
+    console.log('[hermes] done sent')
   } catch (err) {
     console.error('Hermes error:', err)
     res.write('data: ' + JSON.stringify({ error: err.message }) + '\n\n')
