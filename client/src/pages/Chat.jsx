@@ -231,6 +231,10 @@ export default function Chat({ user, onLogout }) {
       }
     } finally {
       setStreaming(false)
+      // Always clear per-message streaming flag — done event may not arrive
+      setMessages(prev => prev.map(m =>
+        m.id === assistantId ? { ...m, streaming: false } : m
+      ))
       abortControllerRef.current = null
       loadConversations()
       // Refocus input so user can keep typing without clicking
