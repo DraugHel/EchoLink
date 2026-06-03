@@ -158,13 +158,16 @@ export default function Chat({ user, onLogout }) {
 
       const reader = response.body.getReader()
       const decoder = new TextDecoder()
+      let sseBuffer = ''
 
       while (true) {
         const { done, value } = await reader.read()
         if (done) break
-        const chunk = decoder.decode(value, { stream: true })
-        const lines = chunk.split('\n').filter(l => l.startsWith('data: '))
-        for (const line of lines) {
+        sseBuffer += decoder.decode(value, { stream: true })
+        const lines = sseBuffer.split('\n')
+        sseBuffer = lines.pop() || ''
+        const dataLines = lines.filter(l => l.startsWith('data: '))
+        for (const line of dataLines) {
           try {
             const json = JSON.parse(line.slice(6))
             if (json.tool) {
