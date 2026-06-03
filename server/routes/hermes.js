@@ -174,16 +174,16 @@ router.post('/:conversationId', requireAuth, requireAgentAccess, async (req, res
             continue
           }
 
-          // Token usage in final chunk
-          if (json.usage) {
-            res.write('data: ' + JSON.stringify({ usage: json.usage }) + '\n\n')
-          }
-
-          // Standard chat completion chunk
+          // Standard chat completion chunk — send FIRST
           const delta = json.choices?.[0]?.delta?.content
           if (delta) {
             fullResponse += delta
             res.write('data: ' + JSON.stringify({ token: delta }) + '\n\n')
+          }
+
+          // Token usage AFTER content
+          if (json.usage) {
+            res.write('data: ' + JSON.stringify({ usage: json.usage }) + '\n\n')
           }
         } catch {}
       }
