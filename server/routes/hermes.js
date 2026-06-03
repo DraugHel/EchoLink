@@ -137,17 +137,11 @@ router.post('/:conversationId', requireAuth, requireAgentAccess, async (req, res
         try {
           const json = JSON.parse(data)
 
-          // Hermes custom tool progress event
-          if (json.object === 'hermes.tool.progress' || json.event === 'hermes.tool.progress') {
-            const toolName = json.tool || 'tool'
-            res.write('data: ' + JSON.stringify({ tool: toolName, status: 'running', query: json.input || json.arguments || '' }) + '\n\n')
-            continue
-          }
-
-          // Hermes tool result/completion event
-          if (json.object === 'hermes.tool.result' || json.event === 'hermes.tool.result') {
-            const toolName = json.tool || 'tool'
-            res.write('data: ' + JSON.stringify({ tool: toolName, status: 'done', result: json.result || '' }) + '\n\n')
+          // Hermes tool event — detected by presence of json.tool + json.status
+          if (json.tool && json.status) {
+            const toolName = json.tool
+            const status = json.status === 'completed' || json.status === 'done' ? 'done' : 'running'
+            res.write('data: ' + JSON.stringify({ tool: toolName, status, query: json.label || '' }) + '\n\n')
             continue
           }
 
