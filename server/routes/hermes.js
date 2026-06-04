@@ -3,6 +3,7 @@ import fs from 'fs'
 import { exec } from 'child_process'
 import { randomUUID } from 'crypto'
 import db from '../db.js'
+import { extractTextFromFile } from './uploads.js'
 
 const router = Router()
 const HERMES_URL = process.env.HERMES_URL || 'http://localhost:8642'
@@ -56,6 +57,7 @@ router.post('/:conversationId', requireAuth, requireAgentAccess, async (req, res
       try {
         const items = JSON.parse(m.images)
         const base64Images = []
+        const textParts = []
         for (const it of items) {
           const isImg = typeof it === 'string' || it.kind === 'image'
           if (isImg) {
@@ -73,8 +75,17 @@ router.post('/:conversationId', requireAuth, requireAgentAccess, async (req, res
                 base64Images.push(fs.readFileSync(filepath).toString('base64'))
               }
             }
+          } else {
+            try {
+              const text = await extractTextFromFile(req.session.userId, it.filename, it.originalName)
+              if (text) {
+                const truncated = text.length > 50000 ? text.slice(0, 50000) + '\n...[truncated]' : text
+                textParts.push(`--- File: ${it.originalName} ---\n${truncated}`)
+              }
+            } catch {}
           }
         }
+        if (textParts.length > 0) msg.content = (msg.content ? msg.content + '\n\n' : '') + textParts.join('\n\n')
         if (base64Images.length > 0) {
           msg.content = [
             { type: 'text', text: m.content || '' },
@@ -89,7 +100,7 @@ router.post('/:conversationId', requireAuth, requireAgentAccess, async (req, res
   // Inject SOUL.md after chat history as a reminder
   try {
     const soulContent = fs.readFileSync('/root/.hermes/SOUL.md', 'utf-8')
-      if (soulContent) messages.push({ role: 'system', content: soulContent })
+    if (soulContent) messages.push({ role: 'system', content: soulContent })
   } catch {}
 
   res.setHeader('Content-Type', 'text/event-stream')
@@ -104,7 +115,7 @@ router.post('/:conversationId', requireAuth, requireAgentAccess, async (req, res
         'Authorization': 'Bearer ' + HERMES_KEY
       },
       body: JSON.stringify({
-        model: convo.model || 'hermes-agent',
+        model: 'hermes-agent',
         messages,
         stream: true
       })
@@ -123,7 +134,10 @@ router.post('/:conversationId', requireAuth, requireAgentAccess, async (req, res
 
     while (true) {
       const { done, value } = await reader.read()
-      if (done) break
+      if (done) {
+        setImmediate(() => {}) // flush
+        break
+      }
 
       buffer += decoder.decode(value, { stream: true })
       const lines = buffer.split('\n')
@@ -156,7 +170,6 @@ router.post('/:conversationId', requireAuth, requireAgentAccess, async (req, res
               createdAt: Date.now()
             }
             pendingActions.set(actionId, action)
-            // Expire after 10 minutes
             setTimeout(() => pendingActions.delete(actionId), 10 * 60 * 1000)
             res.write('data: ' + JSON.stringify({
               actionRequest: true,
@@ -183,11 +196,9 @@ router.post('/:conversationId', requireAuth, requireAgentAccess, async (req, res
       }
     }
 
-    console.log('[hermes] saving response, length:', fullResponse.length)
     db.prepare('INSERT INTO messages (conversation_id, role, content) VALUES (?, ?, ?)')
       .run(convo.id, 'assistant', fullResponse)
     res.write('data: ' + JSON.stringify({ done: true }) + '\n\n')
-    console.log('[hermes] done sent')
   } catch (err) {
     console.error('Hermes error:', err)
     res.write('data: ' + JSON.stringify({ error: err.message }) + '\n\n')
@@ -214,7 +225,6 @@ router.post('/action/:actionId/approve', requireAuth, requireAgentAccess, async 
         ? 'Exit code ' + err.code + '. ' + errOutput + output
         : output || '(no output)'
 
-      // Save result as assistant message
       db.prepare('INSERT INTO messages (conversation_id, role, content) VALUES (?, ?, ?)')
         .run(conversationId, 'assistant', '**Action approved:** `' + command + '`\n```\n' + result + '\n```')
 
@@ -232,7 +242,6 @@ router.post('/action/:actionId/deny', requireAuth, requireAgentAccess, (req, res
 
   pendingActions.delete(req.params.actionId)
 
-  // Save denial as assistant message
   db.prepare('INSERT INTO messages (conversation_id, role, content) VALUES (?, ?, ?)')
     .run(action.conversationId, 'assistant', '**Action denied:** ' + action.description)
 
