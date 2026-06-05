@@ -97,6 +97,10 @@ router.post('/:conversationId', requireAuth, requireAgentAccess, async (req, res
     messages.push(msg)
   }
 
+  // Inject current time so Hermes always knows when it is
+  const now = new Date().toLocaleString('de-DE', { timeZone: 'Europe/Berlin', dateStyle: 'full', timeStyle: 'short' })
+  messages.push({ role: 'system', content: `Current time: ${now} (CET)` })
+
   // Inject SOUL.md after chat history as a reminder
   try {
     const soulContent = fs.readFileSync('/root/.hermes/SOUL.md', 'utf-8')
