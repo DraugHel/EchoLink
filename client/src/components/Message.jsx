@@ -7,6 +7,7 @@ import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism'
 export default function Message({ role, content, streaming, images, think, toolStatus, actionRequest, onApprove, onDeny, usage, id, onDelete }) {
   const [thinkOpen, setThinkOpen] = useState(false)
   const [copied, setCopied] = useState(false)
+  const [userCopied, setUserCopied] = useState(false)
   const [actionState, setActionState] = useState(null) // null | 'approved' | 'denied'
   let parsedAttachments = []
   if (images) {
@@ -47,6 +48,22 @@ export default function Message({ role, content, streaming, images, think, toolS
         {isUser
           ? (
             <>
+              <div style={{ ...styles.msgHeader, marginBottom: 4 }}>
+                {onDelete && (
+                  <button style={{ ...styles.copyBtn, color: 'rgba(13,13,13,0.4)' }}
+                    onClick={() => onDelete(id)} title="Delete message">
+                    <TrashIcon />
+                  </button>
+                )}
+                <button style={{ ...styles.copyBtn, color: userCopied ? 'var(--green)' : 'rgba(13,13,13,0.4)' }}
+                  onClick={async () => {
+                    try { await navigator.clipboard.writeText(content) }
+                    catch { const t = document.createElement('textarea'); t.value = content; document.body.appendChild(t); t.select(); document.execCommand('copy'); document.body.removeChild(t) }
+                    setUserCopied(true); setTimeout(() => setUserCopied(false), 1500)
+                  }} title="Copy message">
+                  {userCopied ? <CheckIcon /> : <CopyIcon />}
+                </button>
+              </div>
               {imgAttachments.length > 0 && (
                 <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: (content || fileAttachments.length > 0) ? 8 : 0 }}>
                   {imgAttachments.map(att => (
@@ -67,16 +84,6 @@ export default function Message({ role, content, streaming, images, think, toolS
                 </div>
               )}
               {content && <p style={styles.userText}>{content}</p>}
-              {onDelete && (
-                <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 4 }}>
-                  <button style={{ ...styles.copyBtn, color: 'rgba(13,13,13,0.4)' }}
-                    onClick={() => onDelete(id)}
-                    title="Delete message"
-                  >
-                    <TrashIcon />
-                  </button>
-                </div>
-              )}
             </>
           )
           : (
@@ -231,6 +238,7 @@ const CheckIcon = () => (
 
 function CodeBlock({ lang, code }) {
   const [copied, setCopied] = useState(false)
+  const [userCopied, setUserCopied] = useState(false)
 
   async function copy() {
     try {
