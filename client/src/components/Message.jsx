@@ -295,7 +295,7 @@ const styles = {
     background: 'var(--green-bg)', border: '1px solid var(--green-dim)',
     marginTop: 2
   },
-  bubble: { maxWidth: '80%', borderRadius: 12, padding: '12px 16px', fontSize: 15, lineHeight: 1.65 },
+  bubble: { maxWidth: '80%', borderRadius: 12, padding: '12px 16px', fontSize: 15, lineHeight: 1.65, minWidth: 0, overflow: 'hidden', wordBreak: 'break-word' },
   userBubble: {
     background: 'var(--user-bubble, var(--accent))',
     color: 'var(--user-text, #0d0d0d)',
@@ -311,7 +311,7 @@ const styles = {
     maxWidth: '100%'
   },
   userText: { margin: 0 },
-  markdown: { minWidth: 0 },
+  markdown: { minWidth: 0, overflowX: 'auto', wordBreak: 'break-word' },
   inlineCode: {
     background: 'var(--bg4)', padding: '1px 6px', borderRadius: 4,
     fontFamily: 'var(--font-mono)', fontSize: '0.88em', color: 'var(--green)'
