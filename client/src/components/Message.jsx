@@ -120,7 +120,7 @@ export default function Message({ role, content, streaming, images, think, toolS
                 </button>
                 {onDelete && (
                   <button style={{ ...styles.copyBtn, color: 'var(--text3)' }}
-                    onClick={() => { if (window.confirm('Delete?')) onDelete(id) }}
+                    onClick={() => onDelete(id)}
                     title="Delete message"
                   >
                     <TrashIcon />
