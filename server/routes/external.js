@@ -34,8 +34,8 @@ router.post('/briefing', requireApiKey, async (req, res) => {
 
   const model = req.body.model || process.env.DEFAULT_MODEL || 'glm-5.1:cloud'
 
-  // Always post to the fixed Loomy conversation (id 52)
-  const LOOMY_CONVO_ID = 52
+  // Always post to the fixed Loomy conversation (id 53)
+  const LOOMY_CONVO_ID = 53
   const convo = db.prepare('SELECT * FROM conversations WHERE id = ?').get(LOOMY_CONVO_ID)
   if (!convo) {
     return res.status(404).json({ error: 'Loomy conversation not found' })

@@ -116,4 +116,15 @@ router.delete('/:id/last-assistant', requireAuth, (req, res) => {
   res.json({ ok: true })
 })
 
+router.delete('/message/:messageId', requireAuth, (req, res) => {
+  const msg = db.prepare(`
+    SELECT messages.id FROM messages
+    JOIN conversations ON conversations.id = messages.conversation_id
+    WHERE messages.id = ? AND conversations.user_id = ?
+  `).get(req.params.messageId, req.session.userId)
+  if (!msg) return res.status(404).json({ error: 'Not found' })
+  db.prepare('DELETE FROM messages WHERE id = ?').run(req.params.messageId)
+  res.json({ success: true })
+})
+
 export default router

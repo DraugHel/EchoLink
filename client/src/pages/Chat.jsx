@@ -421,6 +421,11 @@ export default function Chat({ user, onLogout }) {
               toolStatus={m.toolStatus}
               actionRequest={m.actionRequests?.[0]}
               usage={m.usage}
+              id={m.id}
+              onDelete={async (msgId) => {
+                await api.delete(`/api/conversations/message/${msgId}`)
+                setMessages(prev => prev.filter(msg => msg.id !== msgId))
+              }}
               onApprove={m.actionRequests?.[0] ? () => handleActionApprove(m.actionRequests[0].actionId, m.actionRequests[0]) : undefined}
               onDeny={m.actionRequests?.[0] ? () => handleActionDeny(m.actionRequests[0].actionId) : undefined}
             />
