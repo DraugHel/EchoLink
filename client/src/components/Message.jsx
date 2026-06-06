@@ -314,7 +314,8 @@ const styles = {
   markdown: { minWidth: 0, wordBreak: 'break-word', overflowWrap: 'break-word' },
   inlineCode: {
     background: 'var(--bg4)', padding: '1px 6px', borderRadius: 4,
-    fontFamily: 'var(--font-mono)', fontSize: '0.88em', color: 'var(--green)'
+    fontFamily: 'var(--font-mono)', fontSize: '0.88em', color: 'var(--green)',
+    wordBreak: 'break-all', overflowWrap: 'break-word', whiteSpace: 'pre-wrap'
   },
   toolStatus: {
     display: 'inline-flex', alignItems: 'center', gap: 8,
