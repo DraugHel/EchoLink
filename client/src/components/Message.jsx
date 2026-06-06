@@ -67,6 +67,16 @@ export default function Message({ role, content, streaming, images, think, toolS
                 </div>
               )}
               {content && <p style={styles.userText}>{content}</p>}
+              {onDelete && (
+                <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 4 }}>
+                  <button style={{ ...styles.copyBtn, color: 'rgba(13,13,13,0.4)' }}
+                    onClick={() => onDelete(id)}
+                    title="Delete message"
+                  >
+                    <TrashIcon />
+                  </button>
+                </div>
+              )}
             </>
           )
           : (
