@@ -1,3 +1,4 @@
+import './loadEnv.js'  // MUSS erster Import bleiben — laedt .env bevor Routen process.env lesen
 import express from 'express'
 import session from 'express-session'
 import connectSqlite3 from 'connect-sqlite3'
@@ -17,18 +18,14 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const SQLiteStore = connectSqlite3(session)
 
 const PORT = process.env.PORT || 3000
-const SECRET = process.env.SESSION_SECRET || 'echolink-change-this-secret'
+const SECRET = process.env.SESSION_SECRET
+if (!SECRET || SECRET === 'aender-mich' || SECRET === 'echolink-change-this-secret') {
+  console.error('FATAL: SESSION_SECRET fehlt oder ist noch der Platzhalter. In .env setzen.')
+  process.exit(1)
+}
 const DATA_DIR = path.join(__dirname, '..', 'data')
 
 fs.mkdirSync(DATA_DIR, { recursive: true })
-
-// Clear all sessions on startup to avoid stale cache issues
-try {
-  const sessDb = new (await import('better-sqlite3')).default(path.join(DATA_DIR, 'sessions.db'))
-  sessDb.exec('DELETE FROM sessions')
-  sessDb.close()
-  console.log('Sessions cleared on startup')
-} catch {}
 
 const app = express()
 app.use(express.json({ limit: '100mb' }))

@@ -1,5 +1,5 @@
 import { Router } from 'express'
-import db from '../db.js'
+import db, { DEFAULT_MODEL } from '../db.js'
 
 const router = Router()
 const OLLAMA_URL = process.env.OLLAMA_URL || 'http://localhost:11434'
@@ -31,7 +31,7 @@ export async function extractMemory(userId, conversationId, model) {
   const messages = db.prepare(`
     SELECT role, content FROM messages
     WHERE conversation_id = ?
-    ORDER BY created_at ASC
+    ORDER BY id ASC
     LIMIT 40
   `).all(conversationId)
 
@@ -64,7 +64,7 @@ Extract a concise, updated list of facts about the user. Rules:
 - If nothing new or useful, return the existing memory unchanged
 - Return ONLY the bullet list, nothing else`
 
-  const useModel = model || convo.model || 'llama3'
+  const useModel = model || convo.model || DEFAULT_MODEL
   const ollamaRes = await fetch(`${OLLAMA_URL}/api/chat`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

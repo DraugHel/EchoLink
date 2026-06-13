@@ -79,7 +79,7 @@ router.post('/', requireAuth, upload.array('files', 5), (req, res) => {
 // Serve a file (auth required, scoped to user)
 router.get('/:filename', requireAuth, (req, res) => {
   const filename = req.params.filename
-  if (!/^[a-z0-9_.-]+$/i.test(filename)) return res.status(400).end()
+  if (!/^[a-z0-9_.-]+$/i.test(filename) || filename.includes('..')) return res.status(400).end()
   const filepath = path.join(UPLOAD_DIR, String(req.session.userId), filename)
   if (!fs.existsSync(filepath)) return res.status(404).end()
   res.sendFile(filepath)
@@ -90,6 +90,21 @@ export async function extractTextFromFile(userId, filename, originalName) {
   const filepath = path.join(UPLOAD_DIR, String(userId), filename)
   if (!fs.existsSync(filepath)) return null
 
+  // Cache-Hit? Verhindert PDF/docx/xlsx-Parsing bei jedem einzelnen Chat-Turn
+  const cached = db.prepare('SELECT text FROM file_extractions WHERE filename = ?').get(filename)
+  if (cached) return cached.text
+
+  const text = await doExtract(filepath, filename, originalName)
+  if (text != null) {
+    try {
+      db.prepare('INSERT OR REPLACE INTO file_extractions (filename, user_id, text) VALUES (?, ?, ?)')
+        .run(filename, userId, text)
+    } catch {}
+  }
+  return text
+}
+
+async function doExtract(filepath, filename, originalName) {
   const ext = path.extname(filename).toLowerCase()
   try {
     if (ext === '.pdf') {
@@ -121,6 +136,12 @@ export async function extractTextFromFile(userId, filename, originalName) {
   }
 }
 
+function removeFileAndCache(userId, fn) {
+  const filepath = path.join(UPLOAD_DIR, String(userId), fn)
+  if (fs.existsSync(filepath)) fs.unlinkSync(filepath)
+  try { db.prepare('DELETE FROM file_extractions WHERE filename = ?').run(fn) } catch {}
+}
+
 // Delete files for a conversation
 export function deleteFilesForConvo(userId, conversationId) {
   const messages = db.prepare('SELECT images FROM messages WHERE conversation_id = ?').all(conversationId)
@@ -130,9 +151,7 @@ export function deleteFilesForConvo(userId, conversationId) {
       const items = JSON.parse(msg.images)
       // Could be array of strings (old format) or array of objects (new)
       for (const it of items) {
-        const fn = typeof it === 'string' ? it : it.filename
-        const filepath = path.join(UPLOAD_DIR, String(userId), fn)
-        if (fs.existsSync(filepath)) fs.unlinkSync(filepath)
+        removeFileAndCache(userId, typeof it === 'string' ? it : it.filename)
       }
     } catch {}
   }
@@ -144,9 +163,7 @@ export function deleteFilesForMessage(userId, images) {
   try {
     const items = JSON.parse(images)
     for (const it of items) {
-      const fn = typeof it === 'string' ? it : it.filename
-      const filepath = path.join(UPLOAD_DIR, String(userId), fn)
-      if (fs.existsSync(filepath)) fs.unlinkSync(filepath)
+      removeFileAndCache(userId, typeof it === 'string' ? it : it.filename)
     }
   } catch {}
 }
@@ -158,26 +175,27 @@ export function cleanupOrphanedFiles() {
     return fs.statSync(p).isDirectory()
   })
 
+  // Referenced-Set EINMAL bauen, nicht pro User-Verzeichnis
+  const referenced = new Set()
+  const messages = db.prepare("SELECT images FROM messages WHERE images IS NOT NULL AND images != ''").all()
+  for (const msg of messages) {
+    try {
+      const items = JSON.parse(msg.images)
+      for (const it of items) {
+        referenced.add(typeof it === 'string' ? it : it.filename)
+      }
+    } catch {}
+  }
+
   for (const userId of userDirs) {
     const userDir = path.join(UPLOAD_DIR, userId)
     const filesOnDisk = fs.readdirSync(userDir)
-
-    // Get all referenced filenames from DB for this user
-    const referenced = new Set()
-    const messages = db.prepare("SELECT images FROM messages WHERE images IS NOT NULL AND images != ''").all()
-    for (const msg of messages) {
-      try {
-        const items = JSON.parse(msg.images)
-        for (const it of items) {
-          referenced.add(typeof it === 'string' ? it : it.filename)
-        }
-      } catch {}
-    }
 
     let removed = 0
     for (const file of filesOnDisk) {
       if (!referenced.has(file)) {
         fs.unlinkSync(path.join(userDir, file))
+        try { db.prepare('DELETE FROM file_extractions WHERE filename = ?').run(file) } catch {}
         removed++
       }
     }

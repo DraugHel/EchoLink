@@ -1,5 +1,5 @@
 import { Router } from 'express'
-import db from '../db.js'
+import db, { DEFAULT_MODEL } from '../db.js'
 import { deleteFilesForConvo, deleteFilesForMessage } from './uploads.js'
 
 const router = Router()
@@ -38,7 +38,7 @@ router.post('/', requireAuth, (req, res) => {
   `).run(
     req.session.userId,
     title || 'New Conversation',
-    model || process.env.DEFAULT_MODEL || 'glm-5.1:cloud',
+    model || DEFAULT_MODEL,
     effectivePrompt,
     temperature ?? 0.5,
     top_k ?? 40,
@@ -91,7 +91,7 @@ router.get('/:id/messages', requireAuth, (req, res) => {
   const messages = db.prepare(`
     SELECT id, role, content, images, created_at FROM messages
     WHERE conversation_id = ?
-    ORDER BY created_at ASC
+    ORDER BY id ASC
   `).all(convo.id)
   res.json(messages)
 })
@@ -105,7 +105,7 @@ router.delete('/:id/last-assistant', requireAuth, (req, res) => {
   const last = db.prepare(`
     SELECT id, images FROM messages
     WHERE conversation_id = ? AND role = 'assistant'
-    ORDER BY created_at DESC LIMIT 1
+    ORDER BY id DESC LIMIT 1
   `).get(convo.id)
 
   if (last) {
@@ -118,11 +118,13 @@ router.delete('/:id/last-assistant', requireAuth, (req, res) => {
 
 router.delete('/message/:messageId', requireAuth, (req, res) => {
   const msg = db.prepare(`
-    SELECT messages.id FROM messages
+    SELECT messages.id, messages.images FROM messages
     JOIN conversations ON conversations.id = messages.conversation_id
     WHERE messages.id = ? AND conversations.user_id = ?
   `).get(req.params.messageId, req.session.userId)
   if (!msg) return res.status(404).json({ error: 'Not found' })
+  // Anhaenge der Message direkt mit aufraeumen (nicht auf den 6h-Cleanup warten)
+  deleteFilesForMessage(req.session.userId, msg.images)
   db.prepare('DELETE FROM messages WHERE id = ?').run(req.params.messageId)
   res.json({ success: true })
 })

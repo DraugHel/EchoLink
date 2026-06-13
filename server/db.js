@@ -43,6 +43,17 @@ db.exec(`
     created_at INTEGER DEFAULT (unixepoch()),
     FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
   );
+
+  -- SQLite indiziert FKs nicht automatisch; wichtig fuer History-Queries + Cascade-Deletes
+  CREATE INDEX IF NOT EXISTS idx_messages_convo ON messages(conversation_id, id);
+
+  -- Cache fuer extrahierten Datei-Text (verhindert PDF/docx-Parsing bei jedem Chat-Turn)
+  CREATE TABLE IF NOT EXISTS file_extractions (
+    filename TEXT PRIMARY KEY,
+    user_id INTEGER NOT NULL,
+    text TEXT NOT NULL,
+    created_at INTEGER DEFAULT (unixepoch())
+  );
 `)
 
 // Add columns if they don't exist yet (for existing DBs)
@@ -61,5 +72,8 @@ try {
   }
   if (convos.length > 0) console.log(`Migrated ${convos.length} conversations to remove memory from system_prompt`)
 } catch (e) { console.error('Migration error:', e.message) }
+
+// Eine Quelle der Wahrheit fuer das Default-Modell
+export const DEFAULT_MODEL = process.env.DEFAULT_MODEL || 'glm-5.1:cloud'
 
 export default db

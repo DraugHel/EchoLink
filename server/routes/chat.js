@@ -3,6 +3,7 @@ import db from '../db.js'
 import { extractUrls, fetchAllUrls } from '../lib/fetchUrl.js'
 import { UPLOAD_DIR, isImage, extractTextFromFile } from './uploads.js'
 import { webSearch, SEARCH_TOOL } from '../lib/webSearch.js'
+import { resizeImageBuffer } from '../utils/image.js'
 import fs from 'fs'
 import path from 'path'
 
@@ -162,6 +163,9 @@ router.post('/:conversationId', requireAuth, async (req, res) => {
       .run(convo.id, 'user', content || '', attachmentsJson)
   }
 
+  // Activity-Timestamp bumpen, damit die Sidebar-Sortierung stimmt
+  db.prepare('UPDATE conversations SET updated_at = unixepoch() WHERE id = ?').run(convo.id)
+
   // System prompt with memory
   const user = db.prepare('SELECT memory FROM users WHERE id = ?').get(req.session.userId)
   const memory = user?.memory || ''
@@ -176,7 +180,7 @@ router.post('/:conversationId', requireAuth, async (req, res) => {
   const history = db.prepare(`
     SELECT role, content, images FROM messages
     WHERE conversation_id = ?
-    ORDER BY created_at ASC
+    ORDER BY id ASC
   `).all(convo.id)
 
   const ollamaMessages = []
@@ -197,7 +201,9 @@ router.post('/:conversationId', requireAuth, async (req, res) => {
           if (att.kind === 'image') {
             const filepath = path.join(UPLOAD_DIR, String(req.session.userId), att.filename)
             if (fs.existsSync(filepath)) {
-              base64Images.push(fs.readFileSync(filepath).toString('base64'))
+              // Vor Base64 runterskalieren — Full-Size-Bilder bei jedem Turn sprengen den Kontext
+              const resized = await resizeImageBuffer(fs.readFileSync(filepath), null, 1024)
+              base64Images.push(resized.toString('base64'))
             }
           } else {
             const text = await extractTextFromFile(req.session.userId, att.filename, att.originalName)
@@ -274,6 +280,7 @@ router.post('/:conversationId', requireAuth, async (req, res) => {
 
       db.prepare('INSERT INTO messages (conversation_id, role, content) VALUES (?, ?, ?)')
         .run(convo.id, 'assistant', cleanResponse)
+      db.prepare('UPDATE conversations SET updated_at = unixepoch() WHERE id = ?').run(convo.id)
 
       res.write(`data: ${JSON.stringify({ done: true, ...(tokenUsage ? { tokens: tokenUsage } : {}) })}\n\n`)
 

@@ -4,10 +4,14 @@ import crypto from 'crypto'
 
 const router = Router()
 
-const API_KEY = process.env.ECHO_API_KEY || 'echolink-external-key'
+const API_KEY = process.env.ECHO_API_KEY || process.env.EXTERNAL_API_KEY
 
 // API Key auth — X-API-Key header or api_key query param
+// Ohne konfigurierten Key wird alles abgelehnt (kein bekannter Default mehr)
 const requireApiKey = (req, res, next) => {
+  if (!API_KEY) {
+    return res.status(503).json({ error: 'ECHO_API_KEY not configured on server' })
+  }
   const key = req.headers['x-api-key'] || req.headers['x-external-api-key'] || req.query.api_key
   if (!key || key !== API_KEY) {
     return res.status(401).json({ error: 'Invalid API key' })
@@ -32,10 +36,8 @@ router.post('/briefing', requireApiKey, async (req, res) => {
     return res.status(404).json({ error: 'Default user not found' })
   }
 
-  const model = req.body.model || process.env.DEFAULT_MODEL || 'glm-5.1:cloud'
-
   // Always post to the fixed Loomy conversation (id 53)
-  const LOOMY_CONVO_ID = 53
+  const LOOMY_CONVO_ID = Number(process.env.BRIEFING_CONVERSATION_ID || 53)
   const convo = db.prepare('SELECT * FROM conversations WHERE id = ?').get(LOOMY_CONVO_ID)
   if (!convo) {
     return res.status(404).json({ error: 'Loomy conversation not found' })

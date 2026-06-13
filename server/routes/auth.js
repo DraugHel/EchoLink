@@ -6,7 +6,34 @@ const router = Router()
 
 const GLOBAL_DEFAULT = process.env.DEFAULT_SYSTEM_PROMPT || ''
 
-router.post('/login', async (req, res) => {
+// In-Memory Rate-Limiter: max 5 Login-Versuche pro Minute pro IP
+const loginAttempts = new Map()
+const LOGIN_WINDOW_MS = 60 * 1000
+const LOGIN_MAX_ATTEMPTS = 5
+
+function loginRateLimit(req, res, next) {
+  const ip = req.ip || req.socket?.remoteAddress || 'unknown'
+  const now = Date.now()
+  let entry = loginAttempts.get(ip)
+  if (!entry || now - entry.windowStart > LOGIN_WINDOW_MS) {
+    entry = { count: 0, windowStart: now }
+  }
+  entry.count++
+  loginAttempts.set(ip, entry)
+  if (entry.count > LOGIN_MAX_ATTEMPTS) {
+    return res.status(429).json({ error: 'Zu viele Login-Versuche — in einer Minute nochmal' })
+  }
+  next()
+}
+
+setInterval(() => {
+  const now = Date.now()
+  for (const [ip, e] of loginAttempts) {
+    if (now - e.windowStart > LOGIN_WINDOW_MS) loginAttempts.delete(ip)
+  }
+}, 10 * LOGIN_WINDOW_MS).unref()
+
+router.post('/login', loginRateLimit, async (req, res) => {
   const { username, password } = req.body
   if (!username || !password) return res.status(400).json({ error: 'Missing credentials' })
 

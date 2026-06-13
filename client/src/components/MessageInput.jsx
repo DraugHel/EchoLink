@@ -1,4 +1,4 @@
-import { useRef, useCallback } from 'react'
+import { useState, useRef, useCallback } from 'react'
 
 const FileIcon = () => (
   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -29,22 +29,38 @@ const RefreshIcon = () => (
 )
 
 export default function MessageInput({
-  input, setInput, streaming, attachments, uploading,
+  streaming, attachments, uploading,
   onSend, onStop, onRegenerate, onFileSelect, onRemoveAttachment,
-  showRegenerate
+  showRegenerate, inputRef
 }) {
+  // Local input state — typing only re-renders THIS component
+  const [input, setInput] = useState('')
   const textareaRef = useRef(null)
   const fileInputRef = useRef(null)
 
   const handleKeyDown = useCallback(e => {
-    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); onSend() }
-  }, [onSend])
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault()
+      handleSend()
+    }
+  }, [input, attachments])
 
   const autoResize = useCallback(e => {
     const el = e.target
     el.style.height = 'auto'
     el.style.height = Math.min(el.scrollHeight, 160) + 'px'
   }, [])
+
+  function handleSend() {
+    const content = input.trim()
+    if ((!content && attachments.length === 0) || streaming) return
+    setInput('')
+    // Reset textarea height after clearing
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto'
+    }
+    onSend(content)
+  }
 
   const canSend = input.trim() || attachments.length > 0
 
@@ -84,7 +100,12 @@ export default function MessageInput({
           <AttachIcon />
         </button>
         <textarea
-          ref={textareaRef}
+          ref={el => {
+            // Beide Refs setzen: lokal + Parent (fuer Fokus nach Streaming-Ende).
+            // Vorher wurde inputRef waehrend des Renders mutiert — beim ersten Render noch null.
+            textareaRef.current = el
+            if (inputRef) inputRef.current = el
+          }}
           style={styles.textarea}
           value={input}
           onChange={e => { setInput(e.target.value); autoResize(e) }}
@@ -100,7 +121,7 @@ export default function MessageInput({
         ) : (
           <button
             style={{ ...styles.sendBtn, opacity: canSend ? 1 : 0.4 }}
-            onClick={() => onSend()}
+            onClick={handleSend}
             disabled={!canSend}
           >
             <SendIcon />

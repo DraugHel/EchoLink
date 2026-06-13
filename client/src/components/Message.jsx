@@ -1,10 +1,10 @@
-import { useState } from 'react'
+import { useState, memo } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism'
 
-export default function Message({ role, content, streaming, images, think, toolStatus, actionRequest, onApprove, onDeny, usage, id, onDelete }) {
+function Message({ role, content, streaming, images, think, toolStatus, actionRequest, onApprove, onDeny, usage, id, onDelete }) {
   const [thinkOpen, setThinkOpen] = useState(false)
   const [copied, setCopied] = useState(false)
   const [userCopied, setUserCopied] = useState(false)
@@ -203,6 +203,8 @@ export default function Message({ role, content, streaming, images, think, toolS
     </div>
   )
 }
+
+export default memo(Message)
 
 const ShieldIcon = () => (
   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

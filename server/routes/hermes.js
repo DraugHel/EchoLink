@@ -2,13 +2,18 @@ import { Router } from 'express'
 import fs from 'fs'
 import { exec } from 'child_process'
 import { randomUUID } from 'crypto'
+import path from 'path'
 import db from '../db.js'
-import { extractTextFromFile } from './uploads.js'
+import { extractTextFromFile, UPLOAD_DIR } from './uploads.js'
 
 const router = Router()
 const HERMES_URL = process.env.HERMES_URL || 'http://localhost:8642'
 const HERMES_KEY = process.env.HERMES_KEY || 'echolink-hermes-local'
-const ALLOWED_USER_IDS = [1]  // Only draug
+const SOUL_PATH = process.env.HERMES_SOUL_PATH || '/root/.hermes/SOUL.md'
+const WORK_DIR = process.env.ECHOLINK_DIR || process.cwd()
+// Aus .env (HERMES_ALLOWED_USER_IDS=1 oder 1,2), Fallback: nur User 1
+const ALLOWED_USER_IDS = (process.env.HERMES_ALLOWED_USER_IDS || '1')
+  .split(',').map(s => Number(s.trim())).filter(Number.isFinite)
 
 // Pending actions awaiting user approval
 const pendingActions = new Map()
@@ -43,11 +48,12 @@ router.post('/:conversationId', requireAuth, requireAgentAccess, async (req, res
   const attachmentsJson = attachments && attachments.length > 0 ? JSON.stringify(attachments) : ''
   db.prepare('INSERT INTO messages (conversation_id, role, content, images) VALUES (?, ?, ?, ?)')
     .run(convo.id, 'user', content || '', attachmentsJson)
+  db.prepare('UPDATE conversations SET updated_at = unixepoch() WHERE id = ?').run(convo.id)
 
   // Build conversation history for hermes
   const history = db.prepare(`
     SELECT role, content, images FROM messages
-    WHERE conversation_id = ? ORDER BY created_at ASC
+    WHERE conversation_id = ? ORDER BY id ASC
   `).all(convo.id)
 
   const messages = []
@@ -62,7 +68,7 @@ router.post('/:conversationId', requireAuth, requireAgentAccess, async (req, res
           const isImg = typeof it === 'string' || it.kind === 'image'
           if (isImg) {
             const fn = typeof it === 'string' ? it : it.filename
-            const filepath = `/root/echolink/data/uploads/${req.session.userId}/${fn}`
+            const filepath = path.join(UPLOAD_DIR, String(req.session.userId), fn)
             if (fs.existsSync(filepath)) {
               try {
                 const sharp = (await import('sharp')).default
@@ -87,8 +93,10 @@ router.post('/:conversationId', requireAuth, requireAgentAccess, async (req, res
         }
         if (textParts.length > 0) msg.content = (msg.content ? msg.content + '\n\n' : '') + textParts.join('\n\n')
         if (base64Images.length > 0) {
+          // Wichtig: msg.content (inkl. extrahiertem Datei-Text) verwenden, nicht m.content —
+          // sonst geht der Datei-Text verloren, sobald auch Bilder dranhaengen
           msg.content = [
-            { type: 'text', text: m.content || '' },
+            { type: 'text', text: typeof msg.content === 'string' ? msg.content : (m.content || '') },
             ...base64Images.map(b64 => ({ type: 'image_url', image_url: { url: `data:image/jpeg;base64,${b64}` } }))
           ]
         }
@@ -103,7 +111,7 @@ router.post('/:conversationId', requireAuth, requireAgentAccess, async (req, res
 
   // Inject SOUL.md after chat history as a reminder
   try {
-    const soulContent = fs.readFileSync('/root/.hermes/SOUL.md', 'utf-8')
+    const soulContent = fs.readFileSync(SOUL_PATH, 'utf-8')
     if (soulContent) messages.push({ role: 'system', content: soulContent })
   } catch {}
 
@@ -202,6 +210,7 @@ router.post('/:conversationId', requireAuth, requireAgentAccess, async (req, res
 
     db.prepare('INSERT INTO messages (conversation_id, role, content) VALUES (?, ?, ?)')
       .run(convo.id, 'assistant', fullResponse)
+    db.prepare('UPDATE conversations SET updated_at = unixepoch() WHERE id = ?').run(convo.id)
     res.write('data: ' + JSON.stringify({ done: true }) + '\n\n')
   } catch (err) {
     console.error('Hermes error:', err)
@@ -222,7 +231,7 @@ router.post('/action/:actionId/approve', requireAuth, requireAgentAccess, async 
   const { type, command, conversationId } = action
 
   if (type === 'shell' && command) {
-    exec(command, { timeout: 30000, cwd: '/root/echolink' }, (err, stdout, stderr) => {
+    exec(command, { timeout: 30000, cwd: WORK_DIR }, (err, stdout, stderr) => {
       const output = (stdout || '').slice(0, 2000)
       const errOutput = (stderr || '').slice(0, 500)
       const result = err
