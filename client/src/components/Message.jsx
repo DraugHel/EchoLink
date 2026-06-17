@@ -4,11 +4,12 @@ import remarkGfm from 'remark-gfm'
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism'
 
-function Message({ role, content, streaming, images, think, toolStatus, actionRequest, onApprove, onDeny, usage, id, onDelete }) {
+function Message({ role, content, streaming, images, think, toolStatus, actionRequests, onApprove, onDeny, usage, id, onDelete }) {
   const [thinkOpen, setThinkOpen] = useState(false)
   const [copied, setCopied] = useState(false)
   const [userCopied, setUserCopied] = useState(false)
-  const [actionState, setActionState] = useState(null) // null | 'approved' | 'denied'
+  // Track approval state per actionId: { actionId: 'approved' | 'denied' }
+  const [actionStates, setActionStates] = useState({})
   let parsedAttachments = []
   if (images) {
     try {
@@ -23,14 +24,14 @@ function Message({ role, content, streaming, images, think, toolStatus, actionRe
   const fileAttachments = parsedAttachments.filter(a => a.kind !== 'image')
   const isUser = role === 'user'
 
-  function handleApprove() {
-    setActionState('approved')
-    if (onApprove) onApprove()
+  function handleApprove(actionId) {
+    setActionStates(prev => ({ ...prev, [actionId]: 'approved' }))
+    if (onApprove) onApprove(actionId)
   }
 
-  function handleDeny() {
-    setActionState('denied')
-    if (onDeny) onDeny()
+  function handleDeny(actionId) {
+    setActionStates(prev => ({ ...prev, [actionId]: 'denied' }))
+    if (onDeny) onDeny(actionId)
   }
 
   return (
@@ -94,36 +95,43 @@ function Message({ role, content, streaming, images, think, toolStatus, actionRe
                   {toolStatus}
                 </div>
               )}
-              {actionRequest && !actionState && (
-                <div style={styles.actionCard}>
-                  <div style={styles.actionHeader}>
-                    <ShieldIcon />
-                    <span style={styles.actionTitle}>Action requires approval</span>
+              {(actionRequests || []).map((ar, idx) => {
+                const state = actionStates[ar.actionId]
+                if (state === 'approved') {
+                  return (
+                    <div key={idx} style={{ ...styles.actionCard, borderLeft: '3px solid var(--green)' }}>
+                      <span style={{ color: 'var(--green)', fontWeight: 600 }}>Approved</span>
+                    </div>
+                  )
+                }
+                if (state === 'denied') {
+                  return (
+                    <div key={idx} style={{ ...styles.actionCard, borderLeft: '3px solid var(--danger)' }}>
+                      <span style={{ color: 'var(--danger)', fontWeight: 600 }}>Denied</span>
+                    </div>
+                  )
+                }
+                return (
+                  <div key={idx} style={styles.actionCard}>
+                    <div style={styles.actionHeader}>
+                      <ShieldIcon />
+                      <span style={styles.actionTitle}>Action requires approval</span>
+                    </div>
+                    <p style={styles.actionDesc}>{ar.description}</p>
+                    {ar.command && (
+                      <code style={styles.actionCmd}>{ar.command}</code>
+                    )}
+                    <div style={styles.actionBtns}>
+                      <button style={styles.approveBtn} onClick={() => handleApprove(ar.actionId)}>
+                        <CheckIcon2 /> Approve
+                      </button>
+                      <button style={styles.denyBtn} onClick={() => handleDeny(ar.actionId)}>
+                        <XIcon2 /> Deny
+                      </button>
+                    </div>
                   </div>
-                  <p style={styles.actionDesc}>{actionRequest.description}</p>
-                  {actionRequest.command && (
-                    <code style={styles.actionCmd}>{actionRequest.command}</code>
-                  )}
-                  <div style={styles.actionBtns}>
-                    <button style={styles.approveBtn} onClick={handleApprove}>
-                      <CheckIcon2 /> Approve
-                    </button>
-                    <button style={styles.denyBtn} onClick={handleDeny}>
-                      <XIcon2 /> Deny
-                    </button>
-                  </div>
-                </div>
-              )}
-              {actionState === 'approved' && (
-                <div style={{ ...styles.actionCard, borderLeft: '3px solid var(--green)' }}>
-                  <span style={{ color: 'var(--green)', fontWeight: 600 }}>Approved</span>
-                </div>
-              )}
-              {actionState === 'denied' && (
-                <div style={{ ...styles.actionCard, borderLeft: '3px solid var(--danger)' }}>
-                  <span style={{ color: 'var(--danger)', fontWeight: 600 }}>Denied</span>
-                </div>
-              )}
+                )
+              })}
               <div style={styles.msgHeader}>
                 <button style={{ ...styles.copyBtn, color: copied ? 'var(--green)' : 'var(--text3)' }}
                   onClick={async () => {

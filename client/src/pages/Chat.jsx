@@ -30,7 +30,9 @@ export default function Chat({ user, onLogout }) {
   const [uploading, setUploading] = useState(false)
   const fileInputRef = useRef(null)
   const [loading, setLoading] = useState(false)
+  const [showScrollBtn, setShowScrollBtn] = useState(false)
   const messagesEndRef = useRef(null)
+  const messagesContainerRef = useRef(null)
   const inputRef = useRef(null)
   const abortControllerRef = useRef(null)
   const mobile = useIsMobile()
@@ -68,6 +70,23 @@ export default function Chat({ user, onLogout }) {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
+
+  // Scroll-to-bottom button: show when scrolled up >200px from bottom
+  useEffect(() => {
+    const el = messagesContainerRef.current
+    if (!el) return
+    const onScroll = () => {
+      const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
+      setShowScrollBtn(distFromBottom > 200)
+    }
+    el.addEventListener('scroll', onScroll, { passive: true })
+    onScroll() // initial check
+    return () => el.removeEventListener('scroll', onScroll)
+  }, [activeConvo])
+
+  function scrollToBottom() {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }
 
   async function loadConversations() {
     const convos = await api.get('/api/conversations')
@@ -129,8 +148,6 @@ export default function Chat({ user, onLogout }) {
 
     const userId = `u_${Date.now()}_${Math.random().toString(36).slice(2)}`
     const assistantId = `a_${Date.now()}_${Math.random().toString(36).slice(2)}`
-    // Track pending actions for this response
-    const responseActions = []
     setMessages(prev => [
       ...prev,
       // On regenerate (skipSave=true), don't add user message to UI again
@@ -214,9 +231,8 @@ export default function Chat({ user, onLogout }) {
             }
             if (json.actionRequest) {
               const action = { actionId: json.actionId, description: json.description, command: json.command, type: json.type }
-              responseActions.push(action)
               setMessages(prev => prev.map(m =>
-                m.id === assistantId ? { ...m, actionRequests: [...(m.actionRequests || []), action] } : m
+                m.id === assistantId ? { ...m, actionRequests: [action] } : m
               ))
             }
           } catch {}
@@ -241,6 +257,14 @@ export default function Chat({ user, onLogout }) {
       ))
       abortControllerRef.current = null
       loadConversations()
+      // Reload messages from DB to replace temp string IDs with real integer IDs
+      // (needed for delete/regenerate to work — temp IDs like "u_..." don't match DB rows)
+      if (activeConvo) {
+        try {
+          const msgs = await api.get(`/api/conversations/${activeConvo.id}/messages`)
+          setMessages(msgs)
+        } catch {}
+      }
       // Refocus input so user can keep typing without clicking
       setTimeout(() => inputRef.current?.focus(), 0)
     }
@@ -248,16 +272,11 @@ export default function Chat({ user, onLogout }) {
 
   async function handleActionApprove(actionId, actionRequest) {
     try {
-      await fetch('/api/hermes/action/' + actionId + '/approve', {
+      await fetch('/api/hermes/run/' + actionId + '/approve', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ conversationId: activeConvo.id })
+        headers: { 'Content-Type': 'application/json' }
       })
-      // Reload messages to show the result
-      if (activeConvo) {
-        const msgs = await api.get('/api/conversations/' + activeConvo.id + '/messages')
-        setMessages(msgs)
-      }
+      // Agent continues streaming via SSE — final reload happens in sendMessage's finally block
     } catch (err) {
       console.error('Approve error:', err)
     }
@@ -265,16 +284,11 @@ export default function Chat({ user, onLogout }) {
 
   async function handleActionDeny(actionId) {
     try {
-      await fetch('/api/hermes/action/' + actionId + '/deny', {
+      await fetch('/api/hermes/run/' + actionId + '/deny', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ conversationId: activeConvo.id })
+        headers: { 'Content-Type': 'application/json' }
       })
-      // Reload messages to show the denial
-      if (activeConvo) {
-        const msgs = await api.get('/api/conversations/' + activeConvo.id + '/messages')
-        setMessages(msgs)
-      }
+      // Agent continues streaming via SSE — final reload happens in sendMessage's finally block
     } catch (err) {
       console.error('Deny error:', err)
     }
@@ -391,7 +405,7 @@ export default function Chat({ user, onLogout }) {
           )}
         </div>
 
-        <div style={styles.messages}>
+        <div style={styles.messages} ref={messagesContainerRef}>
           {!activeConvo && (
             <div style={styles.empty} className="fade-in">
               <div style={styles.emptyLogo}>
@@ -422,17 +436,37 @@ export default function Chat({ user, onLogout }) {
               images={m.images}
               think={m.think}
               toolStatus={m.toolStatus}
-              actionRequest={m.actionRequests?.[0]}
+              actionRequests={m.actionRequests}
               usage={m.usage}
               id={m.id}
               onDelete={deleteMessage}
-              onApprove={m.actionRequests?.[0] ? () => handleActionApprove(m.actionRequests[0].actionId, m.actionRequests[0]) : undefined}
-              onDeny={m.actionRequests?.[0] ? () => handleActionDeny(m.actionRequests[0].actionId) : undefined}
+              onApprove={handleActionApprove}
+              onDeny={handleActionDeny}
             />
           ))}
 
           {activeConvo && !loading && messages.length === 0 && (
             <div style={styles.emptyChat}><p>Start the conversation below.</p></div>
+          )}
+
+          {showScrollBtn && (
+            <button
+              onClick={scrollToBottom}
+              style={{
+                position: 'fixed', left: 8, bottom: 150,
+                width: 44, height: 44, minWidth: 44, minHeight: 44, borderRadius: '50%',
+                background: 'var(--bg2)', border: '1px solid var(--border)',
+                color: 'var(--text2)', cursor: 'pointer',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+                zIndex: 10, flexShrink: 0
+              }}
+              title="Scroll to bottom"
+            >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="6 9 12 15 18 9"/>
+              </svg>
+            </button>
           )}
 
           <div ref={messagesEndRef} />
