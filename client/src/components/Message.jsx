@@ -4,7 +4,7 @@ import remarkGfm from 'remark-gfm'
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism'
 
-function Message({ role, content, streaming, images, think, toolStatus, actionRequests, onApprove, onDeny, usage, id, onDelete }) {
+function Message({ role, content, streaming, images, think, toolStatus, actionRequests, onApprove, onDeny, usage, id, createdAt, onDelete }) {
   const [thinkOpen, setThinkOpen] = useState(false)
   const [copied, setCopied] = useState(false)
   const [userCopied, setUserCopied] = useState(false)
@@ -23,6 +23,22 @@ function Message({ role, content, streaming, images, think, toolStatus, actionRe
   const imgAttachments = parsedAttachments.filter(a => a.kind === 'image')
   const fileAttachments = parsedAttachments.filter(a => a.kind !== 'image')
   const isUser = role === 'user'
+
+  function formatTime(ts) {
+    if (!ts) return ''
+    const d = new Date(ts * 1000)
+    const now = new Date()
+    const sameDay = d.toDateString() === now.toDateString()
+    const yesterday = new Date(now)
+    yesterday.setDate(yesterday.getDate() - 1)
+    const isYesterday = d.toDateString() === yesterday.toDateString()
+    const time = d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })
+    if (sameDay) return time
+    if (isYesterday) return 'gestern ' + time
+    return d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' }) + ' ' + time
+  }
+
+  const timeStr = formatTime(createdAt)
 
   function handleApprove(actionId) {
     setActionStates(prev => ({ ...prev, [actionId]: 'approved' }))
@@ -84,11 +100,17 @@ function Message({ role, content, streaming, images, think, toolStatus, actionRe
                   ))}
                 </div>
               )}
+              {timeStr && !streaming && (
+                <div style={{ fontSize: 10, color: 'rgba(13,13,13,0.45)', marginBottom: 4, fontFamily: 'var(--font-mono)' }}>{timeStr}</div>
+              )}
               {content && <p style={styles.userText}>{content}</p>}
             </>
           )
           : (
             <div style={styles.markdown}>
+              {timeStr && !streaming && (
+                <div style={{ fontSize: 10, color: 'var(--text3)', marginBottom: 4, fontFamily: 'var(--font-mono)' }}>{timeStr}</div>
+              )}
               {toolStatus && (
                 <div style={styles.toolStatus}>
                   <span style={styles.toolDot} />

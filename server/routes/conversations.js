@@ -89,10 +89,14 @@ router.get('/:id/messages', requireAuth, (req, res) => {
   if (!convo) return res.status(404).json({ error: 'Not found' })
 
   const messages = db.prepare(`
-    SELECT id, role, content, images, created_at FROM messages
+    SELECT id, role, content, images, usage, created_at FROM messages
     WHERE conversation_id = ?
     ORDER BY id ASC
   `).all(convo.id)
+  // Parse usage JSON for each message
+  for (const m of messages) {
+    m.usage = m.usage ? JSON.parse(m.usage) : null
+  }
   res.json(messages)
 })
 

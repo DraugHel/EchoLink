@@ -60,6 +60,7 @@ db.exec(`
 try { db.exec(`ALTER TABLE users ADD COLUMN default_system_prompt TEXT DEFAULT ''`) } catch {}
 try { db.exec(`ALTER TABLE users ADD COLUMN memory TEXT DEFAULT ''`) } catch {}
 try { db.exec(`ALTER TABLE messages ADD COLUMN images TEXT DEFAULT ''`) } catch {}
+try { db.exec(`ALTER TABLE messages ADD COLUMN usage TEXT DEFAULT ''`) } catch {}
 
 // One-time migration: strip memory blocks from existing system_prompts
 try {

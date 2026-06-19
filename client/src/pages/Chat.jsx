@@ -220,8 +220,10 @@ export default function Chat({ user, onLogout }) {
                 completion_tokens: json.tokens.completionTokens,
                 total_tokens: json.tokens.totalTokens
               } : null
+              // Agent mode: done event kann auch usage direkt enthalten (fallback)
+              const doneUsage = json.usage || null
               setMessages(prev => prev.map(m =>
-                m.id === assistantId ? { ...m, streaming: false, usage: normalized || m.usage } : m
+                m.id === assistantId ? { ...m, streaming: false, usage: normalized || doneUsage || m.usage } : m
               ))
             }
             if (json.error) {
@@ -439,6 +441,7 @@ export default function Chat({ user, onLogout }) {
               actionRequests={m.actionRequests}
               usage={m.usage}
               id={m.id}
+              createdAt={m.created_at}
               onDelete={deleteMessage}
               onApprove={handleActionApprove}
               onDeny={handleActionDeny}

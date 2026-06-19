@@ -36,11 +36,11 @@ router.post('/briefing', requireApiKey, async (req, res) => {
     return res.status(404).json({ error: 'Default user not found' })
   }
 
-  // Always post to the fixed Loomy conversation (id 53)
-  const LOOMY_CONVO_ID = Number(process.env.BRIEFING_CONVERSATION_ID || 53)
-  const convo = db.prepare('SELECT * FROM conversations WHERE id = ?').get(LOOMY_CONVO_ID)
+  // Always post to the fixed Cora conversation (id 65)
+  const CORA_CONVO_ID = Number(process.env.BRIEFING_CONVERSATION_ID || 65)
+  const convo = db.prepare('SELECT * FROM conversations WHERE id = ?').get(CORA_CONVO_ID)
   if (!convo) {
-    return res.status(404).json({ error: 'Loomy conversation not found' })
+    return res.status(404).json({ error: 'Cora conversation not found' })
   }
 
   // Insert briefing as assistant message

@@ -63,6 +63,8 @@ if (fs.existsSync(distPath)) {
 }
 
 const server = app.listen(PORT, () => {
+
+
   console.log(`EchoLink running on http://localhost:${PORT}`)
   // Clean up orphaned uploads on startup
   try { cleanupOrphanedFiles() } catch (e) { console.error('Upload cleanup failed:', e.message) }

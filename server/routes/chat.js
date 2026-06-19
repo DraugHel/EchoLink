@@ -278,11 +278,15 @@ router.post('/:conversationId', requireAuth, async (req, res) => {
       // Thinking was already streamed token-by-token above, so we don't need to resend it
       // Just send the final "done" signal
 
-      db.prepare('INSERT INTO messages (conversation_id, role, content) VALUES (?, ?, ?)')
-        .run(convo.id, 'assistant', cleanResponse)
+      db.prepare('INSERT INTO messages (conversation_id, role, content, usage) VALUES (?, ?, ?, ?)')
+        .run(convo.id, 'assistant', cleanResponse, tokenUsage ? JSON.stringify({
+          prompt_tokens: tokenUsage.promptTokens,
+          completion_tokens: tokenUsage.completionTokens,
+          total_tokens: tokenUsage.totalTokens
+        }) : '')
       db.prepare('UPDATE conversations SET updated_at = unixepoch() WHERE id = ?').run(convo.id)
 
-      res.write(`data: ${JSON.stringify({ done: true, ...(tokenUsage ? { tokens: tokenUsage } : {}) })}\n\n`)
+      res.write('data: ' + JSON.stringify({ done: true, ...(tokenUsage ? { tokens: tokenUsage } : {}) }) + '\n\n')
 
       // Auto-update memory periodically (non-blocking)
       updateMemory(req.session.userId, convo.id, convo.model).catch(err => console.error('Memory update failed:', err.message))
