@@ -76,8 +76,27 @@ html.theme-blossom {
   --user-text:   #fff0f5;
 }
 
+/* ── Tokyo Night ── */
+html.theme-tokyo-night {
+  --bg:        #1a1b26;
+  --bg2:       #16161e;
+  --bg3:       #1f2335;
+  --bg4:       #292e42;
+  --border:    #2a2e42;
+  --border2:   #3b4261;
+  --accent:     #7aa2f7;
+  --accent-dim: #3d59a1;
+  --accent-bg:  rgba(122,162,247,0.08);
+  --text:      #c0caf5;
+  --text2:     #737aa2;
+  --text3:     #414868;
+  --danger:    #f7768e;
+  --user-bubble: #7aa2f7;
+  --user-text:   #1a1b26;
+}
+
 /* Rename green vars to accent for backward compat */
-:root, html.theme-sakura, html.theme-void, html.theme-blossom {
+:root, html.theme-sakura, html.theme-void, html.theme-blossom, html.theme-tokyo-night {
   --green:      var(--accent);
   --green-dim:  var(--accent-dim);
   --green-bg:   var(--accent-bg);

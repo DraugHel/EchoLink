@@ -66,13 +66,36 @@ function getFileKind(filename) {
 }
 
 // Upload — accepts images and files together
-router.post('/', requireAuth, upload.array('files', 5), (req, res) => {
-  const files = req.files.map(f => ({
-    filename: f.filename,
-    originalName: f.originalname,
-    size: f.size,
-    kind: getFileKind(f.originalname)
-  }))
+// Images are resized to max 1024px / JPEG 80% on upload to keep payloads small
+router.post('/', requireAuth, upload.array('files', 5), async (req, res) => {
+  const files = []
+  for (const f of req.files) {
+    let filename = f.filename
+    let size = f.size
+    if (isImage(f.originalname)) {
+      try {
+        const sharp = (await import('sharp')).default
+        const filepath = path.join(UPLOAD_DIR, String(req.session.userId), f.filename)
+        const jpegName = f.filename.replace(/\.[^.]+$/, '') + '.jpg'
+        const jpegPath = path.join(UPLOAD_DIR, String(req.session.userId), jpegName)
+        await sharp(filepath)
+          .resize({ width: 1024, height: 1024, fit: 'inside', withoutEnlargement: true })
+          .jpeg({ quality: 80 })
+          .toFile(jpegPath)
+        fs.unlinkSync(filepath) // remove original
+        filename = jpegName
+        size = fs.statSync(jpegPath).size
+      } catch (err) {
+        console.error('Image resize failed, keeping original:', err.message)
+      }
+    }
+    files.push({
+      filename,
+      originalName: f.originalname,
+      size,
+      kind: getFileKind(f.originalname)
+    })
+  }
   res.json({ files })
 })
 

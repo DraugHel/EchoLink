@@ -53,7 +53,7 @@ export default function MessageInput({
 
   function handleSend() {
     const content = input.trim()
-    if ((!content && attachments.length === 0) || streaming) return
+    if (!content && attachments.length === 0) return
     setInput('')
     // Reset textarea height after clearing
     if (textareaRef.current) {
@@ -94,7 +94,7 @@ export default function MessageInput({
         <button
           style={{ ...styles.attachBtn, opacity: uploading ? 0.5 : 1 }}
           onClick={() => fileInputRef.current?.click()}
-          disabled={uploading || streaming}
+          disabled={uploading}
           title="Attach image"
         >
           <AttachIcon />
@@ -110,11 +110,10 @@ export default function MessageInput({
           value={input}
           onChange={e => { setInput(e.target.value); autoResize(e) }}
           onKeyDown={handleKeyDown}
-          placeholder="Type your message…"
+          placeholder={streaming ? "Type to interrupt…" : "Type your message…"}
           rows={1}
-          disabled={streaming}
         />
-        {streaming ? (
+        {streaming && !canSend ? (
           <button style={styles.stopBtn} onClick={onStop} title="Stop">
             <StopIcon />
           </button>
@@ -123,12 +122,13 @@ export default function MessageInput({
             style={{ ...styles.sendBtn, opacity: canSend ? 1 : 0.4 }}
             onClick={handleSend}
             disabled={!canSend}
+            title={streaming ? "Send (interrupts current response)" : "Send"}
           >
             <SendIcon />
           </button>
         )}
       </div>
-      <p style={styles.hint}>Enter to send · Shift+Enter for newline</p>
+      <p style={styles.hint}>{streaming ? 'Type to interrupt · or hit Stop' : 'Enter to send · Shift+Enter for newline'}</p>
     </div>
   )
 }

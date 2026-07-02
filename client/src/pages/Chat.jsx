@@ -24,10 +24,11 @@ export default function Chat({ user, onLogout }) {
   const [showSettings, setShowSettings] = useState(false)
   const [mobileSidebar, setMobileSidebar] = useState(false)
   const [availableModels, setAvailableModels] = useState([])
-  const [agentMode, setAgentMode] = useState(true)
+  const [agentMode, setAgentMode] = useState(false)
   const [agentEnabled, setAgentEnabled] = useState(false)
   const [attachments, setAttachments] = useState([])  // array of {filename, originalName, size, kind}
   const [uploading, setUploading] = useState(false)
+  const [editingId, setEditingId] = useState(null)
   const fileInputRef = useRef(null)
   const [loading, setLoading] = useState(false)
   const [showScrollBtn, setShowScrollBtn] = useState(false)
@@ -35,6 +36,7 @@ export default function Chat({ user, onLogout }) {
   const messagesContainerRef = useRef(null)
   const inputRef = useRef(null)
   const abortControllerRef = useRef(null)
+  const streamGenerationRef = useRef(0)
   const mobile = useIsMobile()
   useTheme()
 
@@ -141,7 +143,12 @@ export default function Chat({ user, onLogout }) {
   async function sendMessage(contentOverride, skipSave = false) {
     const content = contentOverride
     const hasAttachments = attachments.length > 0
-    if ((!content && !hasAttachments) || streaming || !activeConvo) return
+    if ((!content && !hasAttachments) || !activeConvo) return
+    // Interrupt: if already streaming, abort current stream before starting new one
+    if (streaming && abortControllerRef.current) {
+      abortControllerRef.current.abort()
+    }
+    const myGeneration = ++streamGenerationRef.current
     const attachmentsToSend = attachments
     setAttachments([])
     inputRef.current?.focus()
@@ -152,21 +159,24 @@ export default function Chat({ user, onLogout }) {
       ...prev,
       // On regenerate (skipSave=true), don't add user message to UI again
       ...(skipSave ? [] : [{ id: userId, role: 'user', content, images: attachmentsToSend.length > 0 ? JSON.stringify(attachmentsToSend) : '' }]),
-      { id: assistantId, role: 'assistant', content: '', think: '', streaming: true, actionRequests: [] }
+      { id: assistantId, role: 'assistant', content: '', streaming: true, actionRequests: [] }
     ])
     setStreaming(true)
 
     let assistantContent = ''
-    let assistantThink = ''
 
     abortControllerRef.current = new AbortController()
 
-    try {
-      const endpoint = agentMode ? `/api/hermes/${activeConvo.id}` : `/api/chat/${activeConvo.id}`
+    // SSE stream with auto-reconnect (max 3 retries, exponential backoff)
+    const endpoint = agentMode ? `/api/hermes/${activeConvo.id}` : `/api/chat/${activeConvo.id}`
+    const maxRetries = 3
+    let retryCount = 0
+
+    const streamAttempt = async (isRetry) => {
       const response = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content, attachments: attachmentsToSend, skipSave }),
+        body: JSON.stringify({ content, attachments: attachmentsToSend, skipSave: skipSave || isRetry }),
         signal: abortControllerRef.current.signal
       })
 
@@ -195,12 +205,6 @@ export default function Chat({ user, onLogout }) {
                 ))
               }
             }
-            if (json.think) {
-              assistantThink += json.think
-              setMessages(prev => prev.map(m =>
-                m.id === assistantId ? { ...m, think: assistantThink, toolStatus: null } : m
-              ))
-            }
             if (json.token) {
               assistantContent += json.token
               setMessages(prev => prev.map(m =>
@@ -213,14 +217,11 @@ export default function Chat({ user, onLogout }) {
               ))
             }
             if (json.done) {
-              // Ollama liefert tokens (camelCase), Hermes usage (snake_case) — normalisieren,
-              // damit der Token-Counter in Message.jsx in beiden Modi rendert
               const normalized = json.tokens ? {
                 prompt_tokens: json.tokens.promptTokens,
                 completion_tokens: json.tokens.completionTokens,
                 total_tokens: json.tokens.totalTokens
               } : null
-              // Agent mode: done event kann auch usage direkt enthalten (fallback)
               const doneUsage = json.usage || null
               setMessages(prev => prev.map(m =>
                 m.id === assistantId ? { ...m, streaming: false, usage: normalized || doneUsage || m.usage } : m
@@ -232,7 +233,7 @@ export default function Chat({ user, onLogout }) {
               ))
             }
             if (json.actionRequest) {
-              const action = { actionId: json.actionId, description: json.description, command: json.command, type: json.type }
+              const action = { actionId: json.actionId, description: json.description, command: json.command, type: json.type, source: json.source }
               setMessages(prev => prev.map(m =>
                 m.id === assistantId ? { ...m, actionRequests: [action] } : m
               ))
@@ -240,6 +241,10 @@ export default function Chat({ user, onLogout }) {
           } catch {}
         }
       }
+    }
+
+    try {
+      await streamAttempt(false)
     } catch (err) {
       if (err.name === 'AbortError') {
         // Stopped by user — mark as done
@@ -247,11 +252,36 @@ export default function Chat({ user, onLogout }) {
           m.id === assistantId ? { ...m, streaming: false, content: assistantContent || '_(stopped)_' } : m
         ))
       } else {
-        setMessages(prev => prev.map(m =>
-          m.id === assistantId ? { ...m, content: `Connection error: ${err.message}`, streaming: false } : m
-        ))
+        // Connection error — try to reconnect
+        while (retryCount < maxRetries && streamGenerationRef.current === myGeneration) {
+          retryCount++
+          setMessages(prev => prev.map(m =>
+            m.id === assistantId ? { ...m, content: assistantContent + `\n\n_Reconnecting… (${retryCount}/${maxRetries})_`, streaming: true } : m
+          ))
+          await new Promise(r => setTimeout(r, 1000 * Math.pow(2, retryCount - 1)))
+          if (streamGenerationRef.current !== myGeneration) break
+          try {
+            abortControllerRef.current = new AbortController()
+            await streamAttempt(true)
+            // Reconnect succeeded — restore content without the reconnecting text
+            setMessages(prev => prev.map(m =>
+              m.id === assistantId ? { ...m, content: assistantContent, streaming: true } : m
+            ))
+            break
+          } catch (retryErr) {
+            if (retryErr.name === 'AbortError') break
+            if (retryCount >= maxRetries) {
+              setMessages(prev => prev.map(m =>
+                m.id === assistantId ? { ...m, content: `Connection error: ${err.message}`, streaming: false, retryFailed: true } : m
+              ))
+            }
+          }
+        }
       }
     } finally {
+      // Skip cleanup if a newer stream has started (interrupt) —
+      // the new sendMessage call handles streaming state and message reload
+      if (streamGenerationRef.current !== myGeneration) return
       setStreaming(false)
       // Always clear per-message streaming flag — done event may not arrive
       setMessages(prev => prev.map(m =>
@@ -274,23 +304,28 @@ export default function Chat({ user, onLogout }) {
 
   async function handleActionApprove(actionId, actionRequest) {
     try {
-      await fetch('/api/hermes/run/' + actionId + '/approve', {
+      // source: 'chat' = Non-Agent terminal, otherwise Hermes
+      const endpoint = actionRequest?.source === 'chat'
+        ? '/api/chat/action/' + actionId + '/approve'
+        : '/api/hermes/run/' + actionId + '/approve'
+      await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' }
       })
-      // Agent continues streaming via SSE — final reload happens in sendMessage's finally block
     } catch (err) {
       console.error('Approve error:', err)
     }
   }
 
-  async function handleActionDeny(actionId) {
+  async function handleActionDeny(actionId, actionRequest) {
     try {
-      await fetch('/api/hermes/run/' + actionId + '/deny', {
+      const endpoint = actionRequest?.source === 'chat'
+        ? '/api/chat/action/' + actionId + '/deny'
+        : '/api/hermes/run/' + actionId + '/deny'
+      await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' }
       })
-      // Agent continues streaming via SSE — final reload happens in sendMessage's finally block
     } catch (err) {
       console.error('Deny error:', err)
     }
@@ -304,6 +339,27 @@ export default function Chat({ user, onLogout }) {
       console.error('Delete message error:', err)
     }
   }, [])
+
+  async function saveEdit(msgId, newContent) {
+    if (!newContent.trim()) return
+    try {
+      const res = await api.put(`/api/conversations/message/${msgId}`, { content: newContent.trim() })
+      // Update the edited message in UI and remove everything after it
+      setMessages(prev => {
+        const idx = prev.findIndex(m => m.id === msgId)
+        if (idx === -1) return prev
+        const updated = [...prev]
+        updated[idx] = { ...updated[idx], content: newContent.trim() }
+        return updated.slice(0, idx + 1)  // keep only up to edited message
+      })
+      setEditingId(null)
+      // Regenerate assistant response
+      await sendMessage(newContent.trim(), true)
+    } catch (err) {
+      console.error('Edit message error:', err)
+      setEditingId(null)
+    }
+  }
 
   async function regenerate() {
     if (streaming || messages.length < 2) return
@@ -321,6 +377,24 @@ export default function Chat({ user, onLogout }) {
     try {
       await api.delete(`/api/conversations/${activeConvo.id}/last-assistant`)
     } catch {}
+    await sendMessage(lastUser.content, true)
+  }
+
+  async function retryMessage(msgId) {
+    if (streaming) return
+    // Find the failed assistant message and the user message before it
+    const idx = messages.findIndex(m => m.id === msgId)
+    if (idx === -1) return
+    const lastUser = [...messages.slice(0, idx)].reverse().find(m => m.role === 'user')
+    if (!lastUser) return
+    // Remove the failed assistant message from UI
+    setMessages(prev => prev.filter(m => m.id !== msgId))
+    // Remove last assistant message from DB
+    try {
+      await api.delete(`/api/conversations/${activeConvo.id}/last-assistant`)
+    } catch {}
+    // Reset streamGenerationRef so the new stream can proceed
+    streamGenerationRef.current++
     await sendMessage(lastUser.content, true)
   }
 
@@ -445,6 +519,12 @@ export default function Chat({ user, onLogout }) {
               onDelete={deleteMessage}
               onApprove={handleActionApprove}
               onDeny={handleActionDeny}
+              editing={editingId === m.id}
+              onEdit={() => setEditingId(m.id)}
+              onSaveEdit={saveEdit}
+              onCancelEdit={() => setEditingId(null)}
+              retryFailed={m.retryFailed}
+              onRetry={retryMessage}
             />
           ))}
 

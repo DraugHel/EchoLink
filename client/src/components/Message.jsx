@@ -1,15 +1,36 @@
-import { useState, memo } from 'react'
+import { useState, useRef, memo } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
-import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism'
+import { oneDark, oneLight } from 'react-syntax-highlighter/dist/esm/styles/prism'
 
-function Message({ role, content, streaming, images, think, toolStatus, actionRequests, onApprove, onDeny, usage, id, createdAt, onDelete }) {
+const LIGHT_THEMES = ['blossom']
+
+function getCodeStyle() {
+  const t = localStorage.getItem('echolink-theme') || 'echolink'
+  return LIGHT_THEMES.includes(t) ? oneLight : oneDark
+}
+
+function Message({ role, content, streaming, images, think, toolStatus, actionRequests, onApprove, onDeny, usage, id, createdAt, onDelete, editing, onEdit, onSaveEdit, onCancelEdit, retryFailed, onRetry }) {
   const [thinkOpen, setThinkOpen] = useState(false)
+  const [termOpen, setTermOpen] = useState(false)
+
+  // Terminal-Output-Messages (aus dem chat.js Approve-Handler) erkennen
+  const isTerminal = role === 'assistant' && typeof content === 'string'
+    && content.startsWith('**Terminal:** ')
+  let termCmd = '', termOutput = ''
+  if (isTerminal) {
+    const nl = content.indexOf('\n')
+    termCmd = (nl === -1 ? content.slice(14) : content.slice(14, nl)).replace(/`/g, '')
+    termOutput = nl === -1 ? ''
+      : content.slice(nl + 1).replace(/^```\n?/, '').replace(/\n?```\s*$/, '')
+  }
   const [copied, setCopied] = useState(false)
   const [userCopied, setUserCopied] = useState(false)
   // Track approval state per actionId: { actionId: 'approved' | 'denied' }
   const [actionStates, setActionStates] = useState({})
+  const [editText, setEditText] = useState('')
+  const editRef = useRef(null)
   let parsedAttachments = []
   if (images) {
     try {
@@ -33,21 +54,22 @@ function Message({ role, content, streaming, images, think, toolStatus, actionRe
     yesterday.setDate(yesterday.getDate() - 1)
     const isYesterday = d.toDateString() === yesterday.toDateString()
     const time = d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })
-    if (sameDay) return time
-    if (isYesterday) return 'gestern ' + time
-    return d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' }) + ' ' + time
+    const date = d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: '2-digit' })
+    if (sameDay) return 'Heute, ' + time
+    if (isYesterday) return 'Gestern, ' + time
+    return date + ', ' + time
   }
 
   const timeStr = formatTime(createdAt)
 
-  function handleApprove(actionId) {
+  function handleApprove(actionId, actionRequest) {
     setActionStates(prev => ({ ...prev, [actionId]: 'approved' }))
-    if (onApprove) onApprove(actionId)
+    if (onApprove) onApprove(actionId, actionRequest)
   }
 
-  function handleDeny(actionId) {
+  function handleDeny(actionId, actionRequest) {
     setActionStates(prev => ({ ...prev, [actionId]: 'denied' }))
-    if (onDeny) onDeny(actionId)
+    if (onDeny) onDeny(actionId, actionRequest)
   }
 
   return (
@@ -65,21 +87,32 @@ function Message({ role, content, streaming, images, think, toolStatus, actionRe
         {isUser
           ? (
             <>
-              <div style={{ ...styles.msgHeader, marginBottom: 4 }}>
-                {onDelete && (
-                  <button style={{ ...styles.copyBtn, color: 'rgba(13,13,13,0.4)' }}
-                    onClick={() => onDelete(id)} title="Delete message">
-                    <TrashIcon />
-                  </button>
+              <div style={{ ...styles.msgHeader, marginBottom: 4, justifyContent: 'space-between' }}>
+                {timeStr && !streaming && (
+                  <div style={{ fontSize: 10, color: 'rgba(13,13,13,0.45)', fontFamily: 'var(--font-mono)' }}>{timeStr}</div>
                 )}
-                <button style={{ ...styles.copyBtn, color: userCopied ? 'var(--green)' : 'rgba(13,13,13,0.4)' }}
-                  onClick={async () => {
-                    try { await navigator.clipboard.writeText(content) }
-                    catch { const t = document.createElement('textarea'); t.value = content; document.body.appendChild(t); t.select(); document.execCommand('copy'); document.body.removeChild(t) }
-                    setUserCopied(true); setTimeout(() => setUserCopied(false), 1500)
-                  }} title="Copy message">
-                  {userCopied ? <CheckIcon /> : <CopyIcon />}
-                </button>
+                <div style={{ display: 'flex', gap: 4 }}>
+                  {onDelete && !editing && (
+                    <button style={{ ...styles.copyBtn, color: 'rgba(13,13,13,0.4)' }}
+                      onClick={() => onDelete(id)} title="Delete message">
+                      <TrashIcon />
+                    </button>
+                  )}
+                  {onEdit && !editing && (
+                    <button style={{ ...styles.copyBtn, color: 'rgba(13,13,13,0.4)' }}
+                      onClick={() => { setEditText(content || ''); onEdit(id) }} title="Edit message">
+                      <EditIcon />
+                    </button>
+                  )}
+                  <button style={{ ...styles.copyBtn, color: userCopied ? 'var(--green)' : 'rgba(13,13,13,0.4)' }}
+                    onClick={async () => {
+                      try { await navigator.clipboard.writeText(content) }
+                      catch { const t = document.createElement('textarea'); t.value = content; document.body.appendChild(t); t.select(); document.execCommand('copy'); document.body.removeChild(t) }
+                      setUserCopied(true); setTimeout(() => setUserCopied(false), 1500)
+                    }} title="Copy message">
+                    {userCopied ? <CheckIcon /> : <CopyIcon />}
+                  </button>
+                </div>
               </div>
               {imgAttachments.length > 0 && (
                 <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: (content || fileAttachments.length > 0) ? 8 : 0 }}>
@@ -100,10 +133,40 @@ function Message({ role, content, streaming, images, think, toolStatus, actionRe
                   ))}
                 </div>
               )}
-              {timeStr && !streaming && (
-                <div style={{ fontSize: 10, color: 'rgba(13,13,13,0.45)', marginBottom: 4, fontFamily: 'var(--font-mono)' }}>{timeStr}</div>
+              {editing ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <textarea
+                    ref={editRef}
+                    value={editText}
+                    onChange={(e) => setEditText(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Escape') { e.preventDefault(); onCancelEdit() }
+                      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); onSaveEdit(id, editText) }
+                    }}
+                    autoFocus
+                    style={{
+                      width: '100%', minHeight: 60, resize: 'vertical',
+                      background: 'rgba(13,13,13,0.08)', border: '1px solid rgba(13,13,13,0.2)',
+                      borderRadius: 6, padding: '8px 10px', fontSize: 14,
+                      color: '#0d0d0d', fontFamily: 'var(--font-mono)', outline: 'none',
+                    }}
+                  />
+                  <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                    <button onClick={onCancelEdit}
+                      style={{ padding: '4px 10px', fontSize: 12, border: 'none', borderRadius: 6,
+                        background: 'rgba(13,13,13,0.1)', color: '#0d0d0d', cursor: 'pointer' }}>
+                      Cancel
+                    </button>
+                    <button onClick={() => onSaveEdit(id, editText)}
+                      style={{ padding: '4px 10px', fontSize: 12, border: 'none', borderRadius: 6,
+                        background: 'var(--accent)', color: '#0d0d0d', cursor: 'pointer', fontWeight: 600 }}>
+                      Save
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                content && <p style={styles.userText}>{content}</p>
               )}
-              {content && <p style={styles.userText}>{content}</p>}
             </>
           )
           : (
@@ -144,10 +207,10 @@ function Message({ role, content, streaming, images, think, toolStatus, actionRe
                       <code style={styles.actionCmd}>{ar.command}</code>
                     )}
                     <div style={styles.actionBtns}>
-                      <button style={styles.approveBtn} onClick={() => handleApprove(ar.actionId)}>
+                      <button style={styles.approveBtn} onClick={() => handleApprove(ar.actionId, ar)}>
                         <CheckIcon2 /> Approve
                       </button>
-                      <button style={styles.denyBtn} onClick={() => handleDeny(ar.actionId)}>
+                      <button style={styles.denyBtn} onClick={() => handleDeny(ar.actionId, ar)}>
                         <XIcon2 /> Deny
                       </button>
                     </div>
@@ -187,6 +250,19 @@ function Message({ role, content, streaming, images, think, toolStatus, actionRe
                   )}
                 </div>
               )}
+              {isTerminal ? (
+                <div style={styles.thinkWrap}>
+                  <button style={styles.thinkToggle} onClick={() => setTermOpen(o => !o)}>
+                    <span style={{ marginRight: 6 }}>{termOpen ? '\u25be' : '\u25b8'}</span>
+                    Terminal: <code style={{ marginLeft: 4 }}>{termCmd}</code>
+                  </button>
+                  {termOpen && (
+                    <pre style={{ ...styles.thinkContent, whiteSpace: 'pre-wrap', margin: 0 }}>
+                      {termOutput}
+                    </pre>
+                  )}
+                </div>
+              ) : (
               <ReactMarkdown
                 remarkPlugins={[remarkGfm]}
                 components={{
@@ -220,7 +296,20 @@ function Message({ role, content, streaming, images, think, toolStatus, actionRe
               >
                 {content}
               </ReactMarkdown>
+              )}
               {streaming && <span style={styles.cursor} />}
+              {retryFailed && !streaming && onRetry && (
+                <button
+                  onClick={() => onRetry(id)}
+                  style={{
+                    marginTop: 8, padding: '4px 12px', fontSize: 12, borderRadius: 6,
+                    background: 'var(--accent)', color: '#fff', border: 'none',
+                    cursor: 'pointer', fontWeight: 500
+                  }}
+                >
+                  Retry
+                </button>
+              )}
               {!streaming && usage && (
                 <div style={{ fontSize: 10, color: 'var(--text3)', marginTop: 6, fontFamily: 'var(--font-mono)' }}>
                   {usage.prompt_tokens} in→{usage.completion_tokens} out ({usage.total_tokens} total)
@@ -265,6 +354,12 @@ const CopyIcon = () => (
 const CheckIcon = () => (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
     <polyline points="20 6 9 17 4 12"/>
+  </svg>
+)
+const EditIcon = () => (
+  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
   </svg>
 )
 
@@ -329,7 +424,7 @@ function CodeBlock({ lang, code }) {
           )}
         </button>
       </div>
-      <SyntaxHighlighter style={oneDark} language={lang} PreTag="div"
+      <SyntaxHighlighter style={getCodeStyle()} language={lang} PreTag="div"
         customStyle={{ borderRadius: '0 0 8px 8px', margin: 0, fontSize: 13 }}>
         {code}
       </SyntaxHighlighter>

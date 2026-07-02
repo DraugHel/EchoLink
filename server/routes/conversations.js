@@ -89,7 +89,7 @@ router.get('/:id/messages', requireAuth, (req, res) => {
   if (!convo) return res.status(404).json({ error: 'Not found' })
 
   const messages = db.prepare(`
-    SELECT id, role, content, images, usage, created_at FROM messages
+    SELECT id, role, content, think, images, usage, created_at FROM messages
     WHERE conversation_id = ?
     ORDER BY id ASC
   `).all(convo.id)
@@ -118,6 +118,27 @@ router.delete('/:id/last-assistant', requireAuth, (req, res) => {
     db.prepare('DELETE FROM messages WHERE id = ?').run(last.id)
   }
   res.json({ ok: true })
+})
+
+// Edit a user message — update text and delete all messages after it
+router.put('/message/:messageId', requireAuth, (req, res) => {
+  const { content } = req.body
+  if (!content || !content.trim()) return res.status(400).json({ error: 'Content required' })
+
+  const msg = db.prepare(`
+    SELECT messages.id, messages.conversation_id FROM messages
+    JOIN conversations ON conversations.id = messages.conversation_id
+    WHERE messages.id = ? AND conversations.user_id = ?
+  `).get(req.params.messageId, req.session.userId)
+  if (!msg) return res.status(404).json({ error: 'Not found' })
+
+  // Update the user message text
+  db.prepare('UPDATE messages SET content = ? WHERE id = ?').run(content.trim(), msg.id)
+
+  // Delete all messages after this one (the assistant response + any later messages)
+  db.prepare('DELETE FROM messages WHERE conversation_id = ? AND id > ?').run(msg.conversation_id, msg.id)
+
+  res.json({ success: true, id: msg.id, content: content.trim() })
 })
 
 router.delete('/message/:messageId', requireAuth, (req, res) => {

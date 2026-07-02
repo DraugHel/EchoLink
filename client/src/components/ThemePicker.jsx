@@ -5,6 +5,7 @@ const THEMES = [
   { id: 'sakura',   label: 'Sakura',   color: '#f472b6', bg: '#0f0a0d' },
   { id: 'void',     label: 'Void',     color: '#a78bfa', bg: '#080808' },
   { id: 'blossom',  label: 'Blossom',  color: '#c2185b', bg: '#fdf6f9' },
+  { id: 'tokyo-night', label: 'Tokyo Night', color: '#7aa2f7', bg: '#1a1b26' },
 ]
 
 function applyTheme(id) {
