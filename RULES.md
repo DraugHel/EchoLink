@@ -23,3 +23,4 @@
 - Always install packages with `npm install <name>` inside /root/echolink so they are saved to package.json. Never install ad-hoc without saving — npm prunes unsaved packages on the next install and the app crash-loops on restart (this happened with sharp).
 - Never run `npm audit fix --force` — it swaps major versions across the tree and has broken installs before.
 - After any npm operation: `pm2 restart echolink`, then check `pm2 logs echolink --err --lines 10 --nostream` for ERR_MODULE_NOT_FOUND before considering the task done.
+- Never delete routes, exported functions, or helper functions during refactoring unless explicitly asked — the frontend and other modules depend on them. Before removing anything, grep the whole project for usages (client/src included). Deleted-but-still-called code has already broken /models/list, updateMemory, and the urlContext formatter.

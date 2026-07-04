@@ -12,7 +12,7 @@ import crypto from 'crypto'
 const router = Router()
 const pendingTerminalActions = new Map()
 const OLLAMA_URL = process.env.OLLAMA_URL || 'http://localhost:11434'
-const MAX_TOOL_ITERATIONS = 10
+const MAX_TOOL_ITERATIONS = 25
 
 // --- Auto-Approve fuer harmlose read-only Commands ---
 // Alles mit Shell-Metazeichen (Pipes, Chaining, Redirects, Substitution)
@@ -373,6 +373,7 @@ router.post('/:conversationId', requireAuth, async (req, res) => {
     top_p: convo.top_p
   }
 
+  let allContent = ''
   try {
     let iterations = 0
     let workingMessages = [...ollamaMessages]
@@ -381,6 +382,7 @@ router.post('/:conversationId', requireAuth, async (req, res) => {
       iterations++
 
       const { fullContent, fullThinking, toolCalls, tokenUsage } = await streamOllama(activeModel, workingMessages, options, res, abortController.signal)
+      if (fullContent) allContent += (allContent ? '\n\n' : '') + fullContent
 
       // Handle tool calls
       if (toolCalls && toolCalls.length > 0) {
@@ -410,8 +412,8 @@ router.post('/:conversationId', requireAuth, async (req, res) => {
 
       // Final response — extract thinking from tags if native thinking is empty
       const THINK_TAG_RE = /<think>([\s\S]*?)<\/think>/g
-      const thinkTagMatch = fullContent.match(THINK_TAG_RE)
-      let cleanResponse = fullContent.replace(THINK_TAG_RE, '').trim()
+      const thinkTagMatch = allContent.match(THINK_TAG_RE)
+      let cleanResponse = allContent.replace(THINK_TAG_RE, '').trim()
 
       // Deduplicate: prefer native thinking, only fall back to tags
       let allThinking = fullThinking.trim()
@@ -440,6 +442,12 @@ router.post('/:conversationId', requireAuth, async (req, res) => {
 
     if (iterations >= MAX_TOOL_ITERATIONS) {
       res.write(`data: ${JSON.stringify({ error: 'Max tool iterations reached' })}\n\n`)
+      const partial = allContent.replace(/<think>[\s\S]*?<\/think>/g, '').trim()
+      if (!clientDisconnected && partial) {
+        db.prepare('INSERT INTO messages (conversation_id, role, content) VALUES (?, ?, ?)')
+          .run(convo.id, 'assistant', partial + '\n\n*[abgebrochen: Tool-Limit erreicht]*')
+        res.write('data: ' + JSON.stringify({ done: true }) + '\n\n')
+      }
     }
   } catch (err) {
     if (err.name === 'AbortError') {
@@ -448,6 +456,11 @@ router.post('/:conversationId', requireAuth, async (req, res) => {
       console.error('Chat error:', err)
       if (!clientDisconnected) {
         res.write(`data: ${JSON.stringify({ error: err.message })}\n\n`)
+        const partial = allContent.replace(/<think>[\s\S]*?<\/think>/g, '').trim()
+        if (partial) {
+          db.prepare('INSERT INTO messages (conversation_id, role, content) VALUES (?, ?, ?)')
+            .run(convo.id, 'assistant', partial + '\n\n*[abgebrochen: ' + err.message.slice(0, 120) + ']*')
+        }
       }
     }
   }
@@ -529,6 +542,17 @@ router.get('/stats', requireAuth, (req, res) => {
     SUM(CASE WHEN json_extract(usage, '$.prompt_tokens') IS NOT NULL THEN json_extract(usage, '$.prompt_tokens') ELSE 0 END) as prompt_tokens
   FROM messages WHERE usage IS NOT NULL AND usage != ''`).get()
   res.json(row || {})
+})
+
+// List available models from Ollama
+router.get('/models/list', requireAuth, async (req, res) => {
+  try {
+    const r = await fetch(`${OLLAMA_URL}/api/tags`)
+    const data = await r.json()
+    res.json(data.models || [])
+  } catch {
+    res.status(503).json({ error: 'Could not reach Ollama' })
+  }
 })
 
 export default router
