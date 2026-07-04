@@ -114,7 +114,7 @@ export async function extractTextFromFile(userId, filename, originalName) {
   if (!fs.existsSync(filepath)) return null
 
   // Cache-Hit? Verhindert PDF/docx/xlsx-Parsing bei jedem einzelnen Chat-Turn
-  const cached = db.prepare('SELECT text FROM file_extractions WHERE filename = ?').get(filename)
+  const cached = db.prepare('SELECT text FROM file_extractions WHERE filename = ? AND user_id = ?').get(filename, userId)
   if (cached) return cached.text
 
   const text = await doExtract(filepath, filename, originalName)

@@ -95,7 +95,7 @@ router.get('/:id/messages', requireAuth, (req, res) => {
   `).all(convo.id)
   // Parse usage JSON for each message
   for (const m of messages) {
-    m.usage = m.usage ? JSON.parse(m.usage) : null
+    try { m.usage = m.usage ? JSON.parse(m.usage) : null } catch { m.usage = null }
   }
   res.json(messages)
 })

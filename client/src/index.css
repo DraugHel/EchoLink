@@ -13,7 +13,7 @@
   --accent-bg:  rgba(46,204,113,0.08);
   --text:      #e8e8e8;
   --text2:     #999999;
-  --text3:     #555555;
+  --text3:     #6b6b6b;
   --danger:    #e74c3c;
   --user-bubble: var(--accent);
   --user-text:   #0d0d0d;
@@ -23,7 +23,7 @@
 html.theme-sakura {
   --bg:        #0d0d10;
   --bg2:       #13121a;
-  --bg3:       #19182200;
+  --bg3:       #191822;
   --bg4:       #201f2e;
   --border:    #2e2a3e;
   --border2:   #3a3550;
@@ -167,3 +167,22 @@ a { color: var(--accent); text-decoration: none; }
 }
 
 .fade-in { animation: fadeIn 200ms ease forwards; }
+
+
+/* ── UX polish ── */
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.msg-actions { opacity: 0.35; transition: opacity 0.15s ease; }
+.msg-bubble:hover .msg-actions { opacity: 1; }
+@media (hover: none) { .msg-actions { opacity: 0.6; } }
+
+.echo-wave { display: inline-flex; gap: 2px; align-items: flex-end; height: 13px; margin-left: 4px; vertical-align: text-bottom; }
+.echo-wave span { width: 2px; border-radius: 1px; background: var(--accent); animation: echoWave 0.9s ease-in-out infinite; }
+.echo-wave span:nth-child(2) { animation-delay: 0.15s; }
+.echo-wave span:nth-child(3) { animation-delay: 0.3s; }
+.echo-wave span:nth-child(4) { animation-delay: 0.45s; }
+@keyframes echoWave { 0%, 100% { height: 3px; } 50% { height: 13px; } }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
+}

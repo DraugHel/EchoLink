@@ -18,3 +18,8 @@
 - NEVER rename SSE event fields (token, think, done, error, actionRequest, tool, status) — the frontend depends on these exact names. Server and client must always be changed together.
 - When refactoring, preserve existing behavior exactly: do not drop validation checks, formatting blocks, or error handling — even if they look redundant.
 - Node only loads code at startup: file edits are inactive until pm2 restart echolink. After any edit + restart, do a quick test chat to verify streaming still works.
+
+## Dependencies
+- Always install packages with `npm install <name>` inside /root/echolink so they are saved to package.json. Never install ad-hoc without saving — npm prunes unsaved packages on the next install and the app crash-loops on restart (this happened with sharp).
+- Never run `npm audit fix --force` — it swaps major versions across the tree and has broken installs before.
+- After any npm operation: `pm2 restart echolink`, then check `pm2 logs echolink --err --lines 10 --nostream` for ERR_MODULE_NOT_FOUND before considering the task done.

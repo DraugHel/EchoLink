@@ -33,6 +33,7 @@ export default function Chat({ user, onLogout }) {
   const [loading, setLoading] = useState(false)
   const [showScrollBtn, setShowScrollBtn] = useState(false)
   const messagesEndRef = useRef(null)
+  const stickToBottomRef = useRef(true)
   const messagesContainerRef = useRef(null)
   const inputRef = useRef(null)
   const abortControllerRef = useRef(null)
@@ -70,7 +71,10 @@ export default function Chat({ user, onLogout }) {
   }, [])
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+    // Nur mitscrollen, wenn der User unten "klebt" — hochscrollen bleibt ungestoert
+    if (stickToBottomRef.current) {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'auto' })
+    }
   }, [messages])
 
   // Scroll-to-bottom button: show when scrolled up >200px from bottom
@@ -79,6 +83,7 @@ export default function Chat({ user, onLogout }) {
     if (!el) return
     const onScroll = () => {
       const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
+      stickToBottomRef.current = distFromBottom < 120
       setShowScrollBtn(distFromBottom > 200)
     }
     el.addEventListener('scroll', onScroll, { passive: true })
@@ -87,6 +92,7 @@ export default function Chat({ user, onLogout }) {
   }, [activeConvo])
 
   function scrollToBottom() {
+    stickToBottomRef.current = true
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }
 
@@ -503,7 +509,7 @@ export default function Chat({ user, onLogout }) {
             </div>
           )}
 
-          {activeConvo && !loading && messages.map(m => (
+          {activeConvo && !loading && messages.map((m, i) => (
             <Message
               key={m.id}
               role={m.role}
@@ -516,6 +522,7 @@ export default function Chat({ user, onLogout }) {
               usage={m.usage}
               id={m.id}
               createdAt={m.created_at}
+              prevCreatedAt={i > 0 ? messages[i - 1].created_at : null}
               onDelete={deleteMessage}
               onApprove={handleActionApprove}
               onDeny={handleActionDeny}

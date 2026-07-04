@@ -492,26 +492,6 @@ router.post('/action/:actionId/deny', requireAuth, (req, res) => {
   resolve('Terminal action denied by user')
 })
 
-// Regenerate last response
-router.post('/:conversationId/regenerate', requireAuth, async (req, res) => {
-  const convo = db.prepare('SELECT * FROM conversations WHERE id = ? AND user_id = ?')
-    .get(req.params.conversationId, req.session.userId)
-  if (!convo) return res.status(404).json({ error: 'Not found' })
-
-  // Delete last assistant message
-  db.prepare('DELETE FROM messages WHERE id = (SELECT id FROM messages WHERE conversation_id = ? AND role = ? ORDER BY id DESC LIMIT 1)')
-    .run(convo.id, 'assistant')
-
-  // Re-run chat with skipSave
-  const { content, attachments } = req.body
-  db.prepare('INSERT INTO messages (conversation_id, role, content, images) VALUES (?, ?, ?, ?)')
-    .run(convo.id, 'user', content || '', attachments ? JSON.stringify(attachments) : '')
-
-  db.prepare('UPDATE conversations SET updated_at = unixepoch() WHERE id = ?').run(convo.id)
-
-  // ... rest of regenerate logic would go here
-  res.json({ error: 'Not implemented' })
-})
 
 // Get pending terminal actions for a conversation
 router.get('/:conversationId/actions', requireAuth, (req, res) => {

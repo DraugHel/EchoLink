@@ -28,7 +28,7 @@ const DATA_DIR = path.join(__dirname, '..', 'data')
 fs.mkdirSync(DATA_DIR, { recursive: true })
 
 const app = express()
-app.use(express.json({ limit: '100mb' }))
+app.use(express.json({ limit: '5mb' }))
 
 // Sessions stored in SQLite
 app.use(session({

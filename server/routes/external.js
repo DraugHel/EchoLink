@@ -12,7 +12,7 @@ const requireApiKey = (req, res, next) => {
   if (!API_KEY) {
     return res.status(503).json({ error: 'ECHO_API_KEY not configured on server' })
   }
-  const key = req.headers['x-api-key'] || req.headers['x-external-api-key'] || req.query.api_key
+  const key = req.headers['x-api-key'] || req.headers['x-external-api-key']
   if (!key || key !== API_KEY) {
     return res.status(401).json({ error: 'Invalid API key' })
   }

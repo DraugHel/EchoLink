@@ -11,9 +11,10 @@ function getCodeStyle() {
   return LIGHT_THEMES.includes(t) ? oneLight : oneDark
 }
 
-function Message({ role, content, streaming, images, think, toolStatus, actionRequests, onApprove, onDeny, usage, id, createdAt, onDelete, editing, onEdit, onSaveEdit, onCancelEdit, retryFailed, onRetry }) {
+function Message({ role, content, streaming, images, think, toolStatus, actionRequests, onApprove, onDeny, usage, id, createdAt, prevCreatedAt, onDelete, editing, onEdit, onSaveEdit, onCancelEdit, retryFailed, onRetry }) {
   const [thinkOpen, setThinkOpen] = useState(false)
   const [termOpen, setTermOpen] = useState(false)
+  const [usageOpen, setUsageOpen] = useState(false)
 
   // Terminal-Output-Messages (aus dem chat.js Approve-Handler) erkennen
   const isTerminal = role === 'assistant' && typeof content === 'string'
@@ -25,6 +26,7 @@ function Message({ role, content, streaming, images, think, toolStatus, actionRe
     termOutput = nl === -1 ? ''
       : content.slice(nl + 1).replace(/^```\n?/, '').replace(/\n?```\s*$/, '')
   }
+  const termFailed = isTerminal && termOutput.startsWith('Exit code')
   const [copied, setCopied] = useState(false)
   const [userCopied, setUserCopied] = useState(false)
   // Track approval state per actionId: { actionId: 'approved' | 'denied' }
@@ -61,6 +63,8 @@ function Message({ role, content, streaming, images, think, toolStatus, actionRe
   }
 
   const timeStr = formatTime(createdAt)
+  // Timestamp nur zeigen, wenn >5 min seit der vorherigen Message vergangen sind
+  const showTime = !prevCreatedAt || !createdAt || (createdAt - prevCreatedAt > 300)
 
   function handleApprove(actionId, actionRequest) {
     setActionStates(prev => ({ ...prev, [actionId]: 'approved' }))
@@ -83,15 +87,15 @@ function Message({ role, content, streaming, images, think, toolStatus, actionRe
           </svg>
         </div>
       )}
-      <div style={{ ...styles.bubble, ...(isUser ? styles.userBubble : styles.aiBubble) }}>
+      <div className="msg-bubble" style={{ ...styles.bubble, ...(isUser ? styles.userBubble : styles.aiBubble) }}>
         {isUser
           ? (
             <>
               <div style={{ ...styles.msgHeader, marginBottom: 4, justifyContent: 'space-between' }}>
-                {timeStr && !streaming && (
+                {timeStr && !streaming && showTime && (
                   <div style={{ fontSize: 10, color: 'rgba(13,13,13,0.45)', fontFamily: 'var(--font-mono)' }}>{timeStr}</div>
                 )}
-                <div style={{ display: 'flex', gap: 4 }}>
+                <div className="msg-actions" style={{ display: 'flex', gap: 4 }}>
                   {onDelete && !editing && (
                     <button style={{ ...styles.copyBtn, color: 'rgba(13,13,13,0.4)' }}
                       onClick={() => onDelete(id)} title="Delete message">
@@ -171,7 +175,7 @@ function Message({ role, content, streaming, images, think, toolStatus, actionRe
           )
           : (
             <div style={styles.markdown}>
-              {timeStr && !streaming && (
+              {timeStr && !streaming && showTime && (
                 <div style={{ fontSize: 10, color: 'var(--text3)', marginBottom: 4, fontFamily: 'var(--font-mono)' }}>{timeStr}</div>
               )}
               {toolStatus && (
@@ -217,7 +221,7 @@ function Message({ role, content, streaming, images, think, toolStatus, actionRe
                   </div>
                 )
               })}
-              <div style={styles.msgHeader}>
+              <div className="msg-actions" style={styles.msgHeader}>
                 <button style={{ ...styles.copyBtn, color: copied ? 'var(--green)' : 'var(--text3)' }}
                   onClick={async () => {
                     try { await navigator.clipboard.writeText(content) }
@@ -254,7 +258,7 @@ function Message({ role, content, streaming, images, think, toolStatus, actionRe
                 <div style={styles.thinkWrap}>
                   <button style={styles.thinkToggle} onClick={() => setTermOpen(o => !o)}>
                     <span style={{ marginRight: 6 }}>{termOpen ? '\u25be' : '\u25b8'}</span>
-                    Terminal: <code style={{ marginLeft: 4 }}>{termCmd}</code>
+                    <span style={termFailed ? { color: 'var(--danger)' } : undefined}>Terminal:</span> <code style={{ marginLeft: 4, ...(termFailed ? { color: 'var(--danger)' } : {}) }}>{termCmd}</code>
                   </button>
                   {termOpen && (
                     <pre style={{ ...styles.thinkContent, whiteSpace: 'pre-wrap', margin: 0 }}>
@@ -297,7 +301,7 @@ function Message({ role, content, streaming, images, think, toolStatus, actionRe
                 {content}
               </ReactMarkdown>
               )}
-              {streaming && <span style={styles.cursor} />}
+              {streaming && <span className="echo-wave" aria-hidden="true"><span /><span /><span /><span /></span>}
               {retryFailed && !streaming && onRetry && (
                 <button
                   onClick={() => onRetry(id)}
@@ -311,8 +315,11 @@ function Message({ role, content, streaming, images, think, toolStatus, actionRe
                 </button>
               )}
               {!streaming && usage && (
-                <div style={{ fontSize: 10, color: 'var(--text3)', marginTop: 6, fontFamily: 'var(--font-mono)' }}>
-                  {usage.prompt_tokens} in→{usage.completion_tokens} out ({usage.total_tokens} total)
+                <div onClick={() => setUsageOpen(o => !o)} title="Tap for details"
+                  style={{ fontSize: 10, color: 'var(--text3)', marginTop: 6, fontFamily: 'var(--font-mono)', cursor: 'pointer', userSelect: 'none' }}>
+                  {usageOpen
+                    ? `${usage.prompt_tokens} in→${usage.completion_tokens} out (${usage.total_tokens} total)`
+                    : `${usage.total_tokens} tok`}
                 </div>
               )}
             </div>
@@ -433,7 +440,7 @@ function CodeBlock({ lang, code }) {
 }
 
 const styles = {
-  wrap: { display: 'flex', gap: 10, marginBottom: 16, alignItems: 'flex-start', maxWidth: '100%' },
+  wrap: { display: 'flex', gap: 10, marginBottom: 16, alignItems: 'flex-start', maxWidth: 820, width: '100%', marginLeft: 'auto', marginRight: 'auto' },
   avatar: {
     width: 28, height: 28, borderRadius: 8, flexShrink: 0,
     display: 'flex', alignItems: 'center', justifyContent: 'center',
