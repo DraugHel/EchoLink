@@ -2,7 +2,7 @@ import { Router } from 'express'
 import fs from 'fs'
 import path from 'path'
 import db from '../db.js'
-import { extractTextFromFile, UPLOAD_DIR } from './uploads.js'
+import { extractTextFromFile } from './uploads.js'
 
 const router = Router()
 const HERMES_URL = process.env.HERMES_URL || 'http://localhost:8642'

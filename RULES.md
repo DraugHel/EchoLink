@@ -24,3 +24,4 @@
 - Never run `npm audit fix --force` — it swaps major versions across the tree and has broken installs before.
 - After any npm operation: `pm2 restart echolink`, then check `pm2 logs echolink --err --lines 10 --nostream` for ERR_MODULE_NOT_FOUND before considering the task done.
 - Never delete routes, exported functions, or helper functions during refactoring unless explicitly asked — the frontend and other modules depend on them. Before removing anything, grep the whole project for usages (client/src included). Deleted-but-still-called code has already broken /models/list, updateMemory, and the urlContext formatter.
+- After any state-changing command (rm, mv, config changes, installs, restarts), IMMEDIATELY verify the result with a read-only command (ls, grep, pm2 list, docker ps) in the same turn — before reporting success. Never report an action as done based on intent alone; only tool output counts as proof.

@@ -1,7 +1,7 @@
 import { Router } from 'express'
 import db from '../db.js'
 import { extractUrls, fetchAllUrls } from '../lib/fetchUrl.js'
-import { UPLOAD_DIR, isImage, extractTextFromFile } from './uploads.js'
+import { UPLOAD_DIR, extractTextFromFile } from './uploads.js'
 import { webSearch, SEARCH_TOOL, firecrawlScrape, FIRECRAWL_TOOL, TERMINAL_TOOL } from '../lib/webSearch.js'
 import { exec } from 'child_process'
 import { resizeImageBuffer } from '../utils/image.js'
