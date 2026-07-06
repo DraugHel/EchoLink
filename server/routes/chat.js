@@ -31,6 +31,20 @@ const SAFE_PATTERNS = [
   /^node --check\b/,
 ]
 
+const ALLOWLIST_PATH = new URL('../../data/auto-approve.json', import.meta.url).pathname
+
+function userAllowedPrefixes() {
+  try { return JSON.parse(fs.readFileSync(ALLOWLIST_PATH, 'utf-8')) } catch { return [] }
+}
+
+// Warum braucht ein Command Approval? (fuer die UI)
+function approvalReason(cmd) {
+  const c = (cmd || '').trim()
+  const stripped = c.replace(/'[^']*'/g, '')
+  if (stripped.includes("'") || UNSAFE_META.test(stripped)) return 'Shell-Metazeichen ausserhalb von Quotes'
+  return 'Nicht auf der Auto-Approve-Liste'
+}
+
 function isSafeCommand(cmd) {
   const c = (cmd || '').trim()
   if (!c) return false
@@ -41,7 +55,9 @@ function isSafeCommand(cmd) {
   if (UNSAFE_META.test(stripped)) return false
   // find kann ohne Metazeichen Commands ausfuehren -> -exec & Co. sperren
   if (/^find\b/.test(c) && /-(exec|execdir|delete|ok|okdir)\b/.test(c)) return false
-  return SAFE_PATTERNS.some(re => re.test(c))
+  if (SAFE_PATTERNS.some(re => re.test(c))) return true
+  // Vom User per "Immer erlauben" freigegebene Prefixe (Metazeichen-Check gilt weiterhin)
+  return userAllowedPrefixes().some(p => typeof p === 'string' && p.length >= 3 && !NEVER_ALLOW.test(p) && c.startsWith(p))
 }
 
 const stripAnsi = s => s.replace(/\x1B\[[0-9;]*[mGKHF]/g, '').replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '')
@@ -112,6 +128,7 @@ async function executeTool(toolCall, res, conversationId) {
         actionId,
         description,
         command,
+        reason: approvalReason(command),
         type: 'shell',
         source: 'chat'
       })}\n\n`)
@@ -553,6 +570,23 @@ router.get('/models/list', requireAuth, async (req, res) => {
   } catch {
     res.status(503).json({ error: 'Could not reach Ollama' })
   }
+})
+
+// "Immer erlauben": Command-Prefix in die User-Allowlist aufnehmen
+// Destruktive Commands duerfen NIE auf die Auto-Approve-Liste — egal was der User klickt
+const NEVER_ALLOW = /^(rm|rmdir|mv|dd|mkfs|shred|shutdown|reboot|halt|poweroff|kill|killall|pkill|chmod|chown|truncate|userdel|groupdel|fdisk|parted|wipefs|iptables|ufw)\b|^(pm2 (delete|kill|flush))|^(git (push|reset|checkout|clean|rebase))|^(docker (rm|rmi|kill|prune|system))|^(npm (uninstall|remove))\b/
+
+router.post('/allowlist', requireAuth, (req, res) => {
+  const prefix = (req.body?.prefix || '').trim()
+  if (prefix.length < 3 || prefix.length > 80) return res.status(400).json({ error: 'Prefix 3-80 Zeichen' })
+  if (/[;&|><`$\n\\'"]/.test(prefix)) return res.status(400).json({ error: 'Keine Metazeichen im Prefix' })
+  if (NEVER_ALLOW.test(prefix)) return res.status(400).json({ error: 'Destruktive Commands koennen nicht dauerhaft freigegeben werden' })
+  const list = userAllowedPrefixes()
+  if (!list.includes(prefix)) {
+    list.push(prefix)
+    fs.writeFileSync(ALLOWLIST_PATH, JSON.stringify(list, null, 2))
+  }
+  res.json({ ok: true, prefixes: list })
 })
 
 export default router

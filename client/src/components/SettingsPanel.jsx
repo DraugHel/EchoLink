@@ -96,7 +96,10 @@ export default function SettingsPanel({ conversation, onUpdate, onClose }) {
                     ...styles.templateBtn,
                     ...(form.system_prompt === t.prompt ? styles.templateActive : {})
                   }}
-                  onClick={() => set('system_prompt', t.prompt)}
+                  onClick={() => {
+                    set('system_prompt', t.prompt)
+                    if (t.temperature != null) set('temperature', t.temperature)
+                  }}
                   title={t.description}
                 >
                   <span style={{ color: form.system_prompt === t.prompt ? 'var(--accent)' : 'var(--text2)' }}>{t.icon}</span>

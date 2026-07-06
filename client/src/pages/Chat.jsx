@@ -5,6 +5,8 @@ import MessageInput from '../components/MessageInput.jsx'
 import SettingsPanel from '../components/SettingsPanel.jsx'
 import api from '../lib/api.js'
 import ThemePicker, { useTheme } from '../components/ThemePicker.jsx'
+import CorsnFace from '../components/CorsnFace.jsx'
+import TerminalTimeline from '../components/TerminalTimeline.jsx'
 
 function useIsMobile() {
   const [mobile, setMobile] = useState(typeof window !== 'undefined' && window.innerWidth < 768)
@@ -21,6 +23,8 @@ export default function Chat({ user, onLogout }) {
   const [activeConvo, setActiveConvo] = useState(null)
   const [messages, setMessages] = useState([])
   const [streaming, setStreaming] = useState(false)
+  const [sysStatus, setSysStatus] = useState(null)
+  const [showSysPanel, setShowSysPanel] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
   const [mobileSidebar, setMobileSidebar] = useState(false)
   const [availableModels, setAvailableModels] = useState([])
@@ -95,6 +99,17 @@ export default function Chat({ user, onLogout }) {
     stickToBottomRef.current = true
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }
+
+  // Server-Puls: PM2-Apps, Disk, Load — alle 30s
+  useEffect(() => {
+    let alive = true
+    const load = () => api.get('/api/system/status')
+      .then(d => { if (alive) setSysStatus(d) })
+      .catch(() => {})
+    load()
+    const iv = setInterval(load, 30000)
+    return () => { alive = false; clearInterval(iv) }
+  }, [])
 
   async function loadConversations() {
     const convos = await api.get('/api/conversations')
@@ -323,6 +338,19 @@ export default function Chat({ user, onLogout }) {
     }
   }
 
+  async function handleActionAlways(actionId, actionRequest) {
+    try {
+      const words = (actionRequest?.command || '').trim().split(/\s+/)
+      const bad = /[;&|><`$\\'"]/
+      let prefix = words.slice(0, 2).join(' ')
+      if (bad.test(prefix)) prefix = words[0] || ''
+      if (prefix.length >= 3 && !bad.test(prefix)) {
+        await api.post('/api/chat/allowlist', { prefix })
+      }
+    } catch (err) { console.error('Allowlist error:', err) }
+    handleActionApprove(actionId, actionRequest)
+  }
+
   async function handleActionDeny(actionId, actionRequest) {
     try {
       const endpoint = actionRequest?.source === 'chat'
@@ -462,6 +490,44 @@ export default function Chat({ user, onLogout }) {
           <span style={styles.convoTitle}>
             {activeConvo ? activeConvo.title : 'EchoLink'}
           </span>
+          {sysStatus && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginRight: 4, cursor: 'pointer' }}
+              onClick={() => setShowSysPanel(v => !v)}>
+              <CorsnFace mood={sysStatus.apps.some(a => a.status !== 'online') ? 'panic' : (streaming ? 'focus' : 'ok')} />
+              <div style={{ display: 'flex', gap: 3 }}>
+                {sysStatus.apps.map(a => (
+                  <span key={a.name} style={{ width: 6, height: 6, borderRadius: '50%',
+                    background: a.status === 'online' ? 'var(--accent)' : 'var(--danger)' }} />
+                ))}
+              </div>
+              <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text3)' }}>
+                {sysStatus.disk}%
+              </span>
+            </div>
+          )}
+          {showSysPanel && sysStatus && (
+            <>
+              <div style={{ position: 'fixed', inset: 0, zIndex: 40 }} onClick={() => setShowSysPanel(false)} />
+              <div style={{
+                position: 'fixed', top: 58, right: 8, zIndex: 41,
+                background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 10,
+                padding: '10px 14px', minWidth: 210, fontFamily: 'var(--font-mono)', fontSize: 12,
+                boxShadow: '0 8px 24px rgba(0,0,0,0.45)'
+              }}>
+                {sysStatus.apps.map(a => (
+                  <div key={a.name} style={{ display: 'flex', justifyContent: 'space-between', gap: 12, padding: '3px 0' }}>
+                    <span style={{ color: a.status === 'online' ? 'var(--text1)' : 'var(--danger)' }}>{a.name}</span>
+                    <span style={{ color: 'var(--text3)' }}>{a.status} · {a.restarts}x</span>
+                  </div>
+                ))}
+                <div style={{ borderTop: '1px solid var(--border)', marginTop: 6, paddingTop: 6,
+                  display: 'flex', justifyContent: 'space-between', color: 'var(--text3)' }}>
+                  <span>disk {sysStatus.disk}%</span>
+                  <span>load {sysStatus.load}</span>
+                </div>
+              </div>
+            </>
+          )}
           {agentEnabled && (
             <button
               style={{
@@ -509,7 +575,22 @@ export default function Chat({ user, onLogout }) {
             </div>
           )}
 
-          {activeConvo && !loading && messages.map((m, i) => (
+          {activeConvo && !loading && (() => {
+            // Aufeinanderfolgende Terminal-Messages zu einer Timeline gruppieren
+            const isTerm = (x) => x.role === 'assistant' && !x.streaming
+              && typeof x.content === 'string' && x.content.startsWith('**Terminal:** ')
+            const out = []
+            for (let i = 0; i < messages.length; i++) {
+              const m = messages[i]
+              if (isTerm(m)) {
+                const group = [m]
+                while (i + 1 < messages.length && isTerm(messages[i + 1])) group.push(messages[++i])
+                out.push(
+                  <TerminalTimeline key={'tg-' + group[0].id} items={group} onDelete={deleteMessage} />
+                )
+              } else {
+                const prev = out.length === 0 ? null : messages[i - 1]
+                out.push(
             <Message
               key={m.id}
               role={m.role}
@@ -522,9 +603,10 @@ export default function Chat({ user, onLogout }) {
               usage={m.usage}
               id={m.id}
               createdAt={m.created_at}
-              prevCreatedAt={i > 0 ? messages[i - 1].created_at : null}
+              prevCreatedAt={prev ? prev.created_at : null}
               onDelete={deleteMessage}
               onApprove={handleActionApprove}
+              onAlwaysAllow={handleActionAlways}
               onDeny={handleActionDeny}
               editing={editingId === m.id}
               onEdit={() => setEditingId(m.id)}
@@ -533,7 +615,11 @@ export default function Chat({ user, onLogout }) {
               retryFailed={m.retryFailed}
               onRetry={retryMessage}
             />
-          ))}
+                )
+              }
+            }
+            return out
+          })()}
 
           {activeConvo && !loading && messages.length === 0 && (
             <div style={styles.emptyChat}><p>Start the conversation below.</p></div>
@@ -562,6 +648,19 @@ export default function Chat({ user, onLogout }) {
           <div ref={messagesEndRef} />
         </div>
 
+        {activeConvo && !streaming && messages.length > 0 && (
+          <div style={{ display: 'flex', gap: 6, padding: '0 12px 6px', overflowX: 'auto', maxWidth: 820, margin: '0 auto', width: '100%', boxSizing: 'border-box' }}>
+            {['pm2 status', 'df -h', 'zeig die letzten error-logs'].map(q => (
+              <button key={q}
+                style={{ flexShrink: 0, fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text2)',
+                  background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 999,
+                  padding: '4px 10px', cursor: 'pointer' }}
+                onClick={() => sendMessage(q)}>
+                {q}
+              </button>
+            ))}
+          </div>
+        )}
         {activeConvo && (
           <MessageInput
             streaming={streaming}

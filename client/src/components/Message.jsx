@@ -11,7 +11,7 @@ function getCodeStyle() {
   return LIGHT_THEMES.includes(t) ? oneLight : oneDark
 }
 
-function Message({ role, content, streaming, images, think, toolStatus, actionRequests, onApprove, onDeny, usage, id, createdAt, prevCreatedAt, onDelete, editing, onEdit, onSaveEdit, onCancelEdit, retryFailed, onRetry }) {
+function Message({ role, content, streaming, images, think, toolStatus, actionRequests, onApprove, onDeny, onAlwaysAllow, usage, id, createdAt, prevCreatedAt, onDelete, editing, onEdit, onSaveEdit, onCancelEdit, retryFailed, onRetry }) {
   const [thinkOpen, setThinkOpen] = useState(false)
   const [termOpen, setTermOpen] = useState(false)
   const [usageOpen, setUsageOpen] = useState(false)
@@ -69,6 +69,11 @@ function Message({ role, content, streaming, images, think, toolStatus, actionRe
   function handleApprove(actionId, actionRequest) {
     setActionStates(prev => ({ ...prev, [actionId]: 'approved' }))
     if (onApprove) onApprove(actionId, actionRequest)
+  }
+
+  function handleAlways(actionId, actionRequest) {
+    setActionStates(prev => ({ ...prev, [actionId]: 'approved' }))
+    if (onAlwaysAllow) onAlwaysAllow(actionId, actionRequest)
   }
 
   function handleDeny(actionId, actionRequest) {
@@ -207,6 +212,11 @@ function Message({ role, content, streaming, images, think, toolStatus, actionRe
                       <span style={styles.actionTitle}>Action requires approval</span>
                     </div>
                     <p style={styles.actionDesc}>{ar.description}</p>
+                    {ar.reason && (
+                      <p style={{ fontSize: 11, color: 'var(--text3)', margin: '0 0 8px', fontFamily: 'var(--font-mono)' }}>
+                        ({ar.reason})
+                      </p>
+                    )}
                     {ar.command && (
                       <code style={styles.actionCmd}>{ar.command}</code>
                     )}
@@ -217,6 +227,14 @@ function Message({ role, content, streaming, images, think, toolStatus, actionRe
                       <button style={styles.denyBtn} onClick={() => handleDeny(ar.actionId, ar)}>
                         <XIcon2 /> Deny
                       </button>
+                      {ar.source === 'chat' && onAlwaysAllow && (
+                        <button style={{ ...styles.approveBtn, background: 'transparent',
+                          border: '1px solid var(--border)', color: 'var(--text2)' }}
+                          onClick={() => handleAlways(ar.actionId, ar)}
+                          title="Diesen Command-Typ zur Auto-Approve-Liste hinzufuegen">
+                          Immer erlauben
+                        </button>
+                      )}
                     </div>
                   </div>
                 )

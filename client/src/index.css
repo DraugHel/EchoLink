@@ -186,3 +186,11 @@ a { color: var(--accent); text-decoration: none; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
 }
+
+
+/* ── Corsn face ── */
+.corsn-face { display: inline-flex; line-height: 0; }
+.corsn-face .corsn-eye { transform-origin: center; animation: corsnBlink 5s infinite; }
+@keyframes corsnBlink { 0%, 94%, 100% { transform: scaleY(1); } 96%, 98% { transform: scaleY(0.12); } }
+.corsn-panic { animation: corsnShake 0.5s ease-in-out infinite; }
+@keyframes corsnShake { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-1px); } 75% { transform: translateX(1px); } }
