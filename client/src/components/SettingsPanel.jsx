@@ -10,12 +10,44 @@ export default function SettingsPanel({ conversation, onUpdate, onClose }) {
     temperature: conversation.temperature,
     top_k: conversation.top_k,
     top_p: conversation.top_p,
+    reasoning_effort: conversation.reasoning_effort || '',
   })
   const [defaultPrompt, setDefaultPrompt] = useState('')
   const [savingDefault, setSavingDefault] = useState(false)
   const [defaultSaved, setDefaultSaved] = useState(false)
   const [saving, setSaving] = useState(false)
   const [modelsError, setModelsError] = useState(false)
+
+  // Provider aus Modellnamen ableiten (Ollama-Eintraege tragen kein provider-Feld)
+  function modelProvider(m) {
+    if (m.provider) return m.provider
+    return (m.name || '').endsWith(':cloud') ? 'ollama-cloud' : 'ollama'
+  }
+  const PROVIDER_LABELS = {
+    'ollama-cloud': 'Ollama Cloud', 'ollama': 'Ollama (lokal)',
+    'anthropic': 'Anthropic', 'openai': 'OpenAI', 'zai': 'Z.ai'
+  }
+  const [provider, setProvider] = useState(null)
+  // Initial: Provider aus dem aktuellen Model der Convo ableiten
+  const currentProvider = provider ?? modelProvider({ name: form.model, provider:
+    form.model.startsWith('claude') ? 'anthropic'
+    : form.model.startsWith('openai/') ? 'openai'
+    : form.model.startsWith('zai/') ? 'zai'
+    : undefined })
+  const availableProviders = [...new Set(models.map(modelProvider))]
+  const filteredModels = models.filter(m => modelProvider(m) === currentProvider)
+
+  function switchProvider(p) {
+    setProvider(p)
+    const first = models.find(m => modelProvider(m) === p)
+    if (first && modelProvider({ name: form.model, provider:
+      form.model.startsWith('claude') ? 'anthropic'
+      : form.model.startsWith('openai/') ? 'openai'
+      : form.model.startsWith('zai/') ? 'zai'
+      : undefined }) !== p) {
+      set('model', first.name)
+    }
+  }
 
   useEffect(() => {
     api.get('/api/chat/models/list').then(m => setModels(m)).catch(() => setModelsError(true))
@@ -60,13 +92,20 @@ export default function SettingsPanel({ conversation, onUpdate, onClose }) {
           {/* Conversation settings */}
           <p style={styles.sectionLabel}>This Conversation</p>
 
+          <Field label="Provider">
+            <select style={styles.select} value={currentProvider} onChange={e => switchProvider(e.target.value)}>
+              {availableProviders.length === 0 && <option value={currentProvider}>{PROVIDER_LABELS[currentProvider] || currentProvider}</option>}
+              {availableProviders.map(p => <option key={p} value={p}>{PROVIDER_LABELS[p] || p}</option>)}
+            </select>
+          </Field>
+
           <Field label="Model">
             {modelsError
-              ? <p style={styles.err}>Could not fetch models from Ollama.</p>
+              ? <p style={styles.err}>Could not fetch models.</p>
               : (
                 <select style={styles.select} value={form.model} onChange={e => set('model', e.target.value)}>
-                  {models.length === 0 && <option value={form.model}>{form.model}</option>}
-                  {models.map(m => <option key={m.name} value={m.name}>{m.name}</option>)}
+                  {filteredModels.length === 0 && <option value={form.model}>{form.model}</option>}
+                  {filteredModels.map(m => <option key={m.name} value={m.name}>{m.name}</option>)}
                 </select>
               )
             }
@@ -85,6 +124,18 @@ export default function SettingsPanel({ conversation, onUpdate, onClose }) {
           <Field label={`Top-P: ${form.top_p.toFixed(2)}`}>
             <input type="range" min="0" max="1" step="0.05" value={form.top_p}
               onChange={e => set('top_p', parseFloat(e.target.value))} style={styles.range} />
+          </Field>
+
+          <Field label="Reasoning">
+            <select value={form.reasoning_effort} onChange={e => set('reasoning_effort', e.target.value)}
+              style={{ width: '100%', padding: '8px 10px', background: 'var(--bg3)', color: 'var(--text1)',
+                border: '1px solid var(--border)', borderRadius: 8, fontFamily: 'var(--font-mono)', fontSize: 13 }}>
+              <option value="">Provider default</option>
+              <option value="off">Off</option>
+              <option value="low">Low</option>
+              <option value="medium">Medium</option>
+              <option value="high">High</option>
+            </select>
           </Field>
 
           <Field label="Prompt Template">

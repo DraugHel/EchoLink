@@ -12,7 +12,7 @@ const requireAuth = (req, res, next) => {
 // Get all conversations for current user
 router.get('/', requireAuth, (req, res) => {
   const convos = db.prepare(`
-    SELECT id, title, model, system_prompt, temperature, top_k, top_p, created_at, updated_at
+    SELECT id, title, model, system_prompt, temperature, top_k, top_p, reasoning_effort, created_at, updated_at
     FROM conversations
     WHERE user_id = ?
     ORDER BY updated_at DESC
@@ -22,7 +22,7 @@ router.get('/', requireAuth, (req, res) => {
 
 // Create new conversation
 router.post('/', requireAuth, (req, res) => {
-  const { title, model, system_prompt, temperature, top_k, top_p } = req.body
+  const { title, model, system_prompt, temperature, top_k, top_p, reasoning_effort } = req.body
 
   // Use user's default prompt if none provided
   // Memory is no longer baked into system_prompt — it's appended at chat time
@@ -54,10 +54,10 @@ router.patch('/:id', requireAuth, (req, res) => {
     .get(req.params.id, req.session.userId)
   if (!convo) return res.status(404).json({ error: 'Not found' })
 
-  const { title, model, system_prompt, temperature, top_k, top_p } = req.body
+  const { title, model, system_prompt, temperature, top_k, top_p, reasoning_effort } = req.body
   db.prepare(`
     UPDATE conversations
-    SET title = ?, model = ?, system_prompt = ?, temperature = ?, top_k = ?, top_p = ?, updated_at = unixepoch()
+    SET title = ?, model = ?, system_prompt = ?, temperature = ?, top_k = ?, top_p = ?, reasoning_effort = ?, updated_at = unixepoch()
     WHERE id = ?
   `).run(
     title ?? convo.title,
@@ -66,6 +66,7 @@ router.patch('/:id', requireAuth, (req, res) => {
     temperature ?? convo.temperature,
     top_k ?? convo.top_k,
     top_p ?? convo.top_p,
+    reasoning_effort ?? convo.reasoning_effort,
     convo.id
   )
   res.json(db.prepare('SELECT * FROM conversations WHERE id = ?').get(convo.id))

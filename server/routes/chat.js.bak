@@ -210,11 +210,6 @@ function toAnthropic(messages) {
   let pendingToolIds = []
   for (const m of messages) {
     if (m.role === 'system') { system += (system ? '\n\n' : '') + m.content; continue }
-    if (m.role === 'assistant' && m._raw) {
-      pendingToolIds = m._raw.filter(b => b.type === 'tool_use').map(b => b.id)
-      out.push({ role: 'assistant', content: m._raw })
-      continue
-    }
     if (m.role === 'assistant' && m.tool_calls?.length) {
       const blocks = []
       if (m.content) blocks.push({ type: 'text', text: m.content })
@@ -293,28 +288,18 @@ async function streamAnthropic(model, messages, options, res, abortSignal) {
     if (typeof m.content === 'string' && m.content) {
       m.content = [{ type: 'text', text: m.content, cache_control: { type: 'ephemeral' } }]
     } else if (Array.isArray(m.content) && m.content.length) {
-      // Breakpoint nie auf Thinking-Bloecke setzen
-      for (let j = m.content.length - 1; j >= 0; j--) {
-        if (m.content[j].type !== 'thinking' && m.content[j].type !== 'redacted_thinking') {
-          m.content[j].cache_control = { type: 'ephemeral' }
-          break
-        }
-      }
+      m.content[m.content.length - 1].cache_control = { type: 'ephemeral' }
     }
   }
   // --- Ende Prompt Caching ---
 
-  const RE = options?.reasoningEffort || ''
-  const thinkingOn = RE !== '' && RE !== 'off'
   const body = {
-    model, max_tokens: 16384, stream: true,
+    model, max_tokens: 8192, stream: true,
     messages: msgs,
     tools: anthropicTools(),
     ...(systemParam ? { system: systemParam } : {}),
-    // Thinking an: adaptive + effort; temperature ist dann nicht erlaubt
-    ...(thinkingOn
-      ? { thinking: { type: 'adaptive' }, effort: RE }
-      : (options?.temperature != null ? { temperature: Math.min(options.temperature, 1) } : {}))
+    // top_p wird von neueren Claude-Modellen abgelehnt (deprecated) — nur temperature senden
+    ...(options?.temperature != null ? { temperature: Math.min(options.temperature, 1) } : {})
   }
   const r = await fetch(ANTHROPIC_URL, {
     method: 'POST',
@@ -331,9 +316,8 @@ async function streamAnthropic(model, messages, options, res, abortSignal) {
     throw new Error(`Anthropic ${r.status}: ${errBody.slice(0, 200)}`)
   }
 
-  let fullContent = '', fullThinking = ''
+  let fullContent = ''
   const toolBlocks = {}
-  const rawBlocks = {}  // alle Content-Bloecke in Reihenfolge — muessen bei Tool-Use verbatim zurueck
   let inputTokens = 0, outputTokens = 0
   let buf = ''
   const decoder = new TextDecoder()
@@ -352,30 +336,13 @@ async function streamAnthropic(model, messages, options, res, abortSignal) {
         // Cache-Tokens mitzaehlen, damit die Anzeige die echte Kontextgroesse zeigt
         inputTokens = (u.input_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0)
       }
-      if (ev.type === 'content_block_start' && ev.content_block) {
-        const cb = ev.content_block
-        if (cb.type === 'tool_use') {
-          toolBlocks[ev.index] = { id: cb.id, name: cb.name, json: '' }
-          rawBlocks[ev.index] = { type: 'tool_use', id: cb.id, name: cb.name, input: {} }
-        } else if (cb.type === 'thinking') {
-          rawBlocks[ev.index] = { type: 'thinking', thinking: '', signature: '' }
-        } else if (cb.type === 'redacted_thinking') {
-          rawBlocks[ev.index] = { type: 'redacted_thinking', data: cb.data }
-        } else if (cb.type === 'text') {
-          rawBlocks[ev.index] = { type: 'text', text: '' }
-        }
+      if (ev.type === 'content_block_start' && ev.content_block?.type === 'tool_use') {
+        toolBlocks[ev.index] = { id: ev.content_block.id, name: ev.content_block.name, json: '' }
       }
       if (ev.type === 'content_block_delta') {
         if (ev.delta?.type === 'text_delta') {
           fullContent += ev.delta.text
-          if (rawBlocks[ev.index]) rawBlocks[ev.index].text += ev.delta.text
           res.write(`data: ${JSON.stringify({ token: ev.delta.text })}\n\n`)
-        } else if (ev.delta?.type === 'thinking_delta' && ev.delta.thinking) {
-          fullThinking += ev.delta.thinking
-          if (rawBlocks[ev.index]) rawBlocks[ev.index].thinking += ev.delta.thinking
-          res.write(`data: ${JSON.stringify({ think: ev.delta.thinking })}\n\n`)
-        } else if (ev.delta?.type === 'signature_delta' && rawBlocks[ev.index]) {
-          rawBlocks[ev.index].signature = (rawBlocks[ev.index].signature || '') + ev.delta.signature
         } else if (ev.delta?.type === 'input_json_delta' && toolBlocks[ev.index]) {
           toolBlocks[ev.index].json += ev.delta.partial_json
         }
@@ -391,21 +358,12 @@ async function streamAnthropic(model, messages, options, res, abortSignal) {
     try { args = t.json ? JSON.parse(t.json) : {} } catch {}
     return { id: t.id, function: { name: t.name, arguments: args } }
   })
-  // tool_use-Inputs in den rohen Bloecken finalisieren
-  for (const [idx, tb] of Object.entries(toolBlocks)) {
-    if (rawBlocks[idx]) {
-      try { rawBlocks[idx].input = tb.json ? JSON.parse(tb.json) : {} } catch {}
-    }
-  }
-  const rawOutput = Object.keys(rawBlocks).length
-    ? Object.keys(rawBlocks).sort((a, b) => a - b).map(k => rawBlocks[k])
-    : null
   const tokenUsage = {
     promptTokens: inputTokens,
     completionTokens: outputTokens,
     totalTokens: inputTokens + outputTokens
   }
-  return { fullContent, fullThinking, toolCalls, tokenUsage, rawOutput }
+  return { fullContent, fullThinking: '', toolCalls, tokenUsage }
 }
 // ===================== Ende Anthropic Provider =====================
 
@@ -451,30 +409,6 @@ function toOpenAI(messages) {
   return out
 }
 
-// Split the dynamic timeNote out of the first system message so the stable
-// system prefix can be prompt-cached by OpenAI. The timeNote is re-inserted
-// as a separate system message right before the last user message.
-function splitSystemTimeNote(messages) {
-  const out = messages.map(m => ({ ...m }))
-  const sysIdx = out.findIndex(m => m.role === 'system')
-  if (sysIdx === -1) return out
-  const content = out[sysIdx].content || ''
-  const marker = 'Current date and time:'
-  const idx = content.indexOf(marker)
-  if (idx === -1) return out
-  const stable = content.slice(0, idx).trim()
-  const timeNote = content.slice(idx).trim()
-  if (!stable && !timeNote) return out
-  out[sysIdx].content = stable
-  const lastUserIdx = out.map((m, i) => ({ m, i })).filter(({ m }) => m.role === 'user').pop()?.i
-  if (lastUserIdx !== undefined) {
-    out.splice(lastUserIdx, 0, { role: 'system', content: timeNote })
-  } else {
-    out.push({ role: 'system', content: timeNote })
-  }
-  return out
-}
-
 // Gleiches Interface wie streamOllama: { fullContent, fullThinking, toolCalls, tokenUsage }
 async function streamOpenAICompatible(providerName, endpoint, key, model, messages, options, res, abortSignal, extra = {}) {
   if (!key) throw new Error(`API-Key fuer ${providerName} fehlt in der .env`)
@@ -483,6 +417,7 @@ async function streamOpenAICompatible(providerName, endpoint, key, model, messag
     messages: toOpenAI(messages),
     tools: [SEARCH_TOOL, FIRECRAWL_TOOL, TERMINAL_TOOL],
     stream_options: { include_usage: true },
+    reasoning_effort: 'none',
     ...(options?.temperature != null ? { temperature: Math.min(options.temperature, 2) } : {}),
     ...(options?.top_p != null ? { top_p: options.top_p } : {}),
     ...extra
@@ -552,134 +487,13 @@ async function streamOpenAICompatible(providerName, endpoint, key, model, messag
 }
 
 const streamZai = (model, messages, options, res, abortSignal) =>
-  streamOpenAICompatible('Z.ai', ZAI_URL, ZAI_KEY, model, messages, options, res, abortSignal,
-    options?.reasoningEffort === 'off' ? { thinking: { type: 'disabled' } } : {})
+  streamOpenAICompatible('Z.ai', ZAI_URL, ZAI_KEY, model, messages, options, res, abortSignal)
 
 const OPENAI_URL = 'https://api.openai.com/v1/chat/completions'
 const OPENAI_KEY = process.env.OPENAI_API_KEY || ''
 const streamOpenAI = (model, messages, options, res, abortSignal) =>
-  streamOpenAICompatible('OpenAI', OPENAI_URL, OPENAI_KEY, model, messages, options, res, abortSignal, { reasoning_effort: 'none' })
+  streamOpenAICompatible('OpenAI', OPENAI_URL, OPENAI_KEY, model, messages, options, res, abortSignal)
 // ===================== Ende OpenAI-kompatible Provider =====================
-
-// ===================== OpenAI Responses API (Reasoning + Tools) =====================
-const RESPONSES_URL = 'https://api.openai.com/v1/responses'
-
-// Internes Format -> Responses-API-Input. Assistant-Messages mit _raw
-// (Items aus vorheriger Responses-Iteration, inkl. Reasoning) gehen verbatim zurueck —
-// nur so bleibt die Denkkette ueber Tool-Calls hinweg erhalten.
-function toResponsesInput(messages) {
-  let instructions = ''
-  const input = []
-  let pendingCallIds = []
-  for (const m of messages) {
-    if (m.role === 'system') { instructions += (instructions ? '\n\n' : '') + m.content; continue }
-    if (m.role === 'assistant' && m._raw) {
-      pendingCallIds = m._raw.filter(it => it.type === 'function_call').map(it => it.call_id)
-      input.push(...m._raw)
-      continue
-    }
-    if (m.role === 'assistant' && m.tool_calls?.length) {
-      if (m.content) input.push({ role: 'assistant', content: [{ type: 'output_text', text: m.content }] })
-      pendingCallIds = []
-      m.tool_calls.forEach((tc, i) => {
-        const id = tc.id || `call_gen_${input.length}_${i}`
-        pendingCallIds.push(id)
-        input.push({ type: 'function_call', call_id: id, name: tc.function.name, arguments: JSON.stringify(tc.function.arguments || {}) })
-      })
-      continue
-    }
-    if (m.role === 'tool') {
-      input.push({ type: 'function_call_output', call_id: pendingCallIds.shift() || `call_gen_${input.length}`, output: String(m.content ?? '') })
-      continue
-    }
-    if (m.images?.length) {
-      const parts = m.images.map(b64 => ({ type: 'input_image', image_url: `data:${imgMediaType(b64)};base64,${b64}` }))
-      if (m.content) parts.push({ type: 'input_text', text: m.content })
-      input.push({ role: 'user', content: parts })
-    } else if (m.role === 'assistant') {
-      input.push({ role: 'assistant', content: [{ type: 'output_text', text: m.content || '' }] })
-    } else {
-      input.push({ role: 'user', content: [{ type: 'input_text', text: m.content || '' }] })
-    }
-  }
-  return { instructions, input }
-}
-
-async function streamResponses(model, messages, options, res, abortSignal) {
-  if (!OPENAI_KEY) throw new Error('API-Key fuer OpenAI fehlt in der .env')
-  const { instructions, input } = toResponsesInput(messages)
-  const body = {
-    model, stream: true, store: false,
-    include: ['reasoning.encrypted_content'],
-    input,
-    ...(instructions ? { instructions } : {}),
-    tools: [SEARCH_TOOL, FIRECRAWL_TOOL, TERMINAL_TOOL].map(t => ({
-      type: 'function', name: t.function.name, description: t.function.description, parameters: t.function.parameters
-    })),
-    // chat-latest-Varianten sind Instant-Modelle und lehnen den reasoning-Param ab
-    ...(model.includes('chat') ? {} : { reasoning: {
-      summary: 'detailed',
-      ...(options?.reasoningEffort
-        ? { effort: options.reasoningEffort === 'off' ? 'none' : options.reasoningEffort }
-        : {})
-    } })
-    // Reasoning-Modelle lehnen temperature/top_p ab -> bewusst weggelassen
-  }
-  const r = await fetch(RESPONSES_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${OPENAI_KEY}` },
-    body: JSON.stringify(body),
-    signal: abortSignal
-  })
-  if (!r.ok) {
-    const errBody = await r.text()
-    throw new Error(`OpenAI Responses ${r.status}: ${errBody.slice(0, 200)}`)
-  }
-
-  let fullContent = '', fullThinking = ''
-  let rawOutput = null, usage = null
-  let buf = ''
-  const decoder = new TextDecoder()
-
-  for await (const chunk of r.body) {
-    buf += decoder.decode(chunk, { stream: true })
-    const lines = buf.split('\n')
-    buf = lines.pop()
-    for (const line of lines) {
-      if (!line.startsWith('data:')) continue
-      const payload = line.slice(5).trim()
-      if (!payload || payload === '[DONE]') continue
-      let ev
-      try { ev = JSON.parse(payload) } catch { continue }
-      if (ev.type === 'response.output_text.delta' && ev.delta) {
-        fullContent += ev.delta
-        res.write(`data: ${JSON.stringify({ token: ev.delta })}\n\n`)
-      } else if (ev.type === 'response.reasoning_summary_text.delta' && ev.delta) {
-        fullThinking += ev.delta
-        res.write(`data: ${JSON.stringify({ think: ev.delta })}\n\n`)
-      } else if (ev.type === 'response.completed') {
-        rawOutput = ev.response?.output || null
-        usage = ev.response?.usage || null
-      } else if (ev.type === 'response.failed' || ev.type === 'error') {
-        throw new Error(ev.response?.error?.message || ev.message || 'OpenAI Responses stream error')
-      }
-    }
-  }
-
-  const toolCalls = (rawOutput || []).filter(it => it.type === 'function_call').map(it => {
-    let args = {}
-    try { args = it.arguments ? JSON.parse(it.arguments) : {} } catch {}
-    return { id: it.call_id, function: { name: it.name, arguments: args } }
-  })
-  const tokenUsage = usage ? {
-    promptTokens: usage.input_tokens || 0,
-    completionTokens: usage.output_tokens || 0,
-    totalTokens: usage.total_tokens || ((usage.input_tokens || 0) + (usage.output_tokens || 0))
-  } : null
-  return { fullContent, fullThinking, toolCalls, tokenUsage, rawOutput }
-}
-// ===================== Ende Responses API =====================
-
 
 
 // Stream from Ollama, collecting tokens and forwarding to client
@@ -691,8 +505,7 @@ async function streamOllama(model, messages, options, res, abortSignal) {
     body: JSON.stringify({
       model, messages, stream: true,
       tools: [SEARCH_TOOL, FIRECRAWL_TOOL, TERMINAL_TOOL],
-      ...(options?.reasoningEffort === 'off' ? { think: false } : {}),
-      options: { temperature: options?.temperature, top_k: options?.top_k, top_p: options?.top_p }
+      options
     }),
     signal: abortSignal
   })
@@ -942,12 +755,10 @@ router.post('/:conversationId', requireAuth, async (req, res) => {
   const options = {
     temperature: convo.temperature,
     top_k: convo.top_k,
-    top_p: convo.top_p,
-    reasoningEffort: convo.reasoning_effort || ''
+    top_p: convo.top_p
   }
 
   let allContent = ''
-  let accThinking = ''
   try {
     let iterations = 0
     let workingMessages = [...ollamaMessages]
@@ -959,22 +770,16 @@ router.post('/:conversationId', requireAuth, async (req, res) => {
       let providerModel = activeModel
       if (activeModel.startsWith('claude')) streamFn = streamAnthropic
       else if (activeModel.startsWith('zai/')) { streamFn = streamZai; providerModel = activeModel.slice(4) }
-      else if (activeModel.startsWith('openai/')) { streamFn = streamResponses; providerModel = activeModel.slice(7) }
-      if (streamFn === streamOpenAI || streamFn === streamZai || streamFn === streamResponses) {
-        workingMessages = splitSystemTimeNote(workingMessages)
-      }
-      const { fullContent, fullThinking, toolCalls, tokenUsage, rawOutput } = await streamFn(providerModel, workingMessages, options, res, abortController.signal)
+      else if (activeModel.startsWith('openai/')) { streamFn = streamOpenAI; providerModel = activeModel.slice(7) }
+      const { fullContent, fullThinking, toolCalls, tokenUsage } = await streamFn(providerModel, workingMessages, options, res, abortController.signal)
       if (fullContent) allContent += (allContent ? '\n\n' : '') + fullContent
-      if (fullThinking) accThinking += (accThinking ? '\n\n' : '') + fullThinking
 
       // Handle tool calls
       if (toolCalls && toolCalls.length > 0) {
         workingMessages.push({
           role: 'assistant',
           content: fullContent || '',
-          tool_calls: toolCalls,
-          // Responses-API: Items (inkl. Reasoning) fuer die naechste Iteration mitnehmen
-          ...(rawOutput ? { _raw: rawOutput } : {})
+          tool_calls: toolCalls
         })
 
         let terminalDone = false
@@ -1001,7 +806,7 @@ router.post('/:conversationId', requireAuth, async (req, res) => {
       let cleanResponse = allContent.replace(THINK_TAG_RE, '').trim()
 
       // Deduplicate: prefer native thinking, only fall back to tags
-      let allThinking = accThinking.trim()
+      let allThinking = fullThinking.trim()
       if (!allThinking && thinkTagMatch) {
         allThinking = thinkTagMatch.map(m => m.replace(/<\/?think>/g, '').trim()).filter(Boolean).join('\n\n')
       }

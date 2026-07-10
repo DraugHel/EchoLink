@@ -14,7 +14,7 @@ export default function TerminalTimeline({ items, onDelete }) {
 
   return (
     <div style={{
-      maxWidth: 820, width: '100%', margin: '0 auto 16px',
+      maxWidth: 820, width: '100%', margin: '0 auto 16px', flexShrink: 0,
       background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 10,
       fontFamily: 'var(--font-mono)', fontSize: 12, overflow: 'hidden'
     }}>
