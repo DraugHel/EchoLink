@@ -677,131 +677,22 @@ router.get('/stats', requireAuth, (req, res) => {
 })
 
 // List available models from Ollama
-const MODEL_LIST_CACHE_MS = Math.max(
-  5_000,
-  Number(process.env.MODEL_LIST_CACHE_MS) || 60_000
-)
-
-const MODEL_PROVIDER_TIMEOUT_MS = Math.max(
-  1_000,
-  Number(process.env.MODEL_PROVIDER_TIMEOUT_MS) || 4_000
-)
-
-let modelListCache = {
-  models: null,
-  expiresAt: 0
-}
-
-let modelListRefreshPromise = null
-
-async function fetchJsonWithTimeout(url, options = {}) {
-  const controller = new AbortController()
-  const timeout = setTimeout(
-    () => controller.abort(),
-    MODEL_PROVIDER_TIMEOUT_MS
-  )
-
-  try {
-    const response = await fetch(url, {
-      ...options,
-      signal: controller.signal
-    })
-
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`)
-    }
-
-    return await response.json()
-  } finally {
-    clearTimeout(timeout)
-  }
-}
-
-async function loadModelList() {
-  const providers = [
-    {
-      name: 'ollama',
-      enabled: true,
-      load: async () => {
-        const data = await fetchJsonWithTimeout(
-          `${OLLAMA_URL}/api/tags`
-        )
-        return data.models || []
-      }
-    },
-    {
-      name: 'anthropic',
-      enabled: Boolean(ANTHROPIC_KEY),
-      load: async () => {
-        const data = await fetchJsonWithTimeout(
-          'https://api.anthropic.com/v1/models',
-          {
-            headers: {
-              'x-api-key': ANTHROPIC_KEY,
-              'anthropic-version': '2023-06-01'
-            }
-          }
-        )
-
-        return (data.data || []).map(model => ({
-          name: model.id,
-          provider: 'anthropic'
-        }))
-      }
-    },
-    {
-      name: 'openai',
-      enabled: Boolean(OPENAI_KEY),
-      load: async () => {
-        const data = await fetchJsonWithTimeout(
-          'https://api.openai.com/v1/models',
-          {
-            headers: {
-              Authorization: `Bearer ${OPENAI_KEY}`
-            }
-          }
-        )
-
-        return (data.data || [])
-          .map(model => model.id)
-          .filter(id =>
-            /^(gpt-5|gpt-4|o[0-9])/.test(id) &&
-            !/audio|realtime|image|transcribe|tts|search|embedding/.test(id)
-          )
-          .sort()
-          .reverse()
-          .map(id => ({
-            name: `openai/${id}`,
-            provider: 'openai'
-          }))
-      }
-    }
-  ].filter(provider => provider.enabled)
-
-  const results = await Promise.allSettled(
-    providers.map(provider => provider.load())
-  )
-
+router.get('/models/list', requireAuth, async (req, res) => {
   const models = []
-
-  results.forEach((result, index) => {
-    const provider = providers[index]
-
-    if (result.status === 'fulfilled') {
-      models.push(...result.value)
-      return
-    }
-
-    console.warn(JSON.stringify({
-      level: 'warn',
-      event: 'model_provider_unavailable',
-      provider: provider.name,
-      error: result.reason?.name === 'AbortError'
-        ? `Timeout after ${MODEL_PROVIDER_TIMEOUT_MS}ms`
-        : result.reason?.message || String(result.reason)
-    }))
-  })
-
+  try {
+    const r = await fetch(`${OLLAMA_URL}/api/tags`)
+    const data = await r.json()
+    models.push(...(data.models || []))
+  } catch { /* Ollama nicht erreichbar */ }
+  if (ANTHROPIC_KEY) {
+    try {
+      const r2 = await fetch('https://api.anthropic.com/v1/models', {
+        headers: { 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01' }
+      })
+      const d2 = await r2.json()
+      models.push(...(d2.data || []).map(m => ({ name: m.id, provider: 'anthropic' })))
+    } catch { /* Anthropic nicht erreichbar */ }
+  }
   if (ZAI_KEY) {
     models.push(
       { name: 'zai/glm-5.2', provider: 'zai' },
@@ -809,77 +700,21 @@ async function loadModelList() {
       { name: 'zai/glm-4.7', provider: 'zai' }
     )
   }
-
-  // Doppelte Modellnamen entfernen, Reihenfolge aber beibehalten.
-  return Array.from(
-    new Map(
-      models
-        .filter(model => model?.name)
-        .map(model => [model.name, model])
-    ).values()
-  )
-}
-
-router.get('/models/list', requireAuth, async (req, res) => {
-  const now = Date.now()
-
-  if (
-    modelListCache.models?.length &&
-    modelListCache.expiresAt > now
-  ) {
-    res.setHeader('X-Model-Cache', 'HIT')
-    return res.json(modelListCache.models)
-  }
-
-  if (!modelListRefreshPromise) {
-    modelListRefreshPromise = loadModelList()
-      .then(models => {
-        if (models.length) {
-          modelListCache = {
-            models,
-            expiresAt: Date.now() + MODEL_LIST_CACHE_MS
-          }
-        }
-
-        return models
+  if (OPENAI_KEY) {
+    try {
+      const r3 = await fetch('https://api.openai.com/v1/models', {
+        headers: { 'Authorization': `Bearer ${OPENAI_KEY}` }
       })
-      .finally(() => {
-        modelListRefreshPromise = null
-      })
+      const d3 = await r3.json()
+      models.push(...(d3.data || [])
+        .map(m => m.id)
+        .filter(id => /^(gpt-5|gpt-4|o[0-9])/.test(id) && !/audio|realtime|image|transcribe|tts|search|embedding/.test(id))
+        .sort().reverse()
+        .map(id => ({ name: 'openai/' + id, provider: 'openai' })))
+    } catch { /* OpenAI nicht erreichbar */ }
   }
-
-  try {
-    const models = await modelListRefreshPromise
-
-    if (models.length) {
-      res.setHeader('X-Model-Cache', 'MISS')
-      return res.json(models)
-    }
-
-    if (modelListCache.models?.length) {
-      res.setHeader('X-Model-Cache', 'STALE')
-      return res.json(modelListCache.models)
-    }
-
-    return res.status(503).json({
-      error: 'Could not reach any model provider'
-    })
-  } catch (error) {
-    console.error(JSON.stringify({
-      level: 'error',
-      event: 'model_list_refresh_failed',
-      error: error?.message || String(error)
-    }))
-
-    if (modelListCache.models?.length) {
-      res.setHeader('X-Model-Cache', 'STALE')
-      return res.json(modelListCache.models)
-    }
-
-    return res.status(503).json({
-      error: 'Could not reach any model provider'
-    })
-  }
+  if (models.length === 0) return res.status(503).json({ error: 'Could not reach any model provider' })
+  res.json(models)
 })
 
 // "Immer erlauben": Command-Prefix in die User-Allowlist aufnehmen
