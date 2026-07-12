@@ -158,5 +158,8 @@ export const streamZai = (model, messages, options, res, abortSignal) =>
   streamOpenAICompatible('Z.ai', ZAI_URL, ZAI_KEY, model, messages, options, res, abortSignal,
     options?.reasoningEffort === 'off' ? { thinking: { type: 'disabled' } } : {})
 
+const OPENAI_URL = 'https://api.openai.com/v1/chat/completions'
 export const OPENAI_KEY = process.env.OPENAI_API_KEY || ''
+export const streamOpenAI = (model, messages, options, res, abortSignal) =>
+  streamOpenAICompatible('OpenAI', OPENAI_URL, OPENAI_KEY, model, messages, options, res, abortSignal, { reasoning_effort: 'none' })
 // ===================== Ende OpenAI-kompatible Provider =====================

@@ -5,7 +5,7 @@ import { extractUrls, fetchAllUrls } from '../lib/fetchUrl.js'
 import { UPLOAD_DIR, extractTextFromFile } from './uploads.js'
 import { webSearch, SEARCH_TOOL, firecrawlScrape, FIRECRAWL_TOOL, TERMINAL_TOOL } from '../lib/webSearch.js'
 import { OLLAMA_URL, streamOllama } from '../providers/ollama.js'
-import { OPENAI_KEY, ZAI_KEY, streamZai, splitSystemTimeNote } from '../providers/openai-compatible.js'
+import { OPENAI_KEY, ZAI_KEY, streamOpenAI, streamZai, splitSystemTimeNote } from '../providers/openai-compatible.js'
 import { ANTHROPIC_KEY, streamAnthropic } from '../providers/anthropic.js'
 import { exec } from 'child_process'
 import { resizeImageBuffer } from '../utils/image.js'
@@ -613,7 +613,7 @@ router.post('/:conversationId', requireAuth, async (req, res) => {
       if (activeModel.startsWith('claude')) streamFn = streamAnthropic
       else if (activeModel.startsWith('zai/')) { streamFn = streamZai; providerModel = activeModel.slice(4) }
       else if (activeModel.startsWith('openai/')) { streamFn = streamResponses; providerModel = activeModel.slice(7) }
-      if (streamFn === streamZai || streamFn === streamResponses) {
+      if (streamFn === streamOpenAI || streamFn === streamZai || streamFn === streamResponses) {
         workingMessages = splitSystemTimeNote(workingMessages)
       }
       const { fullContent, fullThinking, toolCalls, tokenUsage, rawOutput } = await streamFn(providerModel, workingMessages, options, res, abortController.signal)
