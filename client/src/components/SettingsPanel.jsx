@@ -21,7 +21,7 @@ export default function SettingsPanel({ conversation, onUpdate, onClose }) {
   // Provider aus Modellnamen ableiten (Ollama-Eintraege tragen kein provider-Feld)
   function modelProvider(m) {
     if (m.provider) return m.provider
-    return (m.name || '').endsWith(':cloud') ? 'ollama-cloud' : 'ollama'
+    return /[:-]cloud$/.test(m.name || '') ? 'ollama-cloud' : 'ollama'
   }
   const PROVIDER_LABELS = {
     'ollama-cloud': 'Ollama Cloud', 'ollama': 'Ollama (lokal)',

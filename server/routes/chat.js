@@ -69,6 +69,7 @@ function approvalReason(cmd) {
   const masked = c.replace(/'[^']*'/g, 'Q')
   if (masked.includes("'")) return 'Unbalancierte Quotes'
   if (/[;&><`$\n\\]/.test(masked)) return 'Shell-Metazeichen ausserhalb von Quotes'
+  if (SENSITIVE_PATH.test(c)) return 'Zugriff auf sensible Datei (.env/Keys/DB) — Approval erforderlich'
   if (masked.includes('|')) return 'Pipe-Segment nicht auf der Auto-Approve-Liste'
   return 'Nicht auf der Auto-Approve-Liste'
 }
@@ -82,6 +83,30 @@ function segIsSafe(seg) {
   return userAllowedPrefixes().some(p => typeof p === 'string' && p.length >= 3 && !NEVER_ALLOW.test(p) && s.startsWith(p))
 }
 
+const SENSITIVE_PATH = /(^|[\s'"/=])(\.env|\.git-credentials|id_rsa|id_ed25519|\.pem|\.key|credentials|secrets?|\.aws|\.ssh|shadow|\.hermes|\.openclaw|auto-approve\.json|echolink\.db|\.npmrc)/i
+
+function redactSecrets(text) {
+  if (!text) return text
+  return text
+    .replace(/sk-ant-[A-Za-z0-9_-]{16,}/g, 'sk-ant-***REDACTED***')
+    .replace(/sk-[A-Za-z0-9_-]{16,}/g, 'sk-***REDACTED***')
+    .replace(/ghp_[A-Za-z0-9]{20,}/g, 'ghp_***REDACTED***')
+    .replace(/[0-9a-f]{32}\.[A-Za-z0-9]{16}/g, '***REDACTED-KEY***')
+    .replace(/(API_KEY|TOKEN|SECRET|PASSWORD|PASSWD)(\s*[=:]\s*)\S+/gi, '$1$2***REDACTED***')
+}
+
+function looksLikeExfil(url) {
+  if (!url || typeof url !== 'string') return true
+  if (SENSITIVE_PATH.test(url)) return true
+  if (/sk-[A-Za-z0-9_-]{16,}|[0-9a-f]{32}\.[A-Za-z0-9]{16}|ghp_[A-Za-z0-9]{20,}/.test(url)) return true
+  try {
+    const u = new URL(url)
+    for (const [, v] of u.searchParams) if (v.length > 120) return true
+    if (/^(127\.|10\.|192\.168\.|169\.254\.|172\.(1[6-9]|2[0-9]|3[01])\.|localhost$|\[?::1)/i.test(u.hostname)) return true
+  } catch { return true }
+  return false
+}
+
 function isSafeCommand(cmd) {
   const c = (cmd || '').trim()
   if (!c) return false
@@ -93,6 +118,8 @@ function isSafeCommand(cmd) {
   masked = masked.replace(/&&|\|\||;/g, '|')
   // Restliche Metazeichen bleiben hart gesperrt (einzelnes & = Backgrounding)
   if (/[&><`$\n\\]/.test(masked)) return false
+  // Zugriff auf sensible Pfade -> nie auto-approven (Anti-Exfiltration)
+  if (SENSITIVE_PATH.test(c)) return false
   // Ok, wenn JEDES Segment mit einem freigegebenen Command beginnt
   return masked.split('|').every(segIsSafe)
 }
@@ -105,9 +132,9 @@ function runCommand(command, conversationId) {
     exec(command, { timeout: 60000, cwd: '/root' }, (err, stdout, stderr) => {
       const output = stripAnsi((stdout || '').slice(0, 4000))
       const errOutput = stripAnsi((stderr || '').slice(0, 1000))
-      const result = err
+      const result = redactSecrets(err
         ? `Exit code ${err.code}:\n${errOutput}${output}`
-        : output || '(no output)'
+        : output || '(no output)')
       if (conversationId) {
         db.prepare('INSERT INTO messages (conversation_id, role, content) VALUES (?, ?, ?)')
           .run(conversationId, 'assistant', '**Terminal:** `' + command + '`\n```\n' + result + '\n```')
@@ -173,6 +200,7 @@ async function executeTool(toolCall, res, conversationId) {
   }
   if (name === 'firecrawl_scrape') {
     const url = args.url
+    if (looksLikeExfil(url)) return 'Blocked: URL enthaelt verdaechtige Parameter (moegliche Datenexfiltration).'
     res.write(`data: ${JSON.stringify({ tool: 'firecrawl_scrape', status: 'running', query: url })}\n\n`)
     const result = await firecrawlScrape(url)
     res.write(`data: ${JSON.stringify({ tool: 'firecrawl_scrape', status: 'done', query: url })}\n\n`)
@@ -212,7 +240,10 @@ function toAnthropic(messages) {
     if (m.role === 'system') { system += (system ? '\n\n' : '') + m.content; continue }
     if (m.role === 'assistant' && m._raw) {
       pendingToolIds = m._raw.filter(b => b.type === 'tool_use').map(b => b.id)
-      out.push({ role: 'assistant', content: m._raw })
+      // Invariante: _raw ist read-only geteilter Zustand (Signaturen muessen byte-identisch
+      // ueber alle Iterationen bleiben). Kopie an der Grenze — Mutationen wie cache_control
+      // treffen dann nur die Kopie dieses Requests, nie die naechste Iteration.
+      out.push({ role: 'assistant', content: m._raw.map(b => ({ ...b })) })
       continue
     }
     if (m.role === 'assistant' && m.tool_calls?.length) {
@@ -257,6 +288,13 @@ async function streamAnthropic(model, messages, options, res, abortSignal) {
   const { system, messages: msgs } = toAnthropic(messages)
 
   // --- Prompt Caching ---
+  // Alte Cache-Marker abraeumen: _raw-Bloecke werden per Referenz wiederverwendet,
+  // sonst akkumulieren Breakpoints ueber die Tool-Iterationen (API-Limit: 4)
+  for (const m of msgs) {
+    if (Array.isArray(m.content)) {
+      for (const b of m.content) { if (b && b.cache_control) delete b.cache_control }
+    }
+  }
   // Die timeNote (aendert sich minuetlich) wuerde den Cache-Praefix jedes Mal
   // invalidieren -> raus aus dem System-Prompt, rein in die letzte User-Message
   // (die ist ohnehin nie Teil eines Cache-Hits).
@@ -313,7 +351,7 @@ async function streamAnthropic(model, messages, options, res, abortSignal) {
     ...(systemParam ? { system: systemParam } : {}),
     // Thinking an: adaptive + effort; temperature ist dann nicht erlaubt
     ...(thinkingOn
-      ? { thinking: { type: 'adaptive' }, effort: RE }
+      ? { thinking: { type: 'adaptive', display: 'summarized' }, output_config: { effort: RE } }
       : (options?.temperature != null ? { temperature: Math.min(options.temperature, 1) } : {}))
   }
   const r = await fetch(ANTHROPIC_URL, {
@@ -575,7 +613,8 @@ function toResponsesInput(messages) {
     if (m.role === 'system') { instructions += (instructions ? '\n\n' : '') + m.content; continue }
     if (m.role === 'assistant' && m._raw) {
       pendingCallIds = m._raw.filter(it => it.type === 'function_call').map(it => it.call_id)
-      input.push(...m._raw)
+      // Invariante: _raw ist read-only — Kopie an der Grenze (siehe toAnthropic)
+      input.push(...m._raw.map(it => ({ ...it })))
       continue
     }
     if (m.role === 'assistant' && m.tool_calls?.length) {
