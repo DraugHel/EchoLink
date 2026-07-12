@@ -6,7 +6,9 @@
     "dev:server": "node server/index.js",
     "build": "cd client && npm run build",
     "start": "node server/index.js",
-    "adduser": "node scripts/adduser.js"
+    "adduser": "node scripts/adduser.js",
+    "test:smoke": "node --test tests/smoke.test.mjs",
+    "test": "npm run test:smoke"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
