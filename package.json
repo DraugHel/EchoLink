@@ -15,8 +15,10 @@
     "connect-sqlite3": "^0.9.15",
     "express": "^4.18.3",
     "express-session": "^1.18.0",
+    "mammoth": "^1.12.0",
     "multer": "^2.1.1",
     "pdf-parse": "^2.4.5",
-    "sharp": "^0.35.3"
+    "sharp": "^0.35.3",
+    "xlsx": "^0.18.5"
   }
 }

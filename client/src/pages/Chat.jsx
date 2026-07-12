@@ -8,6 +8,53 @@ import ThemePicker, { useTheme } from '../components/ThemePicker.jsx'
 import CorsnFace from '../components/CorsnFace.jsx'
 import TerminalTimeline from '../components/TerminalTimeline.jsx'
 
+async function readResponseError(response) {
+  const contentType = response.headers.get('content-type') || ''
+  let message = ''
+
+  try {
+    if (contentType.includes('application/json')) {
+      const data = await response.json()
+      message = data?.error || data?.message || ''
+    } else {
+      message = (await response.text()).trim()
+    }
+  } catch {
+    // Der urspruengliche HTTP-Status bleibt als Fallback erhalten.
+  }
+
+  // Komplette HTML-Fehlerseiten von Proxies nicht in den Chat kippen.
+  if (message.startsWith('<!DOCTYPE') || message.startsWith('<html')) {
+    message = ''
+  }
+
+  const error = new Error(
+    message || response.statusText || `HTTP ${response.status}`
+  )
+  error.status = response.status
+  error.retryable = response.status === 408 ||
+    response.status === 429 ||
+    response.status >= 500
+
+  return error
+}
+
+function parseSseEvent(rawEvent) {
+  const data = rawEvent
+    .split(/\r?\n/)
+    .filter(line => line.startsWith('data:'))
+    .map(line => line.slice(5).trimStart())
+    .join('\n')
+
+  if (!data) return null
+
+  try {
+    return JSON.parse(data)
+  } catch {
+    return null
+  }
+}
+
 function useIsMobile() {
   const [mobile, setMobile] = useState(typeof window !== 'undefined' && window.innerWidth < 768)
   useEffect(() => {
@@ -201,21 +248,25 @@ export default function Chat({ user, onLogout }) {
         signal: abortControllerRef.current.signal
       })
 
+      if (!response.ok) {
+        throw await readResponseError(response)
+      }
+
+      if (!response.body) {
+        const error = new Error('Streaming-Antwort enthaelt keinen Body')
+        error.retryable = true
+        throw error
+      }
+
       const reader = response.body.getReader()
       const decoder = new TextDecoder()
       let sseBuffer = ''
 
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        sseBuffer += decoder.decode(value, { stream: true })
-        const lines = sseBuffer.split('\n')
-        sseBuffer = lines.pop() || ''
-        const dataLines = lines.filter(l => l.startsWith('data: '))
-        for (const line of dataLines) {
-          try {
-            const json = JSON.parse(line.slice(6))
-            if (json.tool) {
+      const processEvent = rawEvent => {
+        const json = parseSseEvent(rawEvent)
+        if (!json) return
+
+        if (json.tool) {
               if (json.status === 'running') {
                 setMessages(prev => prev.map(m =>
                   m.id === assistantId ? { ...m, toolStatus: `Searching: "${json.query}"` } : m
@@ -226,41 +277,71 @@ export default function Chat({ user, onLogout }) {
                 ))
               }
             }
-            if (json.token) {
-              assistantContent += json.token
-              setMessages(prev => prev.map(m =>
-                m.id === assistantId ? { ...m, content: assistantContent, toolStatus: null } : m
-              ))
-            }
-            if (json.usage) {
-              setMessages(prev => prev.map(m =>
-                m.id === assistantId ? { ...m, usage: json.usage } : m
-              ))
-            }
-            if (json.done) {
-              const normalized = json.tokens ? {
-                prompt_tokens: json.tokens.promptTokens,
-                completion_tokens: json.tokens.completionTokens,
-                total_tokens: json.tokens.totalTokens
-              } : null
-              const doneUsage = json.usage || null
-              setMessages(prev => prev.map(m =>
-                m.id === assistantId ? { ...m, streaming: false, usage: normalized || doneUsage || m.usage } : m
-              ))
-            }
-            if (json.error) {
-              setMessages(prev => prev.map(m =>
-                m.id === assistantId ? { ...m, content: `Error: ${json.error}`, streaming: false } : m
-              ))
-            }
-            if (json.actionRequest) {
-              const action = { actionId: json.actionId, description: json.description, command: json.command, type: json.type, source: json.source }
-              setMessages(prev => prev.map(m =>
-                m.id === assistantId ? { ...m, actionRequests: [action] } : m
-              ))
-            }
-          } catch {}
+        if (json.token) {
+          assistantContent += json.token
+          setMessages(prev => prev.map(m =>
+            m.id === assistantId ? { ...m, content: assistantContent, toolStatus: null } : m
+          ))
         }
+        if (json.usage) {
+          setMessages(prev => prev.map(m =>
+            m.id === assistantId ? { ...m, usage: json.usage } : m
+          ))
+        }
+        if (json.done) {
+          const normalized = json.tokens ? {
+            prompt_tokens: json.tokens.promptTokens,
+            completion_tokens: json.tokens.completionTokens,
+            total_tokens: json.tokens.totalTokens
+          } : null
+          const doneUsage = json.usage || null
+          setMessages(prev => prev.map(m =>
+            m.id === assistantId ? {
+              ...m,
+              streaming: false,
+              usage: normalized || doneUsage || m.usage
+            } : m
+          ))
+        }
+        if (json.error) {
+          throw new Error(json.error)
+        }
+        if (json.actionRequest) {
+          const action = {
+            actionId: json.actionId,
+            description: json.description,
+            command: json.command,
+            type: json.type,
+            source: json.source
+          }
+          setMessages(prev => prev.map(m =>
+            m.id === assistantId ? { ...m, actionRequests: [action] } : m
+          ))
+        }
+      }
+
+      while (true) {
+        const { done, value } = await reader.read()
+
+        if (done) {
+          sseBuffer += decoder.decode()
+          break
+        }
+
+        sseBuffer += decoder.decode(value, { stream: true })
+
+        // Ein SSE-Event endet mit einer Leerzeile.
+        const events = sseBuffer.split(/\r?\n\r?\n/)
+        sseBuffer = events.pop() || ''
+
+        for (const event of events) {
+          processEvent(event)
+        }
+      }
+
+      // Manche Server/Proxies schliessen den Stream ohne abschliessende Leerzeile.
+      if (sseBuffer.trim()) {
+        processEvent(sseBuffer)
       }
     }
 
@@ -272,8 +353,18 @@ export default function Chat({ user, onLogout }) {
         setMessages(prev => prev.map(m =>
           m.id === assistantId ? { ...m, streaming: false, content: assistantContent || '_(stopped)_' } : m
         ))
+      } else if (err.retryable === false) {
+        // Client-, Auth- oder Validierungsfehler werden durch einen Retry nicht besser.
+        setMessages(prev => prev.map(m =>
+          m.id === assistantId ? {
+            ...m,
+            content: `Error: ${err.message}`,
+            streaming: false,
+            retryFailed: true
+          } : m
+        ))
       } else {
-        // Connection error — try to reconnect
+        // Netzwerk-, Rate-Limit- und Serverfehler duerfen erneut versucht werden.
         while (retryCount < maxRetries && streamGenerationRef.current === myGeneration) {
           retryCount++
           setMessages(prev => prev.map(m =>
@@ -291,10 +382,16 @@ export default function Chat({ user, onLogout }) {
             break
           } catch (retryErr) {
             if (retryErr.name === 'AbortError') break
-            if (retryCount >= maxRetries) {
+            if (retryErr.retryable === false || retryCount >= maxRetries) {
               setMessages(prev => prev.map(m =>
-                m.id === assistantId ? { ...m, content: `Connection error: ${err.message}`, streaming: false, retryFailed: true } : m
+                m.id === assistantId ? {
+                  ...m,
+                  content: `Connection error: ${retryErr.message || err.message}`,
+                  streaming: false,
+                  retryFailed: true
+                } : m
               ))
+              break
             }
           }
         }

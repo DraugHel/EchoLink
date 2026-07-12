@@ -13,7 +13,14 @@ const requireApiKey = (req, res, next) => {
     return res.status(503).json({ error: 'ECHO_API_KEY not configured on server' })
   }
   const key = req.headers['x-api-key'] || req.headers['x-external-api-key']
-  if (!key || key !== API_KEY) {
+  const supplied = typeof key === 'string' ? Buffer.from(key) : null
+  const expected = Buffer.from(API_KEY)
+
+  if (
+    !supplied ||
+    supplied.length !== expected.length ||
+    !crypto.timingSafeEqual(supplied, expected)
+  ) {
     return res.status(401).json({ error: 'Invalid API key' })
   }
   next()
@@ -29,18 +36,52 @@ router.post('/briefing', requireApiKey, async (req, res) => {
     return res.status(400).json({ error: 'Content is required' })
   }
 
-  // Use user id 1 (draug) as the default user for external posts
-  const userId = 1
-  const user = db.prepare('SELECT id FROM users WHERE id = ?').get(userId)
-  if (!user) {
-    return res.status(404).json({ error: 'Default user not found' })
+  const briefingConversationId = Number(process.env.BRIEFING_CONVERSATION_ID)
+  const briefingUsername = process.env.BRIEFING_USERNAME?.trim()
+  const briefingUserId = Number(process.env.BRIEFING_USER_ID)
+
+  if (
+    !Number.isSafeInteger(briefingConversationId) ||
+    briefingConversationId <= 0
+  ) {
+    return res.status(503).json({
+      error: 'BRIEFING_CONVERSATION_ID is not configured correctly'
+    })
   }
 
-  // Always post to the fixed Cora conversation (id 65)
-  const CORA_CONVO_ID = Number(process.env.BRIEFING_CONVERSATION_ID || 65)
-  const convo = db.prepare('SELECT * FROM conversations WHERE id = ?').get(CORA_CONVO_ID)
+  if (
+    !briefingUsername &&
+    (!Number.isSafeInteger(briefingUserId) || briefingUserId <= 0)
+  ) {
+    return res.status(503).json({
+      error: 'Configure BRIEFING_USERNAME or BRIEFING_USER_ID'
+    })
+  }
+
+  const user = briefingUsername
+    ? db.prepare(
+        'SELECT id, username FROM users WHERE username = ?'
+      ).get(briefingUsername)
+    : db.prepare(
+        'SELECT id, username FROM users WHERE id = ?'
+      ).get(briefingUserId)
+
+  if (!user) {
+    return res.status(404).json({
+      error: 'Configured briefing user not found'
+    })
+  }
+
+  const convo = db.prepare(`
+    SELECT *
+    FROM conversations
+    WHERE id = ? AND user_id = ?
+  `).get(briefingConversationId, user.id)
+
   if (!convo) {
-    return res.status(404).json({ error: 'Cora conversation not found' })
+    return res.status(404).json({
+      error: 'Configured briefing conversation not found for this user'
+    })
   }
 
   // Insert briefing as assistant message

@@ -1,13 +1,9 @@
 import { Router } from 'express'
+import { requireAuth } from '../middleware/auth.js'
 import { exec } from 'child_process'
 import os from 'os'
 
 const router = Router()
-
-const requireAuth = (req, res, next) => {
-  if (!req.session.userId) return res.status(401).json({ error: 'Unauthorized' })
-  next()
-}
 
 // 10s-Cache, damit Polling von mehreren Tabs den Server nicht nervt
 let cache = { t: 0, data: null }

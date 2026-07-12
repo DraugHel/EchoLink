@@ -1,4 +1,5 @@
 import { Router } from 'express'
+import { requireAuth } from '../middleware/auth.js'
 import db from '../db.js'
 import { extractUrls, fetchAllUrls } from '../lib/fetchUrl.js'
 import { UPLOAD_DIR, extractTextFromFile } from './uploads.js'
@@ -144,9 +145,83 @@ function runCommand(command, conversationId) {
   })
 }
 
-const requireAuth = (req, res, next) => {
-  if (!req.session.userId) return res.status(401).json({ error: 'Not authenticated' })
-  next()
+const CHAT_LIMITS = {
+  content: 200_000,
+  memory: 500_000,
+  attachments: 5,
+  attachmentName: 255
+}
+
+function validateAttachments(attachments) {
+  if (attachments === undefined || attachments === null) return null
+
+  if (!Array.isArray(attachments)) {
+    return 'attachments muss ein Array sein'
+  }
+
+  if (attachments.length > CHAT_LIMITS.attachments) {
+    return `Maximal ${CHAT_LIMITS.attachments} Anhaenge pro Nachricht`
+  }
+
+  for (const item of attachments) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) {
+      return 'Ungueltiger Attachment-Eintrag'
+    }
+
+    if (
+      typeof item.filename !== 'string' ||
+      !item.filename ||
+      item.filename.length > CHAT_LIMITS.attachmentName
+    ) {
+      return 'Ungueltiger Attachment-Dateiname'
+    }
+
+    // Nur serverseitig generierte, einfache Dateinamen akzeptieren.
+    if (
+      item.filename.includes('/') ||
+      item.filename.includes('\\') ||
+      item.filename.includes('..') ||
+      item.filename.includes('\0')
+    ) {
+      return 'Ungueltiger Attachment-Pfad'
+    }
+
+    if (
+      item.originalName !== undefined &&
+      (
+        typeof item.originalName !== 'string' ||
+        item.originalName.length > CHAT_LIMITS.attachmentName
+      )
+    ) {
+      return 'Ungueltiger Original-Dateiname'
+    }
+  }
+
+  return null
+}
+
+function validateChatBody(body) {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    return 'Ungueltiger Request-Body'
+  }
+
+  if (body.content !== undefined && typeof body.content !== 'string') {
+    return 'content muss ein String sein'
+  }
+
+  if ((body.content || '').length > CHAT_LIMITS.content) {
+    return `Nachricht ist zu lang (maximal ${CHAT_LIMITS.content} Zeichen)`
+  }
+
+  if (body.skipSave !== undefined && typeof body.skipSave !== 'boolean') {
+    return 'skipSave muss true oder false sein'
+  }
+
+  if (body.regenerate !== undefined && typeof body.regenerate !== 'boolean') {
+    return 'regenerate muss true oder false sein'
+  }
+
+  return validateAttachments(body.attachments)
 }
 
 async function executeTool(toolCall, res, conversationId) {
@@ -824,6 +899,11 @@ async function updateMemory(userId, conversationId, model) {
 }
 
 router.post('/:conversationId', requireAuth, async (req, res) => {
+  const validationError = validateChatBody(req.body)
+  if (validationError) {
+    return res.status(400).json({ error: validationError })
+  }
+
   const convo = db.prepare('SELECT * FROM conversations WHERE id = ? AND user_id = ?')
     .get(req.params.conversationId, req.session.userId)
   if (!convo) return res.status(404).json({ error: 'Not found' })
@@ -1146,8 +1226,19 @@ router.get('/:conversationId/actions', requireAuth, (req, res) => {
 
 // Update memory endpoint
 router.post('/memory', requireAuth, async (req, res) => {
-  const { content } = req.body
-  db.prepare('UPDATE users SET memory = ? WHERE id = ?').run(content || '', req.session.userId)
+  const { content } = req.body || {}
+
+  if (typeof content !== 'string') {
+    return res.status(400).json({ error: 'content muss ein String sein' })
+  }
+
+  if (content.length > CHAT_LIMITS.memory) {
+    return res.status(400).json({
+      error: `Memory ist zu lang (maximal ${CHAT_LIMITS.memory} Zeichen)`
+    })
+  }
+
+  db.prepare('UPDATE users SET memory = ? WHERE id = ?').run(content, req.session.userId)
   res.json({ success: true })
 })
 

@@ -1,4 +1,5 @@
 import { Router } from 'express'
+import { requireAuth } from '../middleware/auth.js'
 import multer from 'multer'
 import path from 'path'
 import fs from 'fs'
@@ -10,11 +11,6 @@ const UPLOAD_DIR = path.join(__dirname, '..', '..', 'data', 'uploads')
 fs.mkdirSync(UPLOAD_DIR, { recursive: true })
 
 const router = Router()
-
-const requireAuth = (req, res, next) => {
-  if (!req.session.userId) return res.status(401).json({ error: 'Not authenticated' })
-  next()
-}
 
 const IMAGE_TYPES = /^image\/(jpeg|jpg|png|gif|webp)$/i
 const TEXT_EXTS = new Set([
@@ -162,7 +158,7 @@ async function doExtract(filepath, filename, originalName) {
 function removeFileAndCache(userId, fn) {
   const filepath = path.join(UPLOAD_DIR, String(userId), fn)
   if (fs.existsSync(filepath)) fs.unlinkSync(filepath)
-  try { db.prepare('DELETE FROM file_extractions WHERE filename = ?').run(fn) } catch {}
+  try { db.prepare('DELETE FROM file_extractions WHERE filename = ? AND user_id = ?').run(fn, userId) } catch {}
 }
 
 // Delete files for a conversation
@@ -198,14 +194,21 @@ export function cleanupOrphanedFiles() {
     return fs.statSync(p).isDirectory()
   })
 
-  // Referenced-Set EINMAL bauen, nicht pro User-Verzeichnis
+  // Referenzen inklusive User-ID speichern, damit gleichnamige Dateien
+  // verschiedener Benutzer nicht miteinander verwechselt werden.
   const referenced = new Set()
-  const messages = db.prepare("SELECT images FROM messages WHERE images IS NOT NULL AND images != ''").all()
+  const messages = db.prepare(`
+    SELECT conversations.user_id, messages.images
+    FROM messages
+    JOIN conversations ON conversations.id = messages.conversation_id
+    WHERE messages.images IS NOT NULL AND messages.images != ''
+  `).all()
   for (const msg of messages) {
     try {
       const items = JSON.parse(msg.images)
       for (const it of items) {
-        referenced.add(typeof it === 'string' ? it : it.filename)
+        const filename = typeof it === 'string' ? it : it.filename
+        if (filename) referenced.add(`${msg.user_id}/${filename}`)
       }
     } catch {}
   }
@@ -216,9 +219,12 @@ export function cleanupOrphanedFiles() {
 
     let removed = 0
     for (const file of filesOnDisk) {
-      if (!referenced.has(file)) {
+      if (!referenced.has(`${userId}/${file}`)) {
         fs.unlinkSync(path.join(userDir, file))
-        try { db.prepare('DELETE FROM file_extractions WHERE filename = ?').run(file) } catch {}
+        try {
+          db.prepare('DELETE FROM file_extractions WHERE filename = ? AND user_id = ?')
+            .run(file, Number(userId))
+        } catch {}
         removed++
       }
     }

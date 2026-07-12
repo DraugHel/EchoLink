@@ -5,6 +5,7 @@ import connectSqlite3 from 'connect-sqlite3'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import fs from 'fs'
+import crypto from 'node:crypto'
 
 import authRoutes from './routes/auth.js'
 import conversationRoutes from './routes/conversations.js'
@@ -29,17 +30,63 @@ const DATA_DIR = path.join(__dirname, '..', 'data')
 fs.mkdirSync(DATA_DIR, { recursive: true })
 
 const app = express()
+
+function requestLogger(req, res, next) {
+  const startedAt = process.hrtime.bigint()
+  const requestId = crypto.randomUUID()
+
+  req.requestId = requestId
+  res.setHeader('X-Request-ID', requestId)
+
+  res.on('finish', () => {
+    const elapsedMs = Number(process.hrtime.bigint() - startedAt) / 1e6
+
+    // Nur den Pfad loggen, niemals Query-Parameter mit moeglichen Tokens.
+    const pathname = req.originalUrl?.split('?')[0] || req.path || '/'
+
+    console.log(JSON.stringify({
+      level: res.statusCode >= 500
+        ? 'error'
+        : res.statusCode >= 400
+          ? 'warn'
+          : 'info',
+      event: 'http_request',
+      requestId,
+      method: req.method,
+      path: pathname,
+      status: res.statusCode,
+      durationMs: Number(elapsedMs.toFixed(1)),
+      userId: req.session?.userId || null
+    }))
+  })
+
+  next()
+}
+
+app.use(requestLogger)
+
+// Nur aktivieren, wenn EchoLink hinter einem vertrauenswuerdigen
+// Reverse Proxy wie Nginx, Caddy oder Cloudflare betrieben wird.
+if (process.env.TRUST_PROXY === 'true') {
+  app.set('trust proxy', 1)
+}
+
+app.disable('x-powered-by')
 app.use(express.json({ limit: '5mb' }))
 
 // Sessions stored in SQLite
 app.use(session({
+  name: 'echolink.sid',
   store: new SQLiteStore({ db: 'sessions.db', dir: DATA_DIR }),
   secret: SECRET,
   resave: false,
   saveUninitialized: false,
+  rolling: true,
   cookie: {
     maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
-    httpOnly: true
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: process.env.COOKIE_SECURE === 'true'
   }
 }))
 
@@ -52,6 +99,43 @@ app.use('/api/uploads', uploadRoutes)
 app.use('/api/hermes', hermesRoutes)
 app.use('/api/external', externalRoutes)
 app.use('/api/system', systemRoutes)
+
+// Unbekannte API-Routen immer als JSON beantworten.
+app.use('/api', (req, res) => {
+  res.status(404).json({
+    error: 'API route not found',
+    requestId: req.requestId
+  })
+})
+
+// Zentraler Fehler-Handler. Muss nach allen API-Routen stehen.
+app.use((err, req, res, next) => {
+  const requestId = req.requestId || 'unknown'
+
+  console.error(JSON.stringify({
+    level: 'error',
+    event: 'unhandled_request_error',
+    requestId,
+    method: req.method,
+    path: req.originalUrl?.split('?')[0] || req.path,
+    userId: req.session?.userId || null,
+    error: err?.message || String(err),
+    stack: process.env.NODE_ENV === 'production'
+      ? undefined
+      : err?.stack
+  }))
+
+  // Bei SSE oder anderen bereits gestarteten Responses darf kein
+  // zweiter JSON-Response mehr geschrieben werden.
+  if (res.headersSent) {
+    return next(err)
+  }
+
+  res.status(err?.statusCode || err?.status || 500).json({
+    error: err?.expose ? err.message : 'Internal server error',
+    requestId
+  })
+})
 
 // Serve built frontend
 const distPath = path.join(__dirname, '..', 'dist')

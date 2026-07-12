@@ -1,4 +1,5 @@
 import { Router } from 'express'
+import { requireAuth } from '../middleware/auth.js'
 import fs from 'fs'
 import path from 'path'
 import db from '../db.js'
@@ -10,11 +11,6 @@ const HERMES_KEY = process.env.HERMES_KEY || 'echolink-hermes-local'
 const SOUL_PATH = process.env.HERMES_SOUL_PATH || '/root/.hermes/SOUL.md'
 const ALLOWED_USER_IDS = (process.env.HERMES_ALLOWED_USER_IDS || '1')
   .split(',').map(s => Number(s.trim())).filter(Number.isFinite)
-
-const requireAuth = (req, res, next) => {
-  if (!req.session.userId) return res.status(401).json({ error: 'Not authenticated' })
-  next()
-}
 
 const requireAgentAccess = (req, res, next) => {
   if (!ALLOWED_USER_IDS.includes(req.session.userId)) {

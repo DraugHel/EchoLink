@@ -1,13 +1,9 @@
 import { Router } from 'express'
+import { requireAuth } from '../middleware/auth.js'
 import db, { DEFAULT_MODEL } from '../db.js'
 
 const router = Router()
 const OLLAMA_URL = process.env.OLLAMA_URL || 'http://localhost:11434'
-
-const requireAuth = (req, res, next) => {
-  if (!req.session.userId) return res.status(401).json({ error: 'Not authenticated' })
-  next()
-}
 
 // Get current memory
 router.get('/', requireAuth, (req, res) => {

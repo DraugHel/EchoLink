@@ -1,13 +1,9 @@
 import { Router } from 'express'
+import { requireAuth } from '../middleware/auth.js'
 import db, { DEFAULT_MODEL } from '../db.js'
 import { deleteFilesForConvo, deleteFilesForMessage } from './uploads.js'
 
 const router = Router()
-
-const requireAuth = (req, res, next) => {
-  if (!req.session.userId) return res.status(401).json({ error: 'Not authenticated' })
-  next()
-}
 
 // Get all conversations for current user
 router.get('/', requireAuth, (req, res) => {
@@ -133,11 +129,24 @@ router.put('/message/:messageId', requireAuth, (req, res) => {
   `).get(req.params.messageId, req.session.userId)
   if (!msg) return res.status(404).json({ error: 'Not found' })
 
-  // Update the user message text
-  db.prepare('UPDATE messages SET content = ? WHERE id = ?').run(content.trim(), msg.id)
+  // Anhaenge der Nachrichten merken, die durch das Editieren entfernt werden.
+  const laterMessages = db.prepare(`
+    SELECT images FROM messages
+    WHERE conversation_id = ? AND id > ?
+  `).all(msg.conversation_id, msg.id)
 
-  // Delete all messages after this one (the assistant response + any later messages)
-  db.prepare('DELETE FROM messages WHERE conversation_id = ? AND id > ?').run(msg.conversation_id, msg.id)
+  // Text-Update und History-Loeschung atomar ausfuehren.
+  const editMessage = db.transaction(() => {
+    db.prepare('UPDATE messages SET content = ? WHERE id = ?').run(content.trim(), msg.id)
+    db.prepare('DELETE FROM messages WHERE conversation_id = ? AND id > ?')
+      .run(msg.conversation_id, msg.id)
+  })
+  editMessage()
+
+  // Dateien erst nach erfolgreichem DB-Commit entfernen.
+  for (const later of laterMessages) {
+    deleteFilesForMessage(req.session.userId, later.images)
+  }
 
   res.json({ success: true, id: msg.id, content: content.trim() })
 })
