@@ -9,3 +9,10 @@ data/uploads/
 *.log
 *.db
 *.db
+client/node_modules/
+backups/
+*.tmp.js
+*.bak
+data/
+uploads/
+sessions.db
