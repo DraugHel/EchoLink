@@ -4,6 +4,7 @@ import {
   createGmailReplyDraft,
   deleteGmailDraft,
   getGmailDraft,
+  getGmailAttachmentDownloadInfo,
   listGmailDrafts,
   updateGmailDraft,
   sendGmailDraft,
@@ -122,6 +123,37 @@ export const GMAIL_TOOLS = [
             maximum: 10485760,
             description:
               'Maximum number of attachment bytes to load. Defaults to 2097152 bytes and cannot exceed 10485760 bytes.'
+          }
+        },
+        required: [
+          'messageId',
+          'attachmentId'
+        ]
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'gmail_get_attachment_download_link',
+      description:
+        'Create an authenticated EchoLink download link for a Gmail attachment. ' +
+        'Use this for PDFs, images, archives, office files, and other binary attachments after gmail_read_message or gmail_read_thread returned the messageId and attachmentId. ' +
+        'The link requires the user’s active EchoLink session and does not expose Google access tokens. ' +
+        'Present downloadUrl to the user as a clickable Markdown link using the returned filename. ' +
+        'This tool does not read or analyze the attachment contents.',
+      parameters: {
+        type: 'object',
+        properties: {
+          messageId: {
+            type: 'string',
+            description:
+              'Gmail message ID containing the attachment.'
+          },
+          attachmentId: {
+            type: 'string',
+            description:
+              'Exact Gmail attachment ID returned by gmail_read_message or gmail_read_thread.'
           }
         },
         required: [
@@ -664,6 +696,30 @@ export async function executeGmailTool(
     )
 
     return JSON.stringify(result, null, 2)
+  }
+
+  if (
+    name ===
+    'gmail_get_attachment_download_link'
+  ) {
+    const result =
+      await getGmailAttachmentDownloadInfo(
+        context.userId,
+        {
+          messageId:
+            requiredMessageId(
+              args?.messageId
+            ),
+          attachmentId:
+            args?.attachmentId
+        }
+      )
+
+    return JSON.stringify(
+      result,
+      null,
+      2
+    )
   }
 
   throw new Error(

@@ -13,6 +13,10 @@ import {
   listCalendarEvents
 } from '../connectors/google/calendar.js'
 
+import {
+  downloadGmailAttachment
+} from '../connectors/google/gmail.js'
+
 const router = Router()
 const STATE_MAX_AGE_MS = 10 * 60 * 1000
 
@@ -153,5 +157,69 @@ router.get('/events', async (req, res, next) => {
     next(error)
   }
 })
+
+
+router.get(
+  '/gmail/messages/:messageId/attachments/:attachmentId/download',
+  async (req, res, next) => {
+    try {
+      const attachment =
+        await downloadGmailAttachment(
+          req.session.userId,
+          {
+            messageId:
+              req.params.messageId,
+            attachmentId:
+              req.params.attachmentId
+          }
+        )
+
+      const asciiFilename =
+        String(attachment.filename || '')
+          .replace(/[^\x20-\x7e]/g, '_')
+          .replace(/["\\]/g, '_')
+          .trim()
+          .slice(0, 180) ||
+        'gmail-attachment'
+
+      const encodedFilename =
+        encodeURIComponent(
+          attachment.filename ||
+          'gmail-attachment'
+        ).replace(
+          /['()*]/g,
+          character =>
+            `%${character
+              .charCodeAt(0)
+              .toString(16)
+              .toUpperCase()}`
+        )
+
+      res.set({
+        'Content-Type':
+          attachment.mimeType,
+        'Content-Length':
+          String(attachment.sizeBytes),
+        'Content-Disposition':
+          `attachment; filename="${asciiFilename}"; ` +
+          `filename*=UTF-8''${encodedFilename}`,
+        'Cache-Control':
+          'private, no-store, max-age=0',
+        Pragma:
+          'no-cache',
+        'X-Content-Type-Options':
+          'nosniff',
+        'Cross-Origin-Resource-Policy':
+          'same-origin'
+      })
+
+      return res
+        .status(200)
+        .send(attachment.buffer)
+    } catch (error) {
+      next(error)
+    }
+  }
+)
 
 export default router

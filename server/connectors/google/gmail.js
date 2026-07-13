@@ -1668,3 +1668,278 @@ export async function readGmailAttachment(
   }
 }
 
+const MAX_GMAIL_DOWNLOAD_BYTES =
+  25 * 1024 * 1024
+
+function gmailDownloadLimit(value) {
+  const parsed = Number.parseInt(
+    value,
+    10
+  )
+
+  if (!Number.isFinite(parsed)) {
+    return MAX_GMAIL_DOWNLOAD_BYTES
+  }
+
+  return Math.min(
+    Math.max(parsed, 1024),
+    MAX_GMAIL_DOWNLOAD_BYTES
+  )
+}
+
+function safeGmailDownloadFilename(
+  value
+) {
+  const filename =
+    String(value || '')
+      .normalize('NFKC')
+      .replace(/[\u0000-\u001f\u007f]/g, '')
+      .replace(/[\/\\]/g, '_')
+      .replace(/^\.+/, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 180)
+
+  return filename || 'gmail-attachment'
+}
+
+function safeGmailMimeType(value) {
+  const mimeType =
+    String(value || '')
+      .split(';')[0]
+      .trim()
+      .toLowerCase()
+
+  if (
+    /^[a-z0-9!#$&^_.+-]+\/[a-z0-9!#$&^_.+-]+$/.test(
+      mimeType
+    )
+  ) {
+    return mimeType
+  }
+
+  return 'application/octet-stream'
+}
+
+export async function downloadGmailAttachment(
+  userId,
+  {
+    messageId,
+    attachmentId,
+    maxBytes
+  }
+) {
+  const cleanMessageId =
+    requiredMessageId(messageId)
+
+  const cleanAttachmentId =
+    requiredAttachmentId(attachmentId)
+
+  const limit =
+    gmailDownloadLimit(maxBytes)
+
+  const message = await gmailRequest(
+    userId,
+    `${GMAIL_API}/users/me/messages/` +
+      `${encodeURIComponent(
+        cleanMessageId
+      )}?format=full`
+  )
+
+  const part =
+    findGmailAttachmentPart(
+      message.payload,
+      cleanAttachmentId
+    )
+
+  if (!part) {
+    throw exposedError(
+      'Der angegebene Anhang gehört nicht zu dieser Gmail-Nachricht',
+      404
+    )
+  }
+
+  const resolvedAttachmentId =
+    String(
+      part.body?.attachmentId || ''
+    ).trim()
+
+  const filename =
+    safeGmailDownloadFilename(
+      part.filename
+    )
+
+  const mimeType =
+    safeGmailMimeType(
+      part.mimeType
+    )
+
+  const declaredSizeBytes =
+    Number(part.body?.size) || 0
+
+  if (
+    declaredSizeBytes > 0 &&
+    declaredSizeBytes > limit
+  ) {
+    throw exposedError(
+      `Der Gmail-Anhang überschreitet das Downloadlimit von ${limit} Byte`,
+      413
+    )
+  }
+
+  let buffer
+  let contentSource
+
+  if (part.body?.data) {
+    buffer = decodeBase64UrlBuffer(
+      part.body.data
+    )
+
+    contentSource =
+      'inline-message-data'
+  } else {
+    if (!resolvedAttachmentId) {
+      throw exposedError(
+        'Der Gmail-Anhang besitzt keine abrufbaren Daten',
+        422
+      )
+    }
+
+    const attachment =
+      await gmailRequest(
+        userId,
+        `${GMAIL_API}/users/me/messages/` +
+          `${encodeURIComponent(
+            cleanMessageId
+          )}/attachments/` +
+          encodeURIComponent(
+            resolvedAttachmentId
+          )
+      )
+
+    buffer = decodeBase64UrlBuffer(
+      attachment.data
+    )
+
+    contentSource =
+      'attachment-api'
+  }
+
+  if (!buffer.length) {
+    throw exposedError(
+      'Der Gmail-Anhang ist leer',
+      422
+    )
+  }
+
+  if (buffer.length > limit) {
+    throw exposedError(
+      `Der Gmail-Anhang überschreitet das Downloadlimit von ${limit} Byte`,
+      413
+    )
+  }
+
+  return {
+    messageId:
+      cleanMessageId,
+    attachmentId:
+      resolvedAttachmentId ||
+      cleanAttachmentId,
+    filename,
+    mimeType,
+    declaredSizeBytes,
+    sizeBytes:
+      buffer.length,
+    contentSource,
+    buffer
+  }
+}
+
+export async function getGmailAttachmentDownloadInfo(
+  userId,
+  {
+    messageId,
+    attachmentId
+  }
+) {
+  const cleanMessageId =
+    requiredMessageId(messageId)
+
+  const cleanAttachmentId =
+    requiredAttachmentId(attachmentId)
+
+  const message = await gmailRequest(
+    userId,
+    `${GMAIL_API}/users/me/messages/` +
+      `${encodeURIComponent(
+        cleanMessageId
+      )}?format=full`
+  )
+
+  const part =
+    findGmailAttachmentPart(
+      message.payload,
+      cleanAttachmentId
+    )
+
+  if (!part) {
+    throw exposedError(
+      'Der angegebene Anhang gehört nicht zu dieser Gmail-Nachricht',
+      404
+    )
+  }
+
+  const resolvedAttachmentId =
+    String(
+      part.body?.attachmentId || ''
+    ).trim() ||
+    cleanAttachmentId
+
+  const filename =
+    safeGmailDownloadFilename(
+      part.filename
+    )
+
+  const mimeType =
+    safeGmailMimeType(
+      part.mimeType
+    )
+
+  const sizeBytes =
+    Number(part.body?.size) || 0
+
+  if (
+    sizeBytes >
+    MAX_GMAIL_DOWNLOAD_BYTES
+  ) {
+    throw exposedError(
+      'Der Gmail-Anhang überschreitet das Downloadlimit von 25 MiB',
+      413
+    )
+  }
+
+  const downloadUrl =
+    '/api/google/gmail/messages/' +
+    encodeURIComponent(
+      cleanMessageId
+    ) +
+    '/attachments/' +
+    encodeURIComponent(
+      resolvedAttachmentId
+    ) +
+    '/download'
+
+  return {
+    messageId:
+      cleanMessageId,
+    attachmentId:
+      resolvedAttachmentId,
+    filename,
+    mimeType,
+    sizeBytes,
+    downloadUrl,
+    authenticationRequired: true,
+    expiresWithSession: true
+  }
+}
+
