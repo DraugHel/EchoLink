@@ -1296,3 +1296,375 @@ export async function readGmailThread(
   }
 }
 
+function requiredAttachmentId(value) {
+  const attachmentId =
+    String(value || '').trim()
+
+  if (!attachmentId) {
+    throw exposedError(
+      'Gmail-Anhangs-ID fehlt',
+      400
+    )
+  }
+
+  if (
+    attachmentId.length > 4096 ||
+    !/^[A-Za-z0-9_-]+$/.test(
+      attachmentId
+    )
+  ) {
+    throw exposedError(
+      'Gmail-Anhangs-ID ist ungültig',
+      400
+    )
+  }
+
+  return attachmentId
+}
+
+function gmailAttachmentLimit(value) {
+  const parsed = Number.parseInt(
+    value,
+    10
+  )
+
+  if (!Number.isFinite(parsed)) {
+    return 2 * 1024 * 1024
+  }
+
+  return Math.min(
+    Math.max(parsed, 1024),
+    10 * 1024 * 1024
+  )
+}
+
+function decodeBase64UrlBuffer(value) {
+  const normalized =
+    String(value || '')
+      .replace(/-/g, '+')
+      .replace(/_/g, '/')
+
+  const padding =
+    normalized.length % 4
+      ? '='.repeat(
+          4 - normalized.length % 4
+        )
+      : ''
+
+  return Buffer.from(
+    normalized + padding,
+    'base64'
+  )
+}
+
+function collectGmailAttachmentParts(
+  part,
+  result
+) {
+  if (!part) return
+
+  const filename =
+    String(part.filename || '').trim()
+
+  const attachmentId =
+    String(
+      part.body?.attachmentId || ''
+    ).trim()
+
+  if (filename || attachmentId) {
+    result.push(part)
+  }
+
+  for (const child of part.parts || []) {
+    collectGmailAttachmentParts(
+      child,
+      result
+    )
+  }
+}
+
+function findGmailAttachmentPart(
+  part,
+  attachmentId
+) {
+  const parts = []
+
+  collectGmailAttachmentParts(
+    part,
+    parts
+  )
+
+  const exactMatch = parts.find(
+    candidate =>
+      String(
+        candidate.body?.attachmentId || ''
+      ) === attachmentId
+  )
+
+  if (exactMatch) {
+    return exactMatch
+  }
+
+  // Manche kleinen Anhänge werden von Gmail anders
+  // eingebettet. Bei genau einem Anhang ist die
+  // Zuordnung trotzdem eindeutig.
+  if (parts.length === 1) {
+    return parts[0]
+  }
+
+  return null
+}
+
+function isTextGmailAttachment(
+  mimeType,
+  filename
+) {
+  const mime =
+    String(mimeType || '')
+      .toLowerCase()
+      .split(';')[0]
+      .trim()
+
+  if (mime.startsWith('text/')) {
+    return true
+  }
+
+  const textualMimeTypes = new Set([
+    'application/json',
+    'application/ld+json',
+    'application/xml',
+    'application/xhtml+xml',
+    'application/javascript',
+    'application/x-javascript',
+    'application/sql',
+    'application/yaml',
+    'application/x-yaml',
+    'application/toml',
+    'application/rtf'
+  ])
+
+  if (textualMimeTypes.has(mime)) {
+    return true
+  }
+
+  const name =
+    String(filename || '')
+      .toLowerCase()
+
+  return [
+    '.txt',
+    '.md',
+    '.markdown',
+    '.csv',
+    '.tsv',
+    '.json',
+    '.jsonl',
+    '.xml',
+    '.yaml',
+    '.yml',
+    '.toml',
+    '.ini',
+    '.conf',
+    '.cfg',
+    '.log',
+    '.sql',
+    '.html',
+    '.htm',
+    '.css',
+    '.js',
+    '.mjs',
+    '.cjs',
+    '.jsx',
+    '.ts',
+    '.tsx',
+    '.py',
+    '.java',
+    '.c',
+    '.h',
+    '.cpp',
+    '.hpp',
+    '.cs',
+    '.go',
+    '.rs',
+    '.php',
+    '.rb',
+    '.sh',
+    '.bash',
+    '.zsh',
+    '.ps1'
+  ].some(
+    extension =>
+      name.endsWith(extension)
+  )
+}
+
+export async function readGmailAttachment(
+  userId,
+  {
+    messageId,
+    attachmentId,
+    maxBytes
+  }
+) {
+  const cleanMessageId =
+    requiredMessageId(messageId)
+
+  const cleanAttachmentId =
+    requiredAttachmentId(attachmentId)
+
+  const limit =
+    gmailAttachmentLimit(maxBytes)
+
+  const message = await gmailRequest(
+    userId,
+    `${GMAIL_API}/users/me/messages/` +
+      `${encodeURIComponent(
+        cleanMessageId
+      )}?format=full`
+  )
+
+  const part =
+    findGmailAttachmentPart(
+      message.payload,
+      cleanAttachmentId
+    )
+
+  if (!part) {
+    throw exposedError(
+      'Der angegebene Anhang gehört nicht zu dieser Gmail-Nachricht',
+      404
+    )
+  }
+
+  const filename =
+    String(part.filename || '')
+      .trim() ||
+    '(ohne Dateiname)'
+
+  const mimeType =
+    String(
+      part.mimeType ||
+      'application/octet-stream'
+    )
+
+  const declaredSizeBytes =
+    Number(part.body?.size) || 0
+
+  if (
+    declaredSizeBytes > 0 &&
+    declaredSizeBytes > limit
+  ) {
+    throw exposedError(
+      `Der Gmail-Anhang ist zu groß. ` +
+      `Erlaubt sind höchstens ${limit} Byte, ` +
+      `angegeben sind ${declaredSizeBytes} Byte.`,
+      413
+    )
+  }
+
+  const resolvedAttachmentId =
+    String(
+      part.body?.attachmentId || ''
+    ).trim()
+
+  let data
+  let contentSource
+
+  if (part.body?.data) {
+    data = decodeBase64UrlBuffer(
+      part.body.data
+    )
+
+    contentSource =
+      'inline-message-data'
+  } else {
+    if (!resolvedAttachmentId) {
+      throw exposedError(
+        'Der Gmail-Anhang besitzt weder Inline-Daten noch eine abrufbare Attachment-ID',
+        422
+      )
+    }
+
+    const attachment =
+      await gmailRequest(
+        userId,
+        `${GMAIL_API}/users/me/messages/` +
+          `${encodeURIComponent(
+            cleanMessageId
+          )}/attachments/` +
+          encodeURIComponent(
+            resolvedAttachmentId
+          )
+      )
+
+    data = decodeBase64UrlBuffer(
+      attachment.data
+    )
+
+    contentSource =
+      'attachment-api'
+  }
+
+  if (data.length > limit) {
+    throw exposedError(
+      `Der Gmail-Anhang ist zu groß. ` +
+      `Erlaubt sind höchstens ${limit} Byte.`,
+      413
+    )
+  }
+
+  const readableAsText =
+    isTextGmailAttachment(
+      mimeType,
+      filename
+    )
+
+  if (!readableAsText) {
+    return {
+      messageId: cleanMessageId,
+      attachmentId:
+        resolvedAttachmentId || cleanAttachmentId,
+      contentSource,
+      filename,
+      mimeType,
+      declaredSizeBytes,
+      sizeBytes: data.length,
+      readableAsText: false,
+      contentLoaded: false,
+      note:
+        'Binärer Anhang erkannt. Der Inhalt wurde aus Sicherheits- und Kontextgründen nicht geladen.'
+    }
+  }
+
+  const completeText =
+    data
+      .toString('utf8')
+      .replace(/\u0000/g, '')
+
+  const maximumCharacters = 100_000
+
+  const truncated =
+    completeText.length >
+    maximumCharacters
+
+  return {
+    messageId: cleanMessageId,
+    attachmentId:
+      cleanAttachmentId,
+    filename,
+    mimeType,
+    declaredSizeBytes,
+    sizeBytes: data.length,
+    readableAsText: true,
+    contentLoaded: true,
+    truncated,
+    text:
+      truncated
+        ? completeText.slice(
+            0,
+            maximumCharacters
+          ) + '\n…'
+        : completeText
+  }
+}
+

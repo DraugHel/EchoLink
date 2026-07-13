@@ -9,6 +9,7 @@ import {
   sendGmailDraft,
   readGmailMessage,
   readGmailThread,
+  readGmailAttachment,
   searchGmailMessages
 } from '../connectors/google/gmail.js'
 
@@ -89,6 +90,43 @@ export const GMAIL_TOOLS = [
         },
         required: [
           'messageId'
+        ]
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'gmail_read_attachment',
+      description:
+        'Read a Gmail attachment using the messageId and attachmentId returned by gmail_read_message or gmail_read_thread. ' +
+        'Text, CSV, JSON, XML, source-code, and similar text attachments are returned as text. ' +
+        'Binary attachments such as PDFs, images, archives, and office files return metadata only and are not loaded into the model context. ' +
+        'Never invent an attachmentId and do not use a filename in place of the attachmentId.',
+      parameters: {
+        type: 'object',
+        properties: {
+          messageId: {
+            type: 'string',
+            description:
+              'Gmail message ID containing the attachment.'
+          },
+          attachmentId: {
+            type: 'string',
+            description:
+              'Exact Gmail attachment ID returned in the message or thread attachment metadata.'
+          },
+          maxBytes: {
+            type: 'integer',
+            minimum: 1024,
+            maximum: 10485760,
+            description:
+              'Maximum number of attachment bytes to load. Defaults to 2097152 bytes and cannot exceed 10485760 bytes.'
+          }
+        },
+        required: [
+          'messageId',
+          'attachmentId'
         ]
       }
     }
@@ -604,6 +642,24 @@ export async function executeGmailTool(
           ),
         maxMessages:
           args?.maxMessages
+      }
+    )
+
+    return JSON.stringify(result, null, 2)
+  }
+
+  if (name === 'gmail_read_attachment') {
+    const result = await readGmailAttachment(
+      context.userId,
+      {
+        messageId:
+          requiredMessageId(
+            args?.messageId
+          ),
+        attachmentId:
+          args?.attachmentId,
+        maxBytes:
+          args?.maxBytes
       }
     )
 
