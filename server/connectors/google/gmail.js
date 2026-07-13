@@ -830,3 +830,275 @@ export async function sendGmailDraft(
   }
 }
 
+function draftListLimit(value) {
+  const parsed = Number.parseInt(value, 10)
+
+  if (!Number.isFinite(parsed)) {
+    return 10
+  }
+
+  return Math.min(
+    Math.max(parsed, 1),
+    25
+  )
+}
+
+export async function listGmailDrafts(
+  userId,
+  {
+    maxResults = 10
+  } = {}
+) {
+  const limit = draftListLimit(maxResults)
+
+  const listing = await gmailRequest(
+    userId,
+    `${GMAIL_API}/users/me/drafts?` +
+      `maxResults=${limit}`
+  )
+
+  const drafts = []
+
+  for (
+    const item of listing.drafts || []
+  ) {
+    try {
+      const draft = await getGmailDraft(
+        userId,
+        item.id
+      )
+
+      const body = String(
+        draft.body || ''
+      ).trim()
+
+      drafts.push({
+        draftId: draft.draftId,
+        messageId: draft.id || null,
+        threadId: draft.threadId || null,
+        to: draft.to || '',
+        cc: draft.cc || '',
+        from: draft.from || '',
+        subject: draft.subject || '',
+        date: draft.date || '',
+        bodyPreview:
+          body.length > 1200
+            ? body.slice(0, 1200) + '\n…'
+            : body,
+        attachments:
+          draft.attachments || []
+      })
+    } catch (error) {
+      drafts.push({
+        draftId: item.id,
+        error:
+          error?.message || String(error)
+      })
+    }
+  }
+
+  return {
+    drafts,
+    count: drafts.length,
+    resultSizeEstimate:
+      listing.resultSizeEstimate || 0,
+    nextPageToken:
+      listing.nextPageToken || null
+  }
+}
+
+export async function updateGmailDraft(
+  userId,
+  {
+    draftId,
+    to,
+    cc,
+    subject,
+    body
+  }
+) {
+  const id = requiredDraftId(draftId)
+
+  const current = await gmailRequest(
+    userId,
+    `${GMAIL_API}/users/me/drafts/` +
+      `${encodeURIComponent(id)}?format=full`
+  )
+
+  if (!current.message) {
+    throw exposedError(
+      'Gmail-Entwurf enthält keine Nachricht',
+      502
+    )
+  }
+
+  const headers =
+    current.message.payload?.headers || []
+
+  const currentContent =
+    fullMessageContent(current.message)
+
+  if (
+    Array.isArray(currentContent.attachments) &&
+    currentContent.attachments.length
+  ) {
+    throw exposedError(
+      'Entwürfe mit Anhängen können noch nicht sicher bearbeitet werden',
+      400
+    )
+  }
+
+  const existingBcc =
+    headerValue(headers, 'Bcc')
+
+  if (existingBcc) {
+    throw exposedError(
+      'Entwürfe mit BCC können noch nicht sicher bearbeitet werden',
+      400
+    )
+  }
+
+  const nextTo = cleanMailHeader(
+    to === undefined
+      ? headerValue(headers, 'To')
+      : to,
+    'Empfänger',
+    2000
+  )
+
+  const nextCc = optionalMailHeader(
+    cc === undefined
+      ? headerValue(headers, 'Cc')
+      : cc,
+    'CC',
+    2000
+  )
+
+  const nextSubject = cleanReplySubject(
+    subject === undefined
+      ? headerValue(headers, 'Subject')
+      : subject
+  )
+
+  const nextBody = cleanMailBody(
+    body === undefined
+      ? currentContent.body
+      : body
+  )
+
+  const inReplyTo =
+    cleanReplyReference(
+      headerValue(headers, 'In-Reply-To')
+    )
+
+  const references =
+    cleanReplyReference(
+      headerValue(headers, 'References')
+    )
+
+  const mime = inReplyTo
+    ? buildReplyMime({
+        to: nextTo,
+        cc: nextCc,
+        subject: nextSubject,
+        body: nextBody,
+        inReplyTo,
+        references:
+          references || inReplyTo
+      })
+    : buildPlainTextMime({
+        to: nextTo,
+        cc: nextCc,
+        subject: nextSubject,
+        body: nextBody
+      })
+
+  const message = {
+    raw: encodeBase64Url(mime)
+  }
+
+  if (current.message.threadId) {
+    message.threadId =
+      current.message.threadId
+  }
+
+  const updated = await gmailRequest(
+    userId,
+    `${GMAIL_API}/users/me/drafts/` +
+      encodeURIComponent(id),
+    {
+      method: 'PUT',
+      requestBody: {
+        id,
+        message
+      }
+    }
+  )
+
+  return {
+    updated: true,
+    sent: false,
+    draftId: updated.id || id,
+    messageId:
+      updated.message?.id || null,
+    threadId:
+      updated.message?.threadId ||
+      current.message.threadId ||
+      null,
+    to: nextTo,
+    cc: nextCc,
+    subject: nextSubject
+  }
+}
+
+export async function deleteGmailDraft(
+  userId,
+  draftId
+) {
+  const id = requiredDraftId(draftId)
+
+  const accessToken =
+    await getGoogleAccessToken(userId)
+
+  const response = await fetch(
+    `${GMAIL_API}/users/me/drafts/` +
+      encodeURIComponent(id),
+    {
+      method: 'DELETE',
+      headers: {
+        Authorization:
+          `Bearer ${accessToken}`,
+        Accept: 'application/json'
+      }
+    }
+  )
+
+  if (!response.ok) {
+    const raw = await response.text()
+
+    let details =
+      raw || response.statusText
+
+    try {
+      const parsed = JSON.parse(raw)
+
+      details =
+        parsed?.error?.message ||
+        parsed?.error ||
+        details
+    } catch {
+      // Textantwort verwenden
+    }
+
+    throw exposedError(
+      `Gmail-Entwurf konnte nicht gelöscht werden: ${details}`,
+      response.status || 502
+    )
+  }
+
+  return {
+    deleted: true,
+    draftId: id
+  }
+}
+

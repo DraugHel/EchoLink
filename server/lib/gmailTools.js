@@ -2,7 +2,10 @@ import db from '../db.js'
 import {
   createGmailDraft,
   createGmailReplyDraft,
+  deleteGmailDraft,
   getGmailDraft,
+  listGmailDrafts,
+  updateGmailDraft,
   sendGmailDraft,
   readGmailMessage,
   searchGmailMessages
@@ -155,6 +158,96 @@ export const GMAIL_TOOLS = [
         ]
       }
     }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'gmail_list_drafts',
+      description:
+        'List the existing Gmail drafts. ' +
+        'Use this before updating or sending a draft when its draftId is unknown. ' +
+        'Do not create a duplicate draft when an existing draft can be updated.',
+      parameters: {
+        type: 'object',
+        properties: {
+          maxResults: {
+            type: 'integer',
+            minimum: 1,
+            maximum: 25,
+            description:
+              'Maximum number of drafts to return. Defaults to 10.'
+          }
+        }
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'gmail_update_draft',
+      description:
+        'Update an existing Gmail draft in place without sending it. ' +
+        'Only supplied fields are changed; omitted fields remain unchanged. ' +
+        'Use gmail_list_drafts first if the draftId is unknown. ' +
+        'Prefer updating the existing draft instead of creating another draft.',
+      parameters: {
+        type: 'object',
+        properties: {
+          draftId: {
+            type: 'string',
+            description:
+              'The Gmail draft ID to update.'
+          },
+          to: {
+            type: 'string',
+            description:
+              'New recipient or comma-separated recipients. Omit to preserve.'
+          },
+          cc: {
+            type: 'string',
+            description:
+              'New CC field. Use an empty string to clear it. Omit to preserve.'
+          },
+          subject: {
+            type: 'string',
+            description:
+              'New subject. Omit to preserve.'
+          },
+          body: {
+            type: 'string',
+            description:
+              'Complete new plain-text draft body. Omit to preserve.'
+          }
+        },
+        required: [
+          'draftId'
+        ]
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'gmail_delete_draft',
+      description:
+        'Permanently delete an existing Gmail draft. ' +
+        'Use gmail_list_drafts first when the draftId is unknown. ' +
+        'Only call this when the user explicitly asks to delete a draft. ' +
+        'Do not ask for confirmation in natural language because EchoLink displays Approve and Deny buttons.',
+      parameters: {
+        type: 'object',
+        properties: {
+          draftId: {
+            type: 'string',
+            description:
+              'The Gmail draft ID to permanently delete.'
+          }
+        },
+        required: [
+          'draftId'
+        ]
+      }
+    }
   }
 ]
 
@@ -165,7 +258,8 @@ export const GMAIL_TOOL_NAMES = new Set(
 )
 
 export const GMAIL_WRITE_TOOL_NAMES = new Set([
-  'gmail_send_draft'
+  'gmail_send_draft',
+  'gmail_delete_draft'
 ])
 
 function getContext(conversationId) {
@@ -294,6 +388,56 @@ export function formatGmailSendDraftPreview(
   ].filter(Boolean).join('\n')
 }
 
+export async function prepareGmailDeleteDraft(
+  args,
+  conversationId
+) {
+  const context = getContext(conversationId)
+
+  const draftId = requiredDraftId(
+    args?.draftId
+  )
+
+  const draft = await getGmailDraft(
+    context.userId,
+    draftId
+  )
+
+  return {
+    draftId,
+    draft
+  }
+}
+
+export function formatGmailDeleteDraftPreview(
+  action
+) {
+  const draft = action.draft || {}
+
+  const body = String(
+    draft.body || ''
+  ).trim()
+
+  const bodyPreview =
+    body.length > 1500
+      ? body.slice(0, 1500) + '\n…'
+      : body || '(Leerer Inhalt)'
+
+  return [
+    `An: ${draft.to || '(Unbekannt)'}`,
+    draft.cc
+      ? `CC: ${draft.cc}`
+      : null,
+    `Betreff: ${
+      draft.subject || '(Kein Betreff)'
+    }`,
+    '',
+    bodyPreview,
+    '',
+    'Dieser Entwurf wird endgültig gelöscht.'
+  ].filter(Boolean).join('\n')
+}
+
 export async function executeGmailTool(
   name,
   args,
@@ -376,6 +520,41 @@ export async function executeGmailTool(
 
   if (name === 'gmail_send_draft') {
     const result = await sendGmailDraft(
+      context.userId,
+      requiredDraftId(args?.draftId)
+    )
+
+    return JSON.stringify(result, null, 2)
+  }
+
+  if (name === 'gmail_list_drafts') {
+    const result = await listGmailDrafts(
+      context.userId,
+      {
+        maxResults: args?.maxResults
+      }
+    )
+
+    return JSON.stringify(result, null, 2)
+  }
+
+  if (name === 'gmail_update_draft') {
+    const result = await updateGmailDraft(
+      context.userId,
+      {
+        draftId: args?.draftId,
+        to: args?.to,
+        cc: args?.cc,
+        subject: args?.subject,
+        body: args?.body
+      }
+    )
+
+    return JSON.stringify(result, null, 2)
+  }
+
+  if (name === 'gmail_delete_draft') {
+    const result = await deleteGmailDraft(
       context.userId,
       requiredDraftId(args?.draftId)
     )

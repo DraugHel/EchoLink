@@ -26,7 +26,9 @@ import {
   GMAIL_TOOL_NAMES,
   GMAIL_WRITE_TOOL_NAMES,
   executeGmailTool,
+  formatGmailDeleteDraftPreview,
   formatGmailSendDraftPreview,
+  prepareGmailDeleteDraft,
   prepareGmailSendDraft
 } from '../lib/gmailTools.js'
 import { OLLAMA_URL, streamOllama } from '../providers/ollama.js'
@@ -43,6 +45,31 @@ const router = Router()
 const pendingTerminalActions = new Map()
 const pendingCalendarActions = new Map()
 const pendingGmailActions = new Map()
+
+function gmailActionCard(
+  toolName,
+  action
+) {
+  if (toolName === 'gmail_delete_draft') {
+    return {
+      description:
+        'Gmail-Entwurf löschen',
+      reason:
+        'Der Entwurf wird erst nach deiner Bestätigung endgültig gelöscht.',
+      command:
+        formatGmailDeleteDraftPreview(action)
+    }
+  }
+
+  return {
+    description:
+      'Gmail-Entwurf senden',
+    reason:
+      'Die E-Mail wird erst nach deiner Bestätigung versendet.',
+    command:
+      formatGmailSendDraftPreview(action)
+  }
+}
 const MAX_TOOL_ITERATIONS = 25
 
 // --- Auto-Approve fuer harmlose read-only Commands ---
@@ -319,10 +346,23 @@ async function executeTool(toolCall, res, conversationId) {
     let action
 
     try {
-      action = await prepareGmailSendDraft(
-        args,
-        conversationId
-      )
+      if (name === 'gmail_send_draft') {
+        action = await prepareGmailSendDraft(
+          args,
+          conversationId
+        )
+      } else if (
+        name === 'gmail_delete_draft'
+      ) {
+        action = await prepareGmailDeleteDraft(
+          args,
+          conversationId
+        )
+      } else {
+        throw new Error(
+          `Unbekannte Gmail-Schreibaktion: ${name}`
+        )
+      }
     } catch (error) {
       const message =
         error?.message || String(error)
@@ -335,6 +375,9 @@ async function executeTool(toolCall, res, conversationId) {
 
       return `Gmail error: ${message}`
     }
+
+    const card =
+      gmailActionCard(name, action)
 
     return new Promise(resolve => {
       const actionId = crypto.randomUUID()
@@ -360,7 +403,7 @@ async function executeTool(toolCall, res, conversationId) {
           pendingGmailActions.delete(actionId)
 
           resolve(
-            'Gmail send approval expired'
+            'Gmail action approval expired'
           )
         }
       }, 10 * 60 * 1000)
@@ -369,11 +412,11 @@ async function executeTool(toolCall, res, conversationId) {
         actionRequest: true,
         actionId,
         description:
-          'Gmail-Entwurf senden',
+          card.description,
         reason:
-          'Die E-Mail wird erst nach deiner Bestätigung versendet.',
+          card.reason,
         command:
-          formatGmailSendDraftPreview(action),
+          card.command,
         type: 'gmail',
         source: 'chat'
       })}\n\n`)
@@ -1280,19 +1323,24 @@ router.get(
           Number(entry.conversationId) ===
           conversationId
         )
-        .map(([actionId, entry]) => ({
-          actionId,
-          description:
-            'Gmail-Entwurf senden',
-          reason:
-            'Die E-Mail wird erst nach deiner Bestätigung versendet.',
-          command:
-            formatGmailSendDraftPreview(
-              entry.action
-            ),
-          type: 'gmail',
-          source: 'chat'
-        }))
+        .map(([actionId, entry]) => {
+          const card = gmailActionCard(
+            entry.toolName,
+            entry.action
+          )
+
+          return {
+            actionId,
+            description:
+              card.description,
+            reason:
+              card.reason,
+            command:
+              card.command,
+            type: 'gmail',
+            source: 'chat'
+          }
+        })
 
     res.json([
       ...terminalActions,
