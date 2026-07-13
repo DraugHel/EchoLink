@@ -2,6 +2,9 @@ import './loadEnv.js'
 import db from './db.js'
 import { computeNextRunAt } from './lib/scheduler.js'
 import { sendPushToUser } from './lib/push.js'
+import {
+  cleanupScheduledTasks
+} from './lib/taskCleanup.js'
 
 const POLL_MS = Math.max(
   5_000,
@@ -13,6 +16,58 @@ const MAX_TASKS_PER_TICK = 25
 
 let ticking = false
 let stopping = false
+
+const TASK_ONCE_RETENTION_DAYS = Math.max(
+  1,
+  Number(process.env.TASK_ONCE_RETENTION_DAYS) || 30
+)
+
+const TASK_RUN_RETENTION_DAYS = Math.max(
+  1,
+  Number(process.env.TASK_RUN_RETENTION_DAYS) || 90
+)
+
+const TASK_CLEANUP_INTERVAL_MS = Math.max(
+  60 * 60 * 1000,
+  (
+    Number(
+      process.env.TASK_CLEANUP_INTERVAL_HOURS
+    ) || 24
+  ) * 60 * 60 * 1000
+)
+
+function runTaskCleanup() {
+  try {
+    const result = cleanupScheduledTasks(db, {
+      onceRetentionDays:
+        TASK_ONCE_RETENTION_DAYS,
+      runRetentionDays:
+        TASK_RUN_RETENTION_DAYS
+    })
+
+    console.log(JSON.stringify({
+      level: 'info',
+      event: 'scheduled_task_cleanup',
+      deletedTasks: result.deletedTasks,
+      deletedRuns: result.deletedRuns
+    }))
+  } catch (error) {
+    console.error(JSON.stringify({
+      level: 'error',
+      event: 'scheduled_task_cleanup_failed',
+      error: error?.message || String(error)
+    }))
+  }
+}
+
+runTaskCleanup()
+
+const taskCleanupTimer = setInterval(
+  runTaskCleanup,
+  TASK_CLEANUP_INTERVAL_MS
+)
+
+taskCleanupTimer.unref?.()
 
 const claimNextTask = db.transaction(now => {
   const task = db.prepare(`
@@ -190,8 +245,9 @@ async function executeReminder(task) {
     {
       title: `Erinnerung: ${task.title}`,
       body: task.prompt,
-      url: '/',
-      tag: `echolink-task-${task.id}`
+      url: `/?conversation=${conversation.id}`,
+      tag: `echolink-task-${task.id}`,
+      conversationId: conversation.id
     }
   )
 
