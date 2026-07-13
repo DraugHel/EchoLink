@@ -14,7 +14,8 @@ export const TASK_TOOLS = [
       name: 'create_task',
       description:
         'Create a scheduled reminder or recurring task for the current conversation. ' +
-        'Use once for one-time reminders, interval for a number of minutes, or cron for recurring schedules. ' +
+        'Requests such as "in 2 minutes", "tomorrow", or "at 15:00" MUST use once. ' +
+        'Use interval or cron only when the user explicitly asks for repetition, such as "every 2 minutes" or "jeden Montag". ' +
         'For once, scheduleValue must be an ISO 8601 timestamp including an offset, for example 2026-07-14T15:00:00+02:00. ' +
         'Default timezone is Europe/Vienna.',
       parameters: {
@@ -40,6 +41,11 @@ export const TASK_TOOLS = [
             description:
               'ISO timestamp for once, integer minutes for interval, or a five-field cron expression'
           },
+          recurring: {
+            type: 'boolean',
+            description:
+              'False for one-time reminders. True only when repetition was explicitly requested.'
+          },
           timezone: {
             type: 'string',
             description:
@@ -50,7 +56,8 @@ export const TASK_TOOLS = [
           'title',
           'prompt',
           'scheduleKind',
-          'scheduleValue'
+          'scheduleValue',
+          'recurring'
         ]
       }
     }
@@ -270,6 +277,22 @@ function createTask(args, context) {
     'Prompt',
     MAX_PROMPT_LENGTH
   )
+
+  if (typeof args.recurring !== 'boolean') {
+    throw new Error('recurring muss true oder false sein')
+  }
+
+  if (args.scheduleKind === 'once' && args.recurring) {
+    throw new Error(
+      'Ein einmaliger Task darf nicht wiederkehrend sein'
+    )
+  }
+
+  if (args.scheduleKind !== 'once' && !args.recurring) {
+    throw new Error(
+      'interval und cron sind nur für ausdrücklich wiederkehrende Tasks erlaubt'
+    )
+  }
 
   const schedule = normalizeSchedule({
     scheduleKind: args.scheduleKind,
