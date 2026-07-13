@@ -1,8 +1,4 @@
-import {
-  SEARCH_TOOL,
-  FIRECRAWL_TOOL,
-  TERMINAL_TOOL
-} from '../lib/webSearch.js'
+import { ALL_TOOLS } from '../lib/toolRegistry.js'
 
 export const OLLAMA_URL =
   process.env.OLLAMA_URL || 'http://localhost:11434'
@@ -15,7 +11,7 @@ export async function streamOllama(model, messages, options, res, abortSignal) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       model, messages, stream: true,
-      tools: [SEARCH_TOOL, FIRECRAWL_TOOL, TERMINAL_TOOL],
+      tools: ALL_TOOLS,
       ...(options?.reasoningEffort === 'off' ? { think: false } : {}),
       options: { temperature: options?.temperature, top_k: options?.top_k, top_p: options?.top_p }
     }),

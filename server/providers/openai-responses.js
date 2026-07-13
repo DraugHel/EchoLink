@@ -1,9 +1,5 @@
 import { OPENAI_KEY } from './openai-compatible.js'
-import {
-  SEARCH_TOOL,
-  FIRECRAWL_TOOL,
-  TERMINAL_TOOL
-} from '../lib/webSearch.js'
+import { ALL_TOOLS } from '../lib/toolRegistry.js'
 import { imgMediaType } from '../lib/images.js'
 
 // ===================== OpenAI Responses API (Reasoning + Tools) =====================
@@ -89,7 +85,7 @@ export async function streamResponses(model, messages, options, res, abortSignal
     include: ['reasoning.encrypted_content'],
     input,
     ...(instructions ? { instructions } : {}),
-    tools: [SEARCH_TOOL, FIRECRAWL_TOOL, TERMINAL_TOOL].map(t => ({
+    tools: ALL_TOOLS.map(t => ({
       type: 'function', name: t.function.name, description: t.function.description, parameters: t.function.parameters
     })),
     // Nur explizit bekannte Instant-Modelle erhalten keinen reasoning-Parameter.

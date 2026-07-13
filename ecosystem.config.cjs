@@ -21,5 +21,13 @@ Respond in the user's language. Mix languages if the user does.
 
 You're allowed to have humor, sarcasm, personality. You're not a robot.`
     }
+  }, {
+    name: 'echolink-worker',
+    script: 'server/worker.js',
+    cwd: '/root/echolink',
+    env: {
+      TASK_POLL_MS: 30000,
+      DEFAULT_TASK_TIMEZONE: 'Europe/Vienna'
+    }
   }]
 }

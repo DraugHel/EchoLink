@@ -54,6 +54,54 @@ db.exec(`
     text TEXT NOT NULL,
     created_at INTEGER DEFAULT (unixepoch())
   );
+
+  CREATE TABLE IF NOT EXISTS scheduled_tasks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    conversation_id INTEGER,
+    task_type TEXT NOT NULL DEFAULT 'reminder',
+    title TEXT NOT NULL,
+    prompt TEXT NOT NULL,
+    schedule_kind TEXT NOT NULL
+      CHECK(schedule_kind IN ('once', 'interval', 'cron')),
+    schedule_value TEXT NOT NULL,
+    timezone TEXT NOT NULL DEFAULT 'Europe/Vienna',
+    enabled INTEGER NOT NULL DEFAULT 1,
+    next_run_at INTEGER,
+    last_run_at INTEGER,
+    locked_at INTEGER,
+    created_at INTEGER DEFAULT (unixepoch()),
+    updated_at INTEGER DEFAULT (unixepoch()),
+    FOREIGN KEY (user_id)
+      REFERENCES users(id)
+      ON DELETE CASCADE,
+    FOREIGN KEY (conversation_id)
+      REFERENCES conversations(id)
+      ON DELETE SET NULL
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_scheduled_tasks_due
+    ON scheduled_tasks(enabled, next_run_at, locked_at);
+
+  CREATE INDEX IF NOT EXISTS idx_scheduled_tasks_user
+    ON scheduled_tasks(user_id, id);
+
+  CREATE TABLE IF NOT EXISTS task_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_id INTEGER NOT NULL,
+    status TEXT NOT NULL
+      CHECK(status IN ('running', 'success', 'failed')),
+    result TEXT,
+    error TEXT,
+    started_at INTEGER NOT NULL,
+    finished_at INTEGER,
+    FOREIGN KEY (task_id)
+      REFERENCES scheduled_tasks(id)
+      ON DELETE CASCADE
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_task_runs_task
+    ON task_runs(task_id, id);
 `)
 
 // Add columns if they don't exist yet (for existing DBs)

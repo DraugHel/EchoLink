@@ -7,7 +7,7 @@
     "build": "cd client && npm run build",
     "start": "node server/index.js",
     "adduser": "node scripts/adduser.js",
-    "test:smoke": "node --test tests/smoke.test.mjs",
+    "test:smoke": "node --test tests/*.test.mjs",
     "test": "npm run test:smoke"
   },
   "dependencies": {
@@ -15,6 +15,7 @@
     "better-sqlite3": "^12.11.1",
     "cheerio": "^1.2.0",
     "connect-sqlite3": "^0.9.15",
+    "cron-parser": "^5.6.1",
     "express": "^4.18.3",
     "express-session": "^1.18.0",
     "mammoth": "^1.12.0",

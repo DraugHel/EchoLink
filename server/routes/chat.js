@@ -3,7 +3,11 @@ import { requireAuth } from '../middleware/auth.js'
 import db from '../db.js'
 import { extractUrls, fetchAllUrls } from '../lib/fetchUrl.js'
 import { UPLOAD_DIR, extractTextFromFile } from './uploads.js'
-import { webSearch, SEARCH_TOOL, firecrawlScrape, FIRECRAWL_TOOL, TERMINAL_TOOL } from '../lib/webSearch.js'
+import { webSearch, firecrawlScrape } from '../lib/webSearch.js'
+import {
+  executeTaskTool,
+  TASK_TOOL_NAMES
+} from '../lib/taskTools.js'
 import { OLLAMA_URL, streamOllama } from '../providers/ollama.js'
 import { OPENAI_KEY, ZAI_KEY, streamZai, splitSystemTimeNote } from '../providers/openai-compatible.js'
 import { ANTHROPIC_KEY, streamAnthropic } from '../providers/anthropic.js'
@@ -285,6 +289,41 @@ async function executeTool(toolCall, res, conversationId) {
     if (result.error) return `Scrape error: ${result.error}`
     return `Content from ${url}:\n\n${result.content}`
   }
+
+  if (TASK_TOOL_NAMES.has(name)) {
+    res.write(`data: ${JSON.stringify({
+      tool: name,
+      status: 'running',
+      query: args
+    })}\n\n`)
+
+    try {
+      const result = await executeTaskTool(
+        name,
+        args,
+        conversationId
+      )
+
+      res.write(`data: ${JSON.stringify({
+        tool: name,
+        status: 'done'
+      })}\n\n`)
+
+      return result
+    } catch (error) {
+      const message =
+        error?.message || String(error)
+
+      res.write(`data: ${JSON.stringify({
+        tool: name,
+        status: 'error',
+        error: message
+      })}\n\n`)
+
+      return `Task error: ${message}`
+    }
+  }
+
   return `Unknown tool: ${name}`
 }
 

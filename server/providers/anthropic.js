@@ -1,8 +1,4 @@
-import {
-  SEARCH_TOOL,
-  FIRECRAWL_TOOL,
-  TERMINAL_TOOL
-} from '../lib/webSearch.js'
+import { ALL_TOOLS } from '../lib/toolRegistry.js'
 import { imgMediaType } from '../lib/images.js'
 
 // ===================== Anthropic API Provider =====================
@@ -10,7 +6,7 @@ const ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages'
 export const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY || ''
 
 function anthropicTools() {
-  return [SEARCH_TOOL, FIRECRAWL_TOOL, TERMINAL_TOOL].map(t => ({
+  return ALL_TOOLS.map(t => ({
     name: t.function.name,
     description: t.function.description,
     input_schema: t.function.parameters
