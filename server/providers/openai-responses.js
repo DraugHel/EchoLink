@@ -16,6 +16,20 @@ function imgMediaType(b64) {
 // ===================== OpenAI Responses API (Reasoning + Tools) =====================
 const RESPONSES_URL = 'https://api.openai.com/v1/responses'
 
+// Diese Modelle akzeptieren keinen reasoning-Parameter.
+// Weitere exakte Modell-IDs können kommasepariert per .env ergänzt werden.
+const OPENAI_MODELS_WITHOUT_REASONING_CONFIG = new Set([
+  'gpt-5-chat-latest',
+  ...(process.env.OPENAI_NO_REASONING_MODELS || '')
+    .split(',')
+    .map(model => model.trim())
+    .filter(Boolean)
+])
+
+export function supportsReasoningConfig(model) {
+  return !OPENAI_MODELS_WITHOUT_REASONING_CONFIG.has(model)
+}
+
 // Internes Format -> Responses-API-Input. Assistant-Messages mit _raw
 // (Items aus vorheriger Responses-Iteration, inkl. Reasoning) gehen verbatim zurueck —
 // nur so bleibt die Denkkette ueber Tool-Calls hinweg erhalten.
@@ -85,13 +99,13 @@ export async function streamResponses(model, messages, options, res, abortSignal
     tools: [SEARCH_TOOL, FIRECRAWL_TOOL, TERMINAL_TOOL].map(t => ({
       type: 'function', name: t.function.name, description: t.function.description, parameters: t.function.parameters
     })),
-    // chat-latest-Varianten sind Instant-Modelle und lehnen den reasoning-Param ab
-    ...(model.includes('chat') ? {} : { reasoning: {
+    // Nur explizit bekannte Instant-Modelle erhalten keinen reasoning-Parameter.
+    ...(supportsReasoningConfig(model) ? { reasoning: {
       summary: 'detailed',
       ...(options?.reasoningEffort
         ? { effort: options.reasoningEffort === 'off' ? 'none' : options.reasoningEffort }
         : {})
-    } })
+    } } : {})
     // Reasoning-Modelle lehnen temperature/top_p ab -> bewusst weggelassen
   }
   const r = await fetch(RESPONSES_URL, {

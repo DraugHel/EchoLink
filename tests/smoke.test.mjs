@@ -63,6 +63,31 @@ test('Provider lassen sich importieren und exportieren Stream-Funktionen', async
   assert.equal(typeof compatible.streamZai, 'function')
   assert.equal(typeof compatible.splitSystemTimeNote, 'function')
   assert.equal(typeof responses.streamResponses, 'function')
+  assert.equal(typeof responses.supportsReasoningConfig, 'function')
+})
+
+test('OpenAI Reasoning-Regel ist explizit statt substring-basiert', async () => {
+  const responses = await import(
+    '../server/providers/openai-responses.js'
+  )
+
+  assert.equal(
+    responses.supportsReasoningConfig('gpt-5-chat-latest'),
+    false
+  )
+
+  assert.equal(
+    responses.supportsReasoningConfig('gpt-5.6'),
+    true
+  )
+
+  // Das Wort "chat" irgendwo im Namen darf keine falsche Ausnahme erzeugen.
+  assert.equal(
+    responses.supportsReasoningConfig(
+      'future-chat-capable-reasoning-model'
+    ),
+    true
+  )
 })
 
 test('Auth-Middleware blockiert nicht angemeldete Anfragen', async () => {
