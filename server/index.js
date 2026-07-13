@@ -17,6 +17,7 @@ import uploadRoutes, { cleanupOrphanedFiles } from './routes/uploads.js'
 import hermesRoutes from './routes/hermes.js'
 import externalRoutes from './routes/external.js'
 import systemRoutes from './routes/system.js'
+import googleRoutes from './routes/google.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const SQLiteStore = connectSqlite3(session)
@@ -104,6 +105,7 @@ app.use('/api/uploads', uploadRoutes)
 app.use('/api/hermes', hermesRoutes)
 app.use('/api/external', externalRoutes)
 app.use('/api/system', systemRoutes)
+app.use('/api/google', googleRoutes)
 
 // Unbekannte API-Routen immer als JSON beantworten.
 app.use('/api', (req, res) => {

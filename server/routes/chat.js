@@ -8,6 +8,10 @@ import {
   executeTaskTool,
   TASK_TOOL_NAMES
 } from '../lib/taskTools.js'
+import {
+  CALENDAR_TOOL_NAMES,
+  executeCalendarTool
+} from '../lib/calendarTools.js'
 import { OLLAMA_URL, streamOllama } from '../providers/ollama.js'
 import { OPENAI_KEY, ZAI_KEY, streamZai, splitSystemTimeNote } from '../providers/openai-compatible.js'
 import { ANTHROPIC_KEY, streamAnthropic } from '../providers/anthropic.js'
@@ -288,6 +292,40 @@ async function executeTool(toolCall, res, conversationId) {
     res.write(`data: ${JSON.stringify({ tool: 'firecrawl_scrape', status: 'done', query: url })}\n\n`)
     if (result.error) return `Scrape error: ${result.error}`
     return `Content from ${url}:\n\n${result.content}`
+  }
+
+  if (CALENDAR_TOOL_NAMES.has(name)) {
+    res.write(`data: ${JSON.stringify({
+      tool: name,
+      status: 'running',
+      query: args
+    })}\n\n`)
+
+    try {
+      const result = await executeCalendarTool(
+        name,
+        args,
+        conversationId
+      )
+
+      res.write(`data: ${JSON.stringify({
+        tool: name,
+        status: 'done'
+      })}\n\n`)
+
+      return result
+    } catch (error) {
+      const message =
+        error?.message || String(error)
+
+      res.write(`data: ${JSON.stringify({
+        tool: name,
+        status: 'error',
+        error: message
+      })}\n\n`)
+
+      return `Calendar error: ${message}`
+    }
   }
 
   if (TASK_TOOL_NAMES.has(name)) {

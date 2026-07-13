@@ -119,6 +119,22 @@ db.exec(`
 
   CREATE INDEX IF NOT EXISTS idx_push_subscriptions_user
     ON push_subscriptions(user_id, id);
+
+
+  CREATE TABLE IF NOT EXISTS google_oauth_accounts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL UNIQUE,
+    access_token_enc TEXT NOT NULL,
+    refresh_token_enc TEXT,
+    expires_at INTEGER NOT NULL,
+    scope TEXT NOT NULL DEFAULT '',
+    token_type TEXT NOT NULL DEFAULT 'Bearer',
+    created_at INTEGER DEFAULT (unixepoch()),
+    updated_at INTEGER DEFAULT (unixepoch()),
+    FOREIGN KEY (user_id)
+      REFERENCES users(id)
+      ON DELETE CASCADE
+  );
 `)
 
 // Add columns if they don't exist yet (for existing DBs)
