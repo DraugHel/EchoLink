@@ -1102,3 +1102,197 @@ export async function deleteGmailDraft(
   }
 }
 
+function requiredGmailResourceId(
+  value,
+  name
+) {
+  const id = String(value || '').trim()
+
+  if (!id) {
+    throw exposedError(
+      `${name} fehlt`,
+      400
+    )
+  }
+
+  if (
+    id.length > 1024 ||
+    !/^[A-Za-z0-9_-]+$/.test(id)
+  ) {
+    throw exposedError(
+      `${name} ist ungültig`,
+      400
+    )
+  }
+
+  return id
+}
+
+function gmailThreadMessageLimit(value) {
+  const parsed = Number.parseInt(value, 10)
+
+  if (!Number.isFinite(parsed)) {
+    return 20
+  }
+
+  return Math.min(
+    Math.max(parsed, 1),
+    50
+  )
+}
+
+export async function readGmailThread(
+  userId,
+  {
+    messageId,
+    threadId,
+    maxMessages = 20
+  } = {}
+) {
+  let resolvedThreadId = null
+
+  if (threadId) {
+    resolvedThreadId =
+      requiredGmailResourceId(
+        threadId,
+        'Gmail-Thread-ID'
+      )
+  } else {
+    const resolvedMessageId =
+      requiredGmailResourceId(
+        messageId,
+        'Gmail-Nachrichten-ID'
+      )
+
+    const sourceMessage =
+      await gmailRequest(
+        userId,
+        `${GMAIL_API}/users/me/messages/` +
+          `${encodeURIComponent(
+            resolvedMessageId
+          )}?format=metadata`
+      )
+
+    resolvedThreadId =
+      requiredGmailResourceId(
+        sourceMessage.threadId,
+        'Gmail-Thread-ID'
+      )
+  }
+
+  const thread = await gmailRequest(
+    userId,
+    `${GMAIL_API}/users/me/threads/` +
+      `${encodeURIComponent(
+        resolvedThreadId
+      )}?format=full`
+  )
+
+  const allMessages = Array.isArray(
+    thread.messages
+  )
+    ? [...thread.messages]
+    : []
+
+  if (!allMessages.length) {
+    throw exposedError(
+      'Der Gmail-Thread enthält keine Nachrichten',
+      502
+    )
+  }
+
+  allMessages.sort(
+    (left, right) =>
+      Number(left.internalDate || 0) -
+      Number(right.internalDate || 0)
+  )
+
+  const limit =
+    gmailThreadMessageLimit(maxMessages)
+
+  const selectedMessages =
+    allMessages.slice(-limit)
+
+  let remainingBodyCharacters = 120_000
+
+  const messages = selectedMessages.map(
+    message => {
+      const content =
+        fullMessageContent(message)
+
+      let body = String(
+        content.body || ''
+      )
+
+      let bodyTruncated = false
+
+      if (body.length > 30_000) {
+        body =
+          body.slice(0, 30_000) +
+          '\n…'
+
+        bodyTruncated = true
+      }
+
+      if (
+        body.length >
+        remainingBodyCharacters
+      ) {
+        body =
+          body.slice(
+            0,
+            Math.max(
+              remainingBodyCharacters,
+              0
+            )
+          ) +
+          '\n…'
+
+        bodyTruncated = true
+      }
+
+      remainingBodyCharacters =
+        Math.max(
+          0,
+          remainingBodyCharacters -
+            body.length
+        )
+
+      return {
+        ...messageSummary(message),
+        body,
+        bodyFormat:
+          content.bodyFormat,
+        bodyTruncated,
+        attachments:
+          content.attachments || []
+      }
+    }
+  )
+
+  return {
+    threadId:
+      thread.id || resolvedThreadId,
+    historyId:
+      thread.historyId || null,
+    messageCount:
+      allMessages.length,
+    returnedMessageCount:
+      messages.length,
+    omittedMessageCount:
+      Math.max(
+        allMessages.length -
+          messages.length,
+        0
+      ),
+    truncated:
+      allMessages.length >
+        messages.length ||
+      messages.some(
+        message =>
+          message.bodyTruncated
+      ),
+    messages
+  }
+}
+

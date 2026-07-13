@@ -8,6 +8,7 @@ import {
   updateGmailDraft,
   sendGmailDraft,
   readGmailMessage,
+  readGmailThread,
   searchGmailMessages
 } from '../connectors/google/gmail.js'
 
@@ -53,6 +54,37 @@ export const GMAIL_TOOLS = [
           messageId: {
             type: 'string',
             description: 'Gmail message ID'
+          }
+        },
+        required: [
+          'messageId'
+        ]
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'gmail_read_thread',
+      description:
+        'Read the complete Gmail conversation thread containing a message. ' +
+        'Returns the messages in chronological order with bodies, headers, labels, and attachment metadata. ' +
+        'Use gmail_search_messages first when the message ID is unknown. ' +
+        'Use this instead of reading individual messages when the user asks for the full conversation or context.',
+      parameters: {
+        type: 'object',
+        properties: {
+          messageId: {
+            type: 'string',
+            description:
+              'Gmail message ID belonging to the thread.'
+          },
+          maxMessages: {
+            type: 'integer',
+            minimum: 1,
+            maximum: 50,
+            description:
+              'Maximum number of messages to return. Defaults to 20. For long threads, the newest messages are returned.'
           }
         },
         required: [
@@ -557,6 +589,22 @@ export async function executeGmailTool(
     const result = await deleteGmailDraft(
       context.userId,
       requiredDraftId(args?.draftId)
+    )
+
+    return JSON.stringify(result, null, 2)
+  }
+
+  if (name === 'gmail_read_thread') {
+    const result = await readGmailThread(
+      context.userId,
+      {
+        messageId:
+          requiredMessageId(
+            args?.messageId
+          ),
+        maxMessages:
+          args?.maxMessages
+      }
     )
 
     return JSON.stringify(result, null, 2)
