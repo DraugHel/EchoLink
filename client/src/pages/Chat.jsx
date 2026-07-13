@@ -3,6 +3,8 @@ import Sidebar from '../components/Sidebar.jsx'
 import Message from '../components/Message.jsx'
 import MessageInput from '../components/MessageInput.jsx'
 import SettingsPanel from '../components/SettingsPanel.jsx'
+import MemoryPanel from '../components/MemoryPanel.jsx'
+import PushButton from '../components/PushButton.jsx'
 import api from '../lib/api.js'
 import ThemePicker, { useTheme } from '../components/ThemePicker.jsx'
 import CorsnFace from '../components/CorsnFace.jsx'
@@ -73,6 +75,7 @@ export default function Chat({ user, onLogout }) {
   const [sysStatus, setSysStatus] = useState(null)
   const [showSysPanel, setShowSysPanel] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
+  const [showMemory, setShowMemory] = useState(false)
   const [mobileSidebar, setMobileSidebar] = useState(false)
   const [availableModels, setAvailableModels] = useState([])
   const [agentMode, setAgentMode] = useState(false)
@@ -642,6 +645,23 @@ export default function Chat({ user, onLogout }) {
               <BoltIcon /> Agent
             </button>
           )}
+          {activeConvo && !agentMode && (
+            <button
+              type="button"
+              onClick={() => setShowMemory(true)}
+              title="Memory anzeigen"
+              aria-label="Memory anzeigen"
+              style={{
+                ...styles.settingsBtn,
+                color: showMemory
+                  ? 'var(--accent)'
+                  : 'var(--text2)'
+              }}
+            >
+              <BrainIcon />
+            </button>
+          )}
+          <PushButton style={styles.settingsBtn} />
           <ThemePicker />
           {activeConvo && (
             <button style={styles.settingsBtn} onClick={() => setShowSettings(true)} title="Settings">
@@ -774,6 +794,14 @@ export default function Chat({ user, onLogout }) {
         )}
       </main>
 
+      {showMemory && activeConvo && !agentMode && (
+        <MemoryPanel
+          conversationId={activeConvo.id}
+          streaming={streaming}
+          onClose={() => setShowMemory(false)}
+        />
+      )}
+
       {showSettings && activeConvo && (
         <SettingsPanel
           conversation={activeConvo}
@@ -795,6 +823,23 @@ const MenuIcon = () => (
     <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>
   </svg>
 )
+const BrainIcon = () => (
+  <svg
+    width="20"
+    height="20"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.8"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+  >
+    <path d="M9.5 4.5A3 3 0 0 0 4 6v1.2A3.5 3.5 0 0 0 3 13a3.5 3.5 0 0 0 4 5.8A3 3 0 0 0 12 17V7.5a3 3 0 0 0-2.5-3z" />
+    <path d="M14.5 4.5A3 3 0 0 1 20 6v1.2a3.5 3.5 0 0 1 1 5.8 3.5 3.5 0 0 1-4 5.8A3 3 0 0 1 12 17V7.5a3 3 0 0 1 2.5-3z" />
+    <path d="M8 9h1.5M14.5 9H16M8 14h1.5M14.5 14H16" />
+  </svg>
+)
+
 const GearIcon = () => (
   <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
     <circle cx="12" cy="12" r="3"/>

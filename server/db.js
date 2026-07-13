@@ -102,6 +102,23 @@ db.exec(`
 
   CREATE INDEX IF NOT EXISTS idx_task_runs_task
     ON task_runs(task_id, id);
+
+  CREATE TABLE IF NOT EXISTS push_subscriptions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    endpoint TEXT NOT NULL UNIQUE,
+    p256dh TEXT NOT NULL,
+    auth TEXT NOT NULL,
+    user_agent TEXT DEFAULT '',
+    created_at INTEGER DEFAULT (unixepoch()),
+    updated_at INTEGER DEFAULT (unixepoch()),
+    FOREIGN KEY (user_id)
+      REFERENCES users(id)
+      ON DELETE CASCADE
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_push_subscriptions_user
+    ON push_subscriptions(user_id, id);
 `)
 
 // Add columns if they don't exist yet (for existing DBs)

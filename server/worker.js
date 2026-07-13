@@ -1,6 +1,7 @@
 import './loadEnv.js'
 import db from './db.js'
 import { computeNextRunAt } from './lib/scheduler.js'
+import { sendPushToUser } from './lib/push.js'
 
 const POLL_MS = Math.max(
   5_000,
@@ -144,7 +145,7 @@ function failTask(task, now, nextRunAt) {
   )
 }
 
-function executeReminder(task) {
+async function executeReminder(task) {
   const conversation = db.prepare(`
     SELECT id
     FROM conversations
@@ -183,6 +184,26 @@ function executeReminder(task) {
     SET updated_at = unixepoch()
     WHERE id = ?
   `).run(conversation.id)
+
+  const pushResult = await sendPushToUser(
+    task.user_id,
+    {
+      title: `Erinnerung: ${task.title}`,
+      body: task.prompt,
+      url: '/',
+      tag: `echolink-task-${task.id}`
+    }
+  )
+
+  console.log(JSON.stringify({
+    level: 'info',
+    event: 'scheduled_task_push',
+    taskId: task.id,
+    userId: task.user_id,
+    sent: pushResult.sent,
+    failed: pushResult.failed,
+    removed: pushResult.removed
+  }))
 
   return content
 }

@@ -11,6 +11,7 @@ import authRoutes from './routes/auth.js'
 import conversationRoutes from './routes/conversations.js'
 import chatRoutes from './routes/chat.js'
 import memoryRoutes from './routes/memory.js'
+import pushRoutes from './routes/push.js'
 import taskRoutes from './routes/tasks.js'
 import uploadRoutes, { cleanupOrphanedFiles } from './routes/uploads.js'
 import hermesRoutes from './routes/hermes.js'
@@ -96,6 +97,7 @@ app.use('/api/auth', authRoutes)
 app.use('/api/conversations', conversationRoutes)
 app.use('/api/chat', chatRoutes)
 app.use('/api/memory', memoryRoutes)
+app.use('/api/push', pushRoutes)
 app.use('/api/tasks', taskRoutes)
 app.use('/api/uploads', uploadRoutes)
 app.use('/api/hermes', hermesRoutes)
