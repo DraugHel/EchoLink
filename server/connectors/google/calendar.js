@@ -30,7 +30,11 @@ function parseDate(value, fallback) {
 
 async function googleCalendarRequest(
   userId,
-  url
+  url,
+  {
+    method = 'GET',
+    requestBody = null
+  } = {}
 ) {
   for (let attempt = 0; attempt < 2; attempt++) {
     const accessToken =
@@ -39,26 +43,38 @@ async function googleCalendarRequest(
       })
 
     const response = await fetch(url, {
+      method,
       headers: {
         authorization: `Bearer ${accessToken}`,
-        accept: 'application/json'
+        accept: 'application/json',
+        ...(requestBody
+          ? { 'content-type': 'application/json' }
+          : {})
       },
+      ...(requestBody
+        ? {
+            body: JSON.stringify(requestBody)
+          }
+        : {}),
       signal: AbortSignal.timeout(20_000)
     })
 
-    let body = {}
+    let responseBody = {}
 
     try {
-      body = await response.json()
+      responseBody = await response.json()
     } catch {}
 
-    if (response.status === 401 && attempt === 0) {
+    if (
+      response.status === 401 &&
+      attempt === 0
+    ) {
       continue
     }
 
     if (!response.ok) {
       const message =
-        body?.error?.message ||
+        responseBody?.error?.message ||
         `HTTP ${response.status}`
 
       throw exposedError(
@@ -67,7 +83,7 @@ async function googleCalendarRequest(
       )
     }
 
-    return body
+    return responseBody
   }
 
   throw exposedError(
@@ -152,5 +168,151 @@ export async function listCalendarEvents(
           : 0,
       link: event.htmlLink || ''
     }))
+  }
+}
+
+
+function requiredEventText(
+  value,
+  name,
+  maxLength
+) {
+  if (typeof value !== 'string') {
+    throw exposedError(`${name} muss Text sein`, 400)
+  }
+
+  const result = value.trim()
+
+  if (!result) {
+    throw exposedError(`${name} darf nicht leer sein`, 400)
+  }
+
+  if (result.length > maxLength) {
+    throw exposedError(
+      `${name} ist zu lang`,
+      400
+    )
+  }
+
+  return result
+}
+
+function optionalEventText(
+  value,
+  maxLength
+) {
+  if (value == null || value === '') return ''
+
+  if (typeof value !== 'string') {
+    throw exposedError(
+      'Ungültiger Textwert für Kalendertermin',
+      400
+    )
+  }
+
+  return value.trim().slice(0, maxLength)
+}
+
+function validateTimeZone(value) {
+  const timeZone =
+    String(value || 'Europe/Vienna').trim()
+
+  try {
+    new Intl.DateTimeFormat('de-AT', {
+      timeZone
+    }).format(new Date())
+  } catch {
+    throw exposedError(
+      `Ungültige Zeitzone: ${timeZone}`,
+      400
+    )
+  }
+
+  return timeZone
+}
+
+export async function createCalendarEvent(
+  userId,
+  {
+    title,
+    start,
+    end,
+    timeZone = 'Europe/Vienna',
+    location = '',
+    description = ''
+  }
+) {
+  const summary = requiredEventText(
+    title,
+    'Titel',
+    300
+  )
+
+  const startDate = parseDate(start)
+  const endDate = parseDate(end)
+
+  if (endDate <= startDate) {
+    throw exposedError(
+      'Das Terminende muss nach dem Beginn liegen',
+      400
+    )
+  }
+
+  const zone = validateTimeZone(timeZone)
+
+  const payload = {
+    summary,
+    start: {
+      dateTime: startDate.toISOString(),
+      timeZone: zone
+    },
+    end: {
+      dateTime: endDate.toISOString(),
+      timeZone: zone
+    }
+  }
+
+  const cleanLocation =
+    optionalEventText(location, 1000)
+
+  const cleanDescription =
+    optionalEventText(description, 8000)
+
+  if (cleanLocation) {
+    payload.location = cleanLocation
+  }
+
+  if (cleanDescription) {
+    payload.description = cleanDescription
+  }
+
+  const url =
+    'https://www.googleapis.com/calendar/v3/' +
+    'calendars/primary/events?sendUpdates=none'
+
+  const event = await googleCalendarRequest(
+    userId,
+    url,
+    {
+      method: 'POST',
+      requestBody: payload
+    }
+  )
+
+  return {
+    id: event.id,
+    title: event.summary || summary,
+    start:
+      event.start?.dateTime ||
+      event.start?.date ||
+      null,
+    end:
+      event.end?.dateTime ||
+      event.end?.date ||
+      null,
+    location: event.location || '',
+    description: event.description || '',
+    status: event.status || '',
+    link: event.htmlLink || ''
   }
 }

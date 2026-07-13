@@ -10,7 +10,9 @@ import {
 } from '../lib/taskTools.js'
 import {
   CALENDAR_TOOL_NAMES,
-  executeCalendarTool
+  executeCalendarTool,
+  formatCalendarCreatePreview,
+  prepareCalendarCreateEvent
 } from '../lib/calendarTools.js'
 import { OLLAMA_URL, streamOllama } from '../providers/ollama.js'
 import { OPENAI_KEY, ZAI_KEY, streamZai, splitSystemTimeNote } from '../providers/openai-compatible.js'
@@ -24,6 +26,7 @@ import crypto from 'crypto'
 
 const router = Router()
 const pendingTerminalActions = new Map()
+const pendingCalendarActions = new Map()
 const MAX_TOOL_ITERATIONS = 25
 
 // --- Auto-Approve fuer harmlose read-only Commands ---
@@ -294,6 +297,54 @@ async function executeTool(toolCall, res, conversationId) {
     return `Content from ${url}:\n\n${result.content}`
   }
 
+  if (name === 'calendar_create_event') {
+    const event =
+      prepareCalendarCreateEvent(args)
+
+    return new Promise(resolve => {
+      const actionId = crypto.randomUUID()
+      const preview =
+        formatCalendarCreatePreview(event)
+
+      pendingCalendarActions.set(
+        actionId,
+        {
+          conversationId:
+            Number(conversationId),
+          toolName: name,
+          args: event,
+          resolve
+        }
+      )
+
+      setTimeout(() => {
+        if (
+          pendingCalendarActions.has(actionId)
+        ) {
+          pendingCalendarActions.delete(
+            actionId
+          )
+
+          resolve(
+            'Calendar action approval expired'
+          )
+        }
+      }, 10 * 60 * 1000)
+
+      res.write(`data: ${JSON.stringify({
+        actionRequest: true,
+        actionId,
+        description:
+          'Google-Kalendertermin erstellen',
+        reason:
+          'Der Termin wird erst nach deiner Bestätigung gespeichert.',
+        command: preview,
+        type: 'calendar',
+        source: 'chat'
+      })}\n\n`)
+    })
+  }
+
   if (CALENDAR_TOOL_NAMES.has(name)) {
     res.write(`data: ${JSON.stringify({
       tool: name,
@@ -476,6 +527,16 @@ router.post('/:conversationId', requireAuth, async (req, res) => {
       ? `${systemContent}\n\n[What you know about the user from past conversations:\n${memory}]`
       : `[What you know about the user from past conversations:\n${memory}]`
   }
+
+  const calendarToolPolicy = `[Calendar tool policy:
+- When the user explicitly requests creation of a calendar event and title, start, and end are known, call calendar_create_event immediately.
+- Never ask the user to reply "yes" or otherwise confirm in natural language.
+- The calendar_create_event tool automatically triggers the application's Approve/Deny interface.
+- Ask a follow-up question only when required event information is genuinely missing.]`
+
+  systemContent = systemContent
+    ? `${systemContent}\n\n${calendarToolPolicy}`
+    : calendarToolPolicy
 
   // History with attachments
   const history = db.prepare(`
@@ -669,56 +730,248 @@ router.post('/:conversationId', requireAuth, async (req, res) => {
   res.end()
 })
 
-// Approve a pending terminal action
-router.post('/action/:actionId/approve', requireAuth, async (req, res) => {
-  const entry = pendingTerminalActions.get(req.params.actionId)
-  if (!entry) return res.status(404).json({ error: 'Action not found or expired' })
-  pendingTerminalActions.delete(req.params.actionId)
-  const { command, conversationId, resolve } = entry
+// Approve a pending terminal or calendar action
+router.post(
+  '/action/:actionId/approve',
+  requireAuth,
+  async (req, res) => {
+    const actionId = req.params.actionId
 
-  exec(command, { timeout: 60000, cwd: '/root' }, (err, stdout, stderr) => {
-    const stripAnsi = s => s.replace(/\x1B\[[0-9;]*[mGKHF]/g, '').replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '')
-    const output = stripAnsi((stdout || '').slice(0, 4000))
-    const errOutput = stripAnsi((stderr || '').slice(0, 1000))
-    const result = err
-      ? `Exit code ${err.code}:\n${errOutput}${output}`
-      : output || '(no output)'
+    const calendarEntry =
+      pendingCalendarActions.get(actionId)
 
-    // Write result directly to DB as assistant message
-    if (conversationId) {
-      db.prepare('INSERT INTO messages (conversation_id, role, content) VALUES (?, ?, ?)')
-        .run(conversationId, 'assistant', '**Terminal:** `' + command + '`\n```\n' + result + '\n```')
+    if (calendarEntry) {
+      const ownedConversation = db.prepare(`
+        SELECT id
+        FROM conversations
+        WHERE id = ? AND user_id = ?
+      `).get(
+        calendarEntry.conversationId,
+        req.session.userId
+      )
+
+      if (!ownedConversation) {
+        return res.status(404).json({
+          error: 'Action not found or expired'
+        })
+      }
+
+      pendingCalendarActions.delete(actionId)
+
+      try {
+        const result =
+          await executeCalendarTool(
+            calendarEntry.toolName,
+            calendarEntry.args,
+            calendarEntry.conversationId
+          )
+
+        calendarEntry.resolve(result)
+
+        return res.json({
+          success: true,
+          type: 'calendar'
+        })
+      } catch (error) {
+        const message =
+          error?.message || String(error)
+
+        calendarEntry.resolve(
+          `Calendar error: ${message}`
+        )
+
+        return res.status(
+          error?.statusCode || 502
+        ).json({
+          error: message
+        })
+      }
     }
 
-    resolve(result)
-  })
+    const entry =
+      pendingTerminalActions.get(actionId)
 
-  res.json({ success: true })
-})
+    if (!entry) {
+      return res.status(404).json({
+        error: 'Action not found or expired'
+      })
+    }
 
-// Deny a pending terminal action
-router.post('/action/:actionId/deny', requireAuth, (req, res) => {
-  const entry = pendingTerminalActions.get(req.params.actionId)
-  if (!entry) return res.status(404).json({ error: 'Action not found or expired' })
-  pendingTerminalActions.delete(req.params.actionId)
-  const { resolve } = entry
-  resolve('Terminal action denied by user')
-})
+    pendingTerminalActions.delete(actionId)
 
+    const {
+      command,
+      conversationId,
+      resolve
+    } = entry
 
-// Get pending terminal actions for a conversation
-router.get('/:conversationId/actions', requireAuth, (req, res) => {
-  res.json([...pendingTerminalActions.entries()]
-    .filter(([id, entry]) => entry.conversationId === req.params.conversationId)
-    .map(([id, entry]) => ({
-      actionId: id,
-      description: entry.command,
-      command: entry.command,
-      type: 'shell',
-      source: 'chat'
-    }))
-  )
-})
+    exec(
+      command,
+      {
+        timeout: 60000,
+        cwd: '/root'
+      },
+      (err, stdout, stderr) => {
+        const stripAnsi = value =>
+          value
+            .replace(
+              /\x1B\[[0-9;]*[mGKHF]/g,
+              ''
+            )
+            .replace(
+              /[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g,
+              ''
+            )
+
+        const output = stripAnsi(
+          (stdout || '').slice(0, 4000)
+        )
+
+        const errOutput = stripAnsi(
+          (stderr || '').slice(0, 1000)
+        )
+
+        const result = err
+          ? `Exit code ${err.code}:\n${errOutput}${output}`
+          : output || '(no output)'
+
+        if (conversationId) {
+          db.prepare(`
+            INSERT INTO messages (
+              conversation_id,
+              role,
+              content
+            )
+            VALUES (?, 'assistant', ?)
+          `).run(
+            conversationId,
+            '**Terminal:** `' +
+              command +
+              '`\n```\n' +
+              result +
+              '\n```'
+          )
+        }
+
+        resolve(result)
+      }
+    )
+
+    res.json({
+      success: true,
+      type: 'shell'
+    })
+  }
+)
+
+// Deny a pending terminal or calendar action
+router.post(
+  '/action/:actionId/deny',
+  requireAuth,
+  (req, res) => {
+    const actionId = req.params.actionId
+
+    const calendarEntry =
+      pendingCalendarActions.get(actionId)
+
+    if (calendarEntry) {
+      pendingCalendarActions.delete(actionId)
+      calendarEntry.resolve(
+        'Calendar action denied by user'
+      )
+
+      return res.json({
+        success: true,
+        denied: true,
+        type: 'calendar'
+      })
+    }
+
+    const entry =
+      pendingTerminalActions.get(actionId)
+
+    if (!entry) {
+      return res.status(404).json({
+        error: 'Action not found or expired'
+      })
+    }
+
+    pendingTerminalActions.delete(actionId)
+    entry.resolve(
+      'Terminal action denied by user'
+    )
+
+    res.json({
+      success: true,
+      denied: true,
+      type: 'shell'
+    })
+  }
+)
+
+// Get pending actions for a conversation
+router.get(
+  '/:conversationId/actions',
+  requireAuth,
+  (req, res) => {
+    const conversationId =
+      Number(req.params.conversationId)
+
+    const conversation = db.prepare(`
+      SELECT id
+      FROM conversations
+      WHERE id = ? AND user_id = ?
+    `).get(
+      conversationId,
+      req.session.userId
+    )
+
+    if (!conversation) {
+      return res.status(404).json({
+        error: 'Conversation not found'
+      })
+    }
+
+    const terminalActions =
+      [...pendingTerminalActions.entries()]
+        .filter(([, entry]) =>
+          Number(entry.conversationId) ===
+          conversationId
+        )
+        .map(([actionId, entry]) => ({
+          actionId,
+          description: entry.command,
+          command: entry.command,
+          type: 'shell',
+          source: 'chat'
+        }))
+
+    const calendarActions =
+      [...pendingCalendarActions.entries()]
+        .filter(([, entry]) =>
+          Number(entry.conversationId) ===
+          conversationId
+        )
+        .map(([actionId, entry]) => ({
+          actionId,
+          description:
+            'Google-Kalendertermin erstellen',
+          reason:
+            'Der Termin wird erst nach deiner Bestätigung gespeichert.',
+          command:
+            formatCalendarCreatePreview(
+              entry.args
+            ),
+          type: 'calendar',
+          source: 'chat'
+        }))
+
+    res.json([
+      ...terminalActions,
+      ...calendarActions
+    ])
+  }
+)
 
 // Update memory endpoint
 router.post('/memory', requireAuth, async (req, res) => {

@@ -227,7 +227,9 @@ function Message({ role, content, streaming, images, think, toolStatus, actionRe
                       <button style={styles.denyBtn} onClick={() => handleDeny(ar.actionId, ar)}>
                         <XIcon2 /> Deny
                       </button>
-                      {ar.source === 'chat' && onAlwaysAllow && (
+                      {ar.source === 'chat' &&
+                        ar.type === 'shell' &&
+                        onAlwaysAllow && (
                         <button style={{ ...styles.approveBtn, background: 'transparent',
                           border: '1px solid var(--border)', color: 'var(--text2)' }}
                           onClick={() => handleAlways(ar.actionId, ar)}

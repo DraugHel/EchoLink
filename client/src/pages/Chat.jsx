@@ -76,6 +76,63 @@ export default function Chat({ user, onLogout }) {
   const [showSysPanel, setShowSysPanel] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
   const [showMemory, setShowMemory] = useState(false)
+
+  useEffect(() => {
+    if (!('serviceWorker' in navigator)) return
+
+    async function handlePushMessage(event) {
+      if (event.data?.type !== 'ECHOLINK_PUSH') return
+
+      const rawConversationId =
+        event.data?.payload?.conversationId
+
+      const pushedConversationId =
+        rawConversationId == null
+          ? null
+          : Number(rawConversationId)
+
+      try {
+        const convos = await api.get('/api/conversations')
+
+        if (Array.isArray(convos)) {
+          setConversations(convos)
+        }
+
+        const activeId = Number(activeConvo?.id)
+        const hasTarget =
+          Number.isInteger(pushedConversationId) &&
+          pushedConversationId > 0
+
+        if (
+          activeId > 0 &&
+          (!hasTarget || pushedConversationId === activeId)
+        ) {
+          const msgs = await api.get(
+            `/api/conversations/${activeId}/messages`
+          )
+
+          setMessages(msgs)
+        }
+      } catch (error) {
+        console.error(
+          'Push refresh failed:',
+          error?.message || error
+        )
+      }
+    }
+
+    navigator.serviceWorker.addEventListener(
+      'message',
+      handlePushMessage
+    )
+
+    return () => {
+      navigator.serviceWorker.removeEventListener(
+        'message',
+        handlePushMessage
+      )
+    }
+  }, [activeConvo?.id])
   const [mobileSidebar, setMobileSidebar] = useState(false)
   const [availableModels, setAvailableModels] = useState([])
   const [agentMode, setAgentMode] = useState(false)
@@ -166,6 +223,87 @@ export default function Chat({ user, onLogout }) {
     setConversations(convos)
     return convos
   }
+
+  useEffect(() => {
+    if (!activeConvo?.id) return
+
+    let refreshing = false
+
+    async function refreshChatAfterResume() {
+      if (
+        refreshing ||
+        streaming ||
+        document.visibilityState !== 'visible'
+      ) {
+        return
+      }
+
+      refreshing = true
+
+      try {
+        const conversationId = activeConvo.id
+
+        const msgs = await api.get(
+          `/api/conversations/${conversationId}/messages?refresh=${Date.now()}`
+        )
+
+        setMessages(msgs)
+
+        const convos = await api.get(
+          `/api/conversations?refresh=${Date.now()}`
+        )
+
+        if (Array.isArray(convos)) {
+          setConversations(convos)
+        }
+      } catch (error) {
+        console.error(
+          'Chat refresh after resume failed:',
+          error?.message || error
+        )
+      } finally {
+        refreshing = false
+      }
+    }
+
+    function handleVisibilityChange() {
+      if (document.visibilityState === 'visible') {
+        refreshChatAfterResume()
+      }
+    }
+
+    window.addEventListener(
+      'focus',
+      refreshChatAfterResume
+    )
+
+    window.addEventListener(
+      'pageshow',
+      refreshChatAfterResume
+    )
+
+    document.addEventListener(
+      'visibilitychange',
+      handleVisibilityChange
+    )
+
+    return () => {
+      window.removeEventListener(
+        'focus',
+        refreshChatAfterResume
+      )
+
+      window.removeEventListener(
+        'pageshow',
+        refreshChatAfterResume
+      )
+
+      document.removeEventListener(
+        'visibilitychange',
+        handleVisibilityChange
+      )
+    }
+  }, [activeConvo?.id, streaming])
 
   async function selectConvo(convo) {
     setActiveConvo(convo)
@@ -314,6 +452,7 @@ export default function Chat({ user, onLogout }) {
             actionId: json.actionId,
             description: json.description,
             command: json.command,
+            reason: json.reason,
             type: json.type,
             source: json.source
           }
