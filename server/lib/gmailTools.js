@@ -5,6 +5,7 @@ import {
   deleteGmailDraft,
   getGmailDraft,
   getGmailAttachmentDownloadInfo,
+  downloadGmailAttachment,
   listGmailDrafts,
   updateGmailDraft,
   sendGmailDraft,
@@ -13,6 +14,10 @@ import {
   readGmailAttachment,
   searchGmailMessages
 } from '../connectors/google/gmail.js'
+import { extractTextFromBuffer } from '../routes/uploads.js'
+import { renderPdfPagesToImages } from '../utils/pdfVision.js'
+import { analyzeImagesWithOllama } from '../providers/ollamaVision.js'
+import { analyzeImagesWithOpenAI } from '../providers/openaiVision.js'
 
 export const GMAIL_TOOLS = [
   {
@@ -154,6 +159,58 @@ export const GMAIL_TOOLS = [
             type: 'string',
             description:
               'Exact Gmail attachment ID returned by gmail_read_message or gmail_read_thread.'
+          }
+        },
+        required: [
+          'messageId',
+          'attachmentId'
+        ]
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'gmail_extract_attachment_text',
+      description:
+        'Extract readable text from a Gmail PDF, DOCX, XLS, XLSX, or supported text attachment. ' +
+        'For image-based PDFs with little or no embedded text, render up to five pages and use the configured vision model for faithful transcription. ' +
+        'Use gmail_read_message or gmail_read_thread first to obtain the exact messageId and attachmentId. ' +
+        'Use this when the user asks to read, inspect, summarize, or answer questions about the contents of a document attachment. ' +
+        'This tool does not execute macros, scripts, or archive contents and does not permanently store the attachment.',
+      parameters: {
+        type: 'object',
+        properties: {
+          messageId: {
+            type: 'string',
+            description:
+              'Gmail message ID containing the attachment.'
+          },
+          attachmentId: {
+            type: 'string',
+            description:
+              'Exact Gmail attachment ID returned in the message or thread metadata.'
+          },
+          maxBytes: {
+            type: 'integer',
+            minimum: 1024,
+            maximum: 26214400,
+            description:
+              'Maximum attachment size to process. Defaults to 25 MiB.'
+          },
+          maxPages: {
+            type: 'integer',
+            minimum: 1,
+            maximum: 5,
+            description:
+              'Maximum number of PDF pages to render for vision analysis. Defaults to 5.'
+          },
+          maxCharacters: {
+            type: 'integer',
+            minimum: 1000,
+            maximum: 200000,
+            description:
+              'Maximum number of extracted characters returned to the model. Defaults to 100000.'
           }
         },
         required: [
@@ -720,6 +777,236 @@ export async function executeGmailTool(
       null,
       2
     )
+  }
+
+  if (
+    name ===
+    'gmail_extract_attachment_text'
+  ) {
+    const attachment =
+      await downloadGmailAttachment(
+        context.userId,
+        {
+          messageId:
+            requiredMessageId(
+              args?.messageId
+            ),
+          attachmentId:
+            args?.attachmentId,
+          maxBytes:
+            args?.maxBytes
+        }
+      )
+
+    const isPdf =
+      String(
+        attachment.mimeType || ''
+      ).toLowerCase() ===
+        'application/pdf' ||
+      /\.pdf$/i.test(
+        String(
+          attachment.filename || ''
+        )
+      )
+
+    const extracted =
+      await extractTextFromBuffer(
+        attachment.buffer,
+        attachment.filename,
+        attachment.filename
+      )
+
+    const embeddedText =
+      String(extracted || '').trim()
+
+    const embeddedTextSignal =
+      embeddedText
+        .replace(/\s+/g, ' ')
+        .trim()
+
+    const needsVision =
+      isPdf &&
+      embeddedTextSignal.length < 120
+
+    let completeText =
+      embeddedText
+
+    let extractionMethod =
+      completeText
+        ? 'embedded-text'
+        : 'none'
+
+    let visionDetails = null
+
+    if (needsVision) {
+      const rendered =
+        await renderPdfPagesToImages(
+          attachment.buffer,
+          {
+            maxPages:
+              args?.maxPages,
+            dpi: 144,
+            maxWidth: 1600,
+            maxHeight: 2200,
+            jpegQuality: 82
+          }
+        )
+
+      const visionModel =
+        process.env.VISION_MODEL ||
+        'openai/gpt-5.6-luna'
+
+      const visionPrompt = [
+            `Read the PDF document "${attachment.filename}" page by page.`,
+            '',
+            'Produce a faithful transcription and structured extraction of all clearly visible information.',
+            '',
+            'Requirements:',
+            '- Separate the result by page.',
+            '- Preserve names, customer numbers, invoice numbers, dates, billing periods, currencies, decimal separators, totals, tax amounts, line items, payment methods, and bank details exactly as visible.',
+            '- For invoices, clearly identify subtotal, VAT, total amount, due date, and payment status when visible.',
+            '- Mark uncertain or unreadable passages explicitly.',
+            '- Do not infer, calculate, or invent values that are not visible.',
+            '- Do not include jokes, roleplay, personality remarks, or commentary unrelated to the document.',
+            '',
+            `The PDF contains ${rendered.pageCount} page(s).`,
+            `Pages rendered for analysis: ${rendered.renderedPageCount}.`,
+            rendered.truncated
+              ? `Warning: ${rendered.omittedPageCount} later page(s) were not rendered.`
+              : 'All PDF pages were rendered.'
+          ].join('\n')
+
+      let vision
+
+      if (
+        visionModel.startsWith(
+          'openai/'
+        )
+      ) {
+        vision =
+          await analyzeImagesWithOpenAI({
+            model:
+              visionModel.slice(7),
+            images:
+              rendered.images,
+            prompt:
+              visionPrompt,
+            timeoutMs:
+              180_000
+          })
+      } else {
+        vision =
+          await analyzeImagesWithOllama({
+            model:
+              visionModel,
+            images:
+              rendered.images,
+            prompt:
+              visionPrompt,
+            timeoutMs:
+              180_000
+          })
+      }
+
+      completeText =
+        String(
+          vision.content || ''
+        ).trim()
+
+      extractionMethod =
+        'vision-pdf'
+
+      visionDetails = {
+        model:
+          vision.model,
+        pageCount:
+          rendered.pageCount,
+        renderedPageCount:
+          rendered.renderedPageCount,
+        omittedPageCount:
+          rendered.omittedPageCount,
+        truncatedPages:
+          rendered.truncated,
+        tokenUsage:
+          vision.tokenUsage
+      }
+    }
+
+    if (!completeText) {
+      return JSON.stringify({
+        extracted: false,
+        messageId:
+          attachment.messageId,
+        attachmentId:
+          attachment.attachmentId,
+        filename:
+          attachment.filename,
+        mimeType:
+          attachment.mimeType,
+        sizeBytes:
+          attachment.sizeBytes,
+        extractionMethod,
+        visionAttempted:
+          needsVision,
+        reason:
+          'Aus diesem Anhang konnte kein zuverlässiger lesbarer Inhalt extrahiert werden.'
+      }, null, 2)
+    }
+
+    const parsedLimit =
+      Number.parseInt(
+        args?.maxCharacters,
+        10
+      )
+
+    const characterLimit =
+      Number.isFinite(parsedLimit)
+        ? Math.min(
+            Math.max(
+              parsedLimit,
+              1000
+            ),
+            200000
+          )
+        : 100000
+
+    const truncated =
+      completeText.length >
+      characterLimit
+
+    return JSON.stringify({
+      extracted: true,
+      messageId:
+        attachment.messageId,
+      attachmentId:
+        attachment.attachmentId,
+      filename:
+        attachment.filename,
+      mimeType:
+        attachment.mimeType,
+      sizeBytes:
+        attachment.sizeBytes,
+      extractionMethod,
+      embeddedTextCharacterCount:
+        embeddedText.length,
+      characterCount:
+        completeText.length,
+      returnedCharacterCount:
+        Math.min(
+          completeText.length,
+          characterLimit
+        ),
+      truncated,
+      vision:
+        visionDetails,
+      text:
+        truncated
+          ? completeText.slice(
+              0,
+              characterLimit
+            ) + '\n…[gekürzt]'
+          : completeText
+    }, null, 2)
   }
 
   throw new Error(

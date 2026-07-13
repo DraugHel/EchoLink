@@ -123,13 +123,164 @@ export async function extractTextFromFile(userId, filename, originalName) {
   return text
 }
 
+
+
+async function parsePdfBuffer(buffer) {
+  const pdfModule =
+    await import('pdf-parse')
+
+  // pdf-parse 1.x
+  if (
+    typeof pdfModule.default ===
+    'function'
+  ) {
+    const result =
+      await pdfModule.default(buffer)
+
+    return String(
+      result?.text || ''
+    )
+  }
+
+  // pdf-parse 2.x
+  if (
+    typeof pdfModule.PDFParse ===
+    'function'
+  ) {
+    const parser =
+      new pdfModule.PDFParse({
+        data: buffer
+      })
+
+    try {
+      const result =
+        await parser.getText()
+
+      return String(
+        result?.text || ''
+      )
+    } finally {
+      if (
+        typeof parser.destroy ===
+        'function'
+      ) {
+        await parser.destroy()
+      }
+    }
+  }
+
+  throw new Error(
+    'Unbekannte pdf-parse-API: ' +
+    Object.keys(pdfModule).join(', ')
+  )
+}
+
+export async function extractTextFromBuffer(
+  buffer,
+  filename,
+  originalName = filename
+) {
+  if (!Buffer.isBuffer(buffer)) {
+    throw new TypeError(
+      'extractTextFromBuffer erwartet einen Buffer'
+    )
+  }
+
+  const displayName =
+    String(
+      originalName ||
+      filename ||
+      'attachment'
+    )
+
+  const ext = path
+    .extname(displayName)
+    .toLowerCase()
+
+  try {
+    if (ext === '.pdf') {
+      return await parsePdfBuffer(
+        buffer
+      )
+    }
+
+    if (ext === '.docx') {
+      const mammoth =
+        (await import('mammoth')).default
+
+      const result =
+        await mammoth.extractRawText({
+          buffer
+        })
+
+      return result.value
+    }
+
+    if (
+      ext === '.xlsx' ||
+      ext === '.xls'
+    ) {
+      const XLSX =
+        await import('xlsx')
+
+      const workbook =
+        XLSX.read(buffer, {
+          type: 'buffer'
+        })
+
+      return workbook.SheetNames
+        .map(name => {
+          const worksheet =
+            workbook.Sheets[name]
+
+          return (
+            `[Sheet: ${name}]\n` +
+            XLSX.utils.sheet_to_csv(
+              worksheet
+            )
+          )
+        })
+        .join('\n\n')
+    }
+
+    if (ext === '.pptx') {
+      return (
+        '[PPTX: text extraction not ' +
+        'supported, file attached as reference]'
+      )
+    }
+
+    if (
+      [
+        '.zip',
+        '.tar',
+        '.gz',
+        '.7z',
+        '.rar'
+      ].includes(ext)
+    ) {
+      return null
+    }
+
+    return buffer.toString('utf8')
+  } catch (error) {
+    console.error(
+      'Buffer text extraction failed for',
+      displayName,
+      error?.message || String(error)
+    )
+
+    return null
+  }
+}
+
 async function doExtract(filepath, filename, originalName) {
   const ext = path.extname(filename).toLowerCase()
   try {
     if (ext === '.pdf') {
-      const pdfParse = (await import('pdf-parse')).default
-      const data = await pdfParse(fs.readFileSync(filepath))
-      return data.text
+      return await parsePdfBuffer(
+        fs.readFileSync(filepath)
+      )
     } else if (ext === '.docx') {
       const mammoth = (await import('mammoth')).default
       const result = await mammoth.extractRawText({ path: filepath })
