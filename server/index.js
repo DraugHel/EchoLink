@@ -22,6 +22,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const SQLiteStore = connectSqlite3(session)
 
 const PORT = process.env.PORT || 3000
+const HOST = process.env.HOST || '127.0.0.1'
 const SECRET = process.env.SESSION_SECRET
 if (!SECRET || SECRET === 'aender-mich' || SECRET === 'echolink-change-this-secret') {
   console.error('FATAL: SESSION_SECRET fehlt oder ist noch der Platzhalter. In .env setzen.')
@@ -152,10 +153,10 @@ if (fs.existsSync(distPath)) {
   app.get('/', (req, res) => res.send('Run "npm run build" first to build the frontend.'))
 }
 
-const server = app.listen(PORT, () => {
+const server = app.listen(PORT, HOST, () => {
 
 
-  console.log(`EchoLink running on http://localhost:${PORT}`)
+  console.log(`EchoLink running on http://${HOST}:${PORT}`)
   // Clean up orphaned uploads on startup
   try { cleanupOrphanedFiles() } catch (e) { console.error('Upload cleanup failed:', e.message) }
 })

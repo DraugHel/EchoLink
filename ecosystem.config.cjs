@@ -6,6 +6,7 @@ module.exports = {
     script: 'server/index.js',
     cwd: '/root/echolink',
     env: {
+      HOST: '127.0.0.1',
       PORT: 3000,
       DEFAULT_SYSTEM_PROMPT: `You are Echo, an AI assistant — relaxed, direct, no filler.
 

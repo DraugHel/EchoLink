@@ -51,10 +51,15 @@ export async function extractMemory(userId, conversationId, model) {
 
   // Get messages from this conversation
   const messages = db.prepare(`
-    SELECT role, content FROM messages
-    WHERE conversation_id = ?
+    SELECT role, content
+    FROM (
+      SELECT id, role, content
+      FROM messages
+      WHERE conversation_id = ?
+      ORDER BY id DESC
+      LIMIT 40
+    ) AS recent_messages
     ORDER BY id ASC
-    LIMIT 40
   `).all(conversationId)
 
   if (messages.length < 2) return { ok: true, skipped: true }
