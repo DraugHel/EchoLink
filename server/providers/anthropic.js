@@ -3,6 +3,7 @@ import {
   FIRECRAWL_TOOL,
   TERMINAL_TOOL
 } from '../lib/webSearch.js'
+import { imgMediaType } from '../lib/images.js'
 
 // ===================== Anthropic API Provider =====================
 const ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages'
@@ -14,14 +15,6 @@ function anthropicTools() {
     description: t.function.description,
     input_schema: t.function.parameters
   }))
-}
-
-function imgMediaType(b64) {
-  if (b64.startsWith('/9j/')) return 'image/jpeg'
-  if (b64.startsWith('iVBOR')) return 'image/png'
-  if (b64.startsWith('R0lGOD')) return 'image/gif'
-  if (b64.startsWith('UklGR')) return 'image/webp'
-  return 'image/jpeg'
 }
 
 // Ollama-internes Message-Format -> Anthropic Messages API Format

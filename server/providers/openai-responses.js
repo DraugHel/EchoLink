@@ -4,14 +4,7 @@ import {
   FIRECRAWL_TOOL,
   TERMINAL_TOOL
 } from '../lib/webSearch.js'
-
-function imgMediaType(b64) {
-  if (b64.startsWith('/9j/')) return 'image/jpeg'
-  if (b64.startsWith('iVBOR')) return 'image/png'
-  if (b64.startsWith('R0lGOD')) return 'image/gif'
-  if (b64.startsWith('UklGR')) return 'image/webp'
-  return 'image/jpeg'
-}
+import { imgMediaType } from '../lib/images.js'
 
 // ===================== OpenAI Responses API (Reasoning + Tools) =====================
 const RESPONSES_URL = 'https://api.openai.com/v1/responses'
