@@ -729,3 +729,104 @@ export async function createGmailReplyDraft(
   }
 }
 
+function requiredDraftId(value) {
+  const draftId = String(value || '').trim()
+
+  if (!draftId || draftId.length > 1024) {
+    throw exposedError(
+      'Ungültige Gmail-Entwurfs-ID',
+      400
+    )
+  }
+
+  return draftId
+}
+
+function fullMessageContent(message) {
+  const collected = {
+    plain: [],
+    html: [],
+    attachments: []
+  }
+
+  collectParts(
+    message.payload,
+    collected
+  )
+
+  const plainBody = collected.plain
+    .join('\n\n')
+    .trim()
+
+  const htmlBody = collected.html
+    .join('\n\n')
+    .trim()
+
+  return {
+    body: (
+      plainBody ||
+      stripHtml(htmlBody) ||
+      message.snippet ||
+      ''
+    ).slice(0, 50_000),
+    bodyFormat:
+      plainBody
+        ? 'text/plain'
+        : htmlBody
+          ? 'text/html'
+          : 'snippet',
+    attachments:
+      collected.attachments.slice(0, 50)
+  }
+}
+
+export async function getGmailDraft(
+  userId,
+  draftId
+) {
+  const id = requiredDraftId(draftId)
+
+  const draft = await gmailRequest(
+    userId,
+    `${GMAIL_API}/users/me/drafts/` +
+      `${encodeURIComponent(id)}?format=full`
+  )
+
+  if (!draft.message) {
+    throw exposedError(
+      'Gmail-Entwurf enthält keine Nachricht',
+      502
+    )
+  }
+
+  return {
+    draftId: draft.id || id,
+    ...messageSummary(draft.message),
+    ...fullMessageContent(draft.message)
+  }
+}
+
+export async function sendGmailDraft(
+  userId,
+  draftId
+) {
+  const id = requiredDraftId(draftId)
+
+  const message = await gmailRequest(
+    userId,
+    `${GMAIL_API}/users/me/drafts/send`,
+    {
+      method: 'POST',
+      requestBody: {
+        id
+      }
+    }
+  )
+
+  return {
+    sent: true,
+    draftId: id,
+    ...messageSummary(message)
+  }
+}
+

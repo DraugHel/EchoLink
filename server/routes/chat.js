@@ -24,7 +24,10 @@ import {
 } from '../lib/calendarExtraTools.js'
 import {
   GMAIL_TOOL_NAMES,
-  executeGmailTool
+  GMAIL_WRITE_TOOL_NAMES,
+  executeGmailTool,
+  formatGmailSendDraftPreview,
+  prepareGmailSendDraft
 } from '../lib/gmailTools.js'
 import { OLLAMA_URL, streamOllama } from '../providers/ollama.js'
 import { OPENAI_KEY, ZAI_KEY, streamZai, splitSystemTimeNote } from '../providers/openai-compatible.js'
@@ -39,6 +42,7 @@ import crypto from 'crypto'
 const router = Router()
 const pendingTerminalActions = new Map()
 const pendingCalendarActions = new Map()
+const pendingGmailActions = new Map()
 const MAX_TOOL_ITERATIONS = 25
 
 // --- Auto-Approve fuer harmlose read-only Commands ---
@@ -307,6 +311,73 @@ async function executeTool(toolCall, res, conversationId) {
     res.write(`data: ${JSON.stringify({ tool: 'firecrawl_scrape', status: 'done', query: url })}\n\n`)
     if (result.error) return `Scrape error: ${result.error}`
     return `Content from ${url}:\n\n${result.content}`
+  }
+
+  if (
+    GMAIL_WRITE_TOOL_NAMES.has(name)
+  ) {
+    let action
+
+    try {
+      action = await prepareGmailSendDraft(
+        args,
+        conversationId
+      )
+    } catch (error) {
+      const message =
+        error?.message || String(error)
+
+      res.write(`data: ${JSON.stringify({
+        tool: name,
+        status: 'error',
+        error: message
+      })}\n\n`)
+
+      return `Gmail error: ${message}`
+    }
+
+    return new Promise(resolve => {
+      const actionId = crypto.randomUUID()
+
+      pendingGmailActions.set(
+        actionId,
+        {
+          conversationId:
+            Number(conversationId),
+          toolName: name,
+          args: {
+            draftId: action.draftId
+          },
+          action,
+          resolve
+        }
+      )
+
+      setTimeout(() => {
+        if (
+          pendingGmailActions.has(actionId)
+        ) {
+          pendingGmailActions.delete(actionId)
+
+          resolve(
+            'Gmail send approval expired'
+          )
+        }
+      }, 10 * 60 * 1000)
+
+      res.write(`data: ${JSON.stringify({
+        actionRequest: true,
+        actionId,
+        description:
+          'Gmail-Entwurf senden',
+        reason:
+          'Die E-Mail wird erst nach deiner Bestätigung versendet.',
+        command:
+          formatGmailSendDraftPreview(action),
+        type: 'gmail',
+        source: 'chat'
+      })}\n\n`)
+    })
   }
 
   if (GMAIL_TOOL_NAMES.has(name)) {
@@ -949,6 +1020,56 @@ router.post(
       }
     }
 
+    const gmailEntry =
+      pendingGmailActions.get(actionId)
+
+    if (gmailEntry) {
+      const ownedConversation = db.prepare(`
+        SELECT id
+        FROM conversations
+        WHERE id = ? AND user_id = ?
+      `).get(
+        gmailEntry.conversationId,
+        req.session.userId
+      )
+
+      if (!ownedConversation) {
+        return res.status(404).json({
+          error: 'Action not found or expired'
+        })
+      }
+
+      pendingGmailActions.delete(actionId)
+
+      try {
+        const result = await executeGmailTool(
+          gmailEntry.toolName,
+          gmailEntry.args,
+          gmailEntry.conversationId
+        )
+
+        gmailEntry.resolve(result)
+
+        return res.json({
+          success: true,
+          type: 'gmail'
+        })
+      } catch (error) {
+        const message =
+          error?.message || String(error)
+
+        gmailEntry.resolve(
+          `Gmail error: ${message}`
+        )
+
+        return res.status(
+          error?.statusCode || 502
+        ).json({
+          error: message
+        })
+      }
+    }
+
     const entry =
       pendingTerminalActions.get(actionId)
 
@@ -1048,6 +1169,23 @@ router.post(
       })
     }
 
+    const gmailEntry =
+      pendingGmailActions.get(actionId)
+
+    if (gmailEntry) {
+      pendingGmailActions.delete(actionId)
+
+      gmailEntry.resolve(
+        'Gmail send action denied by user'
+      )
+
+      return res.json({
+        success: true,
+        denied: true,
+        type: 'gmail'
+      })
+    }
+
     const entry =
       pendingTerminalActions.get(actionId)
 
@@ -1136,9 +1274,30 @@ router.get(
           source: 'chat'
         }))
 
+    const gmailActions =
+      [...pendingGmailActions.entries()]
+        .filter(([, entry]) =>
+          Number(entry.conversationId) ===
+          conversationId
+        )
+        .map(([actionId, entry]) => ({
+          actionId,
+          description:
+            'Gmail-Entwurf senden',
+          reason:
+            'Die E-Mail wird erst nach deiner Bestätigung versendet.',
+          command:
+            formatGmailSendDraftPreview(
+              entry.action
+            ),
+          type: 'gmail',
+          source: 'chat'
+        }))
+
     res.json([
       ...terminalActions,
-      ...calendarActions
+      ...calendarActions,
+      ...gmailActions
     ])
   }
 )

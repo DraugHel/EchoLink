@@ -2,6 +2,8 @@ import db from '../db.js'
 import {
   createGmailDraft,
   createGmailReplyDraft,
+  getGmailDraft,
+  sendGmailDraft,
   readGmailMessage,
   searchGmailMessages
 } from '../connectors/google/gmail.js'
@@ -130,6 +132,29 @@ export const GMAIL_TOOLS = [
         ]
       }
     }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'gmail_send_draft',
+      description:
+        'Send an existing Gmail draft. ' +
+        'Only call this when the user explicitly asks to send the email or reply. ' +
+        'The draftId must come from gmail_create_draft or gmail_create_reply_draft. ' +
+        'Do not ask the user to confirm in natural language; EchoLink displays Approve and Deny buttons before sending.',
+      parameters: {
+        type: 'object',
+        properties: {
+          draftId: {
+            type: 'string',
+            description: 'Gmail draft ID'
+          }
+        },
+        required: [
+          'draftId'
+        ]
+      }
+    }
   }
 ]
 
@@ -138,6 +163,10 @@ export const GMAIL_TOOL_NAMES = new Set(
     tool => tool.function.name
   )
 )
+
+export const GMAIL_WRITE_TOOL_NAMES = new Set([
+  'gmail_send_draft'
+])
 
 function getContext(conversationId) {
   const id = Number(conversationId)
@@ -201,6 +230,68 @@ function cleanSearchQuery(value) {
   }
 
   return query
+}
+
+function requiredDraftId(value) {
+  const draftId = String(value || '').trim()
+
+  if (!draftId) {
+    throw new Error('Gmail-Entwurfs-ID fehlt')
+  }
+
+  if (draftId.length > 1024) {
+    throw new Error(
+      'Gmail-Entwurfs-ID ist zu lang'
+    )
+  }
+
+  return draftId
+}
+
+export async function prepareGmailSendDraft(
+  args,
+  conversationId
+) {
+  const context = getContext(conversationId)
+  const draftId = requiredDraftId(
+    args?.draftId
+  )
+
+  const draft = await getGmailDraft(
+    context.userId,
+    draftId
+  )
+
+  return {
+    draftId,
+    draft
+  }
+}
+
+export function formatGmailSendDraftPreview(
+  action
+) {
+  const draft = action.draft
+  const body = String(draft.body || '').trim()
+
+  const bodyPreview =
+    body.length > 3000
+      ? body.slice(0, 3000) + '\n…'
+      : body || '(Leerer Inhalt)'
+
+  return [
+    `An: ${draft.to || '(Unbekannt)'}`,
+    draft.cc
+      ? `CC: ${draft.cc}`
+      : null,
+    `Betreff: ${draft.subject || '(Kein Betreff)'}`,
+    '',
+    bodyPreview,
+    Array.isArray(draft.attachments) &&
+    draft.attachments.length
+      ? `\nAnhänge: ${draft.attachments.length}`
+      : null
+  ].filter(Boolean).join('\n')
 }
 
 export async function executeGmailTool(
@@ -281,6 +372,15 @@ export async function executeGmailTool(
       replyDraft: true,
       draft
     }, null, 2)
+  }
+
+  if (name === 'gmail_send_draft') {
+    const result = await sendGmailDraft(
+      context.userId,
+      requiredDraftId(args?.draftId)
+    )
+
+    return JSON.stringify(result, null, 2)
   }
 
   throw new Error(
