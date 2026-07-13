@@ -75,7 +75,11 @@ export async function sendPushToUser(
     tag: clampText(
       payload.tag || 'echolink',
       120
-    )
+    ),
+    conversationId:
+      Number.isInteger(Number(payload.conversationId))
+        ? Number(payload.conversationId)
+        : null
   })
 
   let sent = 0
