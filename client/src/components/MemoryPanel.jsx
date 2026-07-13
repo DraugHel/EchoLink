@@ -11,6 +11,9 @@ export default function MemoryPanel({
   const [memory, setMemory] = useState('')
   const [loading, setLoading] = useState(true)
   const [updating, setUpdating] = useState(false)
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState('')
+  const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
   async function loadMemory() {
@@ -19,7 +22,12 @@ export default function MemoryPanel({
 
     try {
       const data = await api.get('/api/memory')
-      setMemory(data?.memory || '')
+      const nextMemory = data?.memory || ''
+      setMemory(nextMemory)
+
+      if (!editing) {
+        setDraft(nextMemory)
+      }
     } catch (err) {
       setError(err?.message || 'Memory konnte nicht geladen werden.')
     } finally {
@@ -41,6 +49,7 @@ export default function MemoryPanel({
 
       if (typeof data?.memory === 'string') {
         setMemory(data.memory)
+        setDraft(data.memory)
       } else {
         await loadMemory()
       }
@@ -50,6 +59,42 @@ export default function MemoryPanel({
       )
     } finally {
       setUpdating(false)
+    }
+  }
+
+  function startEditing() {
+    setDraft(memory)
+    setEditing(true)
+    setError('')
+  }
+
+  function cancelEditing() {
+    setDraft(memory)
+    setEditing(false)
+    setError('')
+  }
+
+  async function saveMemory() {
+    setSaving(true)
+    setError('')
+
+    try {
+      const data = await api.post('/api/memory/save', {
+        content: draft
+      })
+
+      setMemory(
+        typeof data?.memory === 'string'
+          ? data.memory
+          : draft
+      )
+      setEditing(false)
+    } catch (err) {
+      setError(
+        err?.message || 'Memory konnte nicht gespeichert werden.'
+      )
+    } finally {
+      setSaving(false)
     }
   }
 
@@ -123,6 +168,51 @@ export default function MemoryPanel({
             </div>
           </div>
 
+          {!editing && (
+            <button
+              type="button"
+              onClick={startEditing}
+              disabled={loading || updating || saving}
+              title="Memory bearbeiten"
+              style={{
+                height: 34,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                padding: '0 10px',
+                border: '1px solid var(--border)',
+                borderRadius: 8,
+                background: 'var(--bg3)',
+                color: 'var(--text2)',
+                fontFamily: 'var(--font-mono)',
+                fontSize: 11,
+                cursor:
+                  loading || updating || saving
+                    ? 'not-allowed'
+                    : 'pointer',
+                opacity:
+                  loading || updating || saving
+                    ? 0.55
+                    : 1
+              }}
+            >
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.9"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M12 20h9" />
+                <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4z" />
+              </svg>
+              Bearbeiten
+            </button>
+          )}
+
           <button
             type="button"
             onClick={onClose}
@@ -153,6 +243,43 @@ export default function MemoryPanel({
           {loading ? (
             <div style={{ color: 'var(--text3)' }}>
               Memory wird geladen …
+            </div>
+          ) : editing ? (
+            <div>
+              <textarea
+                autoFocus
+                value={draft}
+                onChange={event => setDraft(event.target.value)}
+                spellCheck
+                aria-label="Memory bearbeiten"
+                style={{
+                  width: '100%',
+                  minHeight: 340,
+                  boxSizing: 'border-box',
+                  resize: 'vertical',
+                  padding: 14,
+                  border: '1px solid var(--border)',
+                  borderRadius: 10,
+                  outline: 'none',
+                  background: 'var(--bg3)',
+                  color: 'var(--text1)',
+                  fontFamily: 'var(--font-mono)',
+                  fontSize: 12,
+                  lineHeight: 1.65
+                }}
+              />
+
+              <div
+                style={{
+                  marginTop: 7,
+                  textAlign: 'right',
+                  color: 'var(--text3)',
+                  fontFamily: 'var(--font-mono)',
+                  fontSize: 10
+                }}
+              >
+                {draft.length.toLocaleString()} Zeichen
+              </div>
             </div>
           ) : memory ? (
             <div
@@ -326,39 +453,100 @@ export default function MemoryPanel({
             borderTop: '1px solid var(--border)'
           }}
         >
-          <button
-            type="button"
-            onClick={loadMemory}
-            disabled={loading || updating}
-            style={{
-              padding: '9px 12px',
-              border: '1px solid var(--border)',
-              borderRadius: 8,
-              background: 'var(--bg3)',
-              color: 'var(--text2)',
-              cursor: 'pointer'
-            }}
-          >
-            Neu laden
-          </button>
+          {editing ? (
+            <>
+              <button
+                type="button"
+                onClick={cancelEditing}
+                disabled={saving}
+                style={{
+                  padding: '9px 12px',
+                  border: '1px solid var(--border)',
+                  borderRadius: 8,
+                  background: 'var(--bg3)',
+                  color: 'var(--text2)',
+                  fontFamily: 'var(--font-mono)',
+                  fontSize: 12,
+                  cursor: saving ? 'not-allowed' : 'pointer',
+                  opacity: saving ? 0.55 : 1
+                }}
+              >
+                Abbrechen
+              </button>
 
-          <button
-            type="button"
-            onClick={updateMemory}
-            disabled={loading || updating || streaming}
-            style={{
-              padding: '9px 14px',
-              border: 0,
-              borderRadius: 8,
-              background: 'var(--accent)',
-              color: 'var(--user-text, #0d0d0d)',
-              fontWeight: 700,
-              cursor: streaming ? 'not-allowed' : 'pointer',
-              opacity: loading || updating || streaming ? 0.55 : 1
-            }}
-          >
-            {updating ? 'Aktualisiere …' : 'Memory aktualisieren'}
-          </button>
+              <button
+                type="button"
+                onClick={saveMemory}
+                disabled={saving}
+                style={{
+                  padding: '9px 14px',
+                  border: 0,
+                  borderRadius: 8,
+                  background: 'var(--accent)',
+                  color: 'var(--user-text, #0d0d0d)',
+                  fontFamily: 'var(--font-mono)',
+                  fontSize: 12,
+                  fontWeight: 700,
+                  cursor: saving ? 'not-allowed' : 'pointer',
+                  opacity: saving ? 0.55 : 1
+                }}
+              >
+                {saving ? 'Speichere …' : 'Speichern'}
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                type="button"
+                onClick={loadMemory}
+                disabled={loading || updating}
+                style={{
+                  padding: '9px 12px',
+                  border: '1px solid var(--border)',
+                  borderRadius: 8,
+                  background: 'var(--bg3)',
+                  color: 'var(--text2)',
+                  fontFamily: 'var(--font-mono)',
+                  fontSize: 12,
+                  cursor:
+                    loading || updating
+                      ? 'not-allowed'
+                      : 'pointer',
+                  opacity: loading || updating ? 0.55 : 1
+                }}
+              >
+                Neu laden
+              </button>
+
+              <button
+                type="button"
+                onClick={updateMemory}
+                disabled={loading || updating || streaming}
+                style={{
+                  padding: '9px 14px',
+                  border: 0,
+                  borderRadius: 8,
+                  background: 'var(--accent)',
+                  color: 'var(--user-text, #0d0d0d)',
+                  fontFamily: 'var(--font-mono)',
+                  fontSize: 12,
+                  fontWeight: 700,
+                  cursor:
+                    loading || updating || streaming
+                      ? 'not-allowed'
+                      : 'pointer',
+                  opacity:
+                    loading || updating || streaming
+                      ? 0.55
+                      : 1
+                }}
+              >
+                {updating
+                  ? 'Aktualisiere …'
+                  : 'Memory aktualisieren'}
+              </button>
+            </>
+          )}
         </footer>
       </section>
     </div>

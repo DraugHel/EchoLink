@@ -11,6 +11,32 @@ router.get('/', requireAuth, (req, res) => {
   res.json({ memory: user.memory || '' })
 })
 
+// Manually save edited memory
+router.post('/save', requireAuth, (req, res) => {
+  const content = req.body?.content
+
+  if (typeof content !== 'string') {
+    return res.status(400).json({
+      error: 'Memory content must be a string'
+    })
+  }
+
+  if (content.length > 500_000) {
+    return res.status(400).json({
+      error: 'Memory ist zu lang'
+    })
+  }
+
+  db.prepare(
+    'UPDATE users SET memory = ? WHERE id = ?'
+  ).run(content, req.session.userId)
+
+  res.json({
+    ok: true,
+    memory: content
+  })
+})
+
 // Clear memory
 router.delete('/', requireAuth, (req, res) => {
   db.prepare('UPDATE users SET memory = ? WHERE id = ?').run('', req.session.userId)
