@@ -42,23 +42,36 @@ export async function extractMemory(userId, conversationId, model) {
     .map(m => `${m.role === 'user' ? 'User' : 'Echo'}: ${m.content.slice(0, 500)}`)
     .join('\n')
 
-  const extractPrompt = `You are a memory extraction system. Your job is to extract important, reusable facts about the user from a conversation.
+  const extractPrompt = `You are a memory extraction system. Your job is to maintain a concise, reusable profile of the user.
 
 ${existingMemory ? `Existing memory about this user:\n${existingMemory}\n\n` : ''}New conversation to analyze:
 ---
 ${transcript}
 ---
 
-Extract a concise, updated list of facts about the user. Rules:
-- Only include stable facts (interests, projects, preferences, skills, context)
-- Remove outdated facts if new info contradicts them
-- Merge duplicates
-- Max 20 bullet points
-- Be specific, not vague ("works on EchoLink, a self-hosted LLM frontend" not "works on a project")
-- Skip trivial small talk
-- Format: one fact per line, starting with "- "
-- If nothing new or useful, return the existing memory unchanged
-- Return ONLY the bullet list, nothing else`
+Create an updated memory in clear Markdown.
+
+Use only the following section headings when relevant:
+## Persönliches
+## Präferenzen
+## Projekte & Ziele
+## Arbeit & Fähigkeiten
+## Aktueller Kontext
+
+Rules:
+- Include only stable or meaningfully reusable facts
+- Remove outdated facts when newer information contradicts them
+- Merge duplicates and closely related facts
+- Maximum 20 bullet points across all sections
+- Write exactly one fact per bullet
+- Be specific rather than vague
+- Skip greetings, temporary small talk and one-off details
+- Omit empty sections
+- Do not invent information
+- Preserve useful existing facts that are still valid
+- Use the language of the existing memory or conversation; default to German
+- If there are no new facts, reorganize the existing memory into this structure without changing its meaning
+- Return only Markdown headings and bullet points, with no introduction or conclusion`
 
   const useModel = model || convo.model || DEFAULT_MODEL
   const ollamaRes = await fetch(`${OLLAMA_URL}/api/chat`, {
