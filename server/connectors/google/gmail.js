@@ -582,3 +582,150 @@ export async function createGmailDraft(
   }
 }
 
+function cleanReplyReference(value) {
+  return String(value || '')
+    .replace(/[\r\n]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 8000)
+}
+
+function cleanReplySubject(value) {
+  return String(value || '')
+    .replace(/[\r\n]+/g, ' ')
+    .trim()
+    .slice(0, 998)
+}
+
+function buildReplyMime({
+  to,
+  cc = '',
+  subject,
+  body,
+  inReplyTo,
+  references
+}) {
+  const headers = [
+    `To: ${to}`,
+    cc ? `Cc: ${cc}` : null,
+    `Subject: ${encodeMimeHeader(subject)}`,
+    `In-Reply-To: ${inReplyTo}`,
+    `References: ${references}`,
+    'MIME-Version: 1.0',
+    'Content-Type: text/plain; charset="UTF-8"',
+    'Content-Transfer-Encoding: base64'
+  ].filter(Boolean)
+
+  const encodedBody = wrapBase64(
+    Buffer.from(body, 'utf8').toString('base64')
+  )
+
+  return [
+    ...headers,
+    '',
+    encodedBody
+  ].join('\r\n')
+}
+
+export async function createGmailReplyDraft(
+  userId,
+  {
+    messageId,
+    body,
+    cc = ''
+  }
+) {
+  const id = requiredMessageId(messageId)
+
+  const original = await gmailRequest(
+    userId,
+    `${GMAIL_API}/users/me/messages/` +
+      `${encodeURIComponent(id)}?format=full`
+  )
+
+  const headers =
+    original.payload?.headers || []
+
+  const recipient =
+    headerValue(headers, 'Reply-To') ||
+    headerValue(headers, 'From')
+
+  const cleanTo = cleanMailHeader(
+    recipient,
+    'Antwortempfänger',
+    2000
+  )
+
+  const cleanCc = optionalMailHeader(
+    cc,
+    'CC',
+    2000
+  )
+
+  const subject = cleanReplySubject(
+    headerValue(headers, 'Subject')
+  )
+
+  const originalMessageId =
+    cleanReplyReference(
+      headerValue(headers, 'Message-ID')
+    )
+
+  if (!originalMessageId) {
+    throw exposedError(
+      'Die Originalnachricht besitzt keinen Message-ID-Header',
+      400
+    )
+  }
+
+  const previousReferences =
+    cleanReplyReference(
+      headerValue(headers, 'References')
+    )
+
+  const references = [
+    previousReferences,
+    originalMessageId
+  ].filter(Boolean).join(' ')
+
+  const cleanBody = cleanMailBody(body)
+
+  const mime = buildReplyMime({
+    to: cleanTo,
+    cc: cleanCc,
+    subject,
+    body: cleanBody,
+    inReplyTo: originalMessageId,
+    references
+  })
+
+  const result = await gmailRequest(
+    userId,
+    `${GMAIL_API}/users/me/drafts`,
+    {
+      method: 'POST',
+      requestBody: {
+        message: {
+          raw: encodeBase64Url(mime),
+          threadId: original.threadId
+        }
+      }
+    }
+  )
+
+  return {
+    draftId: result.id,
+    messageId:
+      result.message?.id || null,
+    threadId:
+      result.message?.threadId ||
+      original.threadId ||
+      null,
+    replyToMessageId: id,
+    to: cleanTo,
+    cc: cleanCc,
+    subject,
+    sent: false
+  }
+}
+

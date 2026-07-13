@@ -1,6 +1,7 @@
 import db from '../db.js'
 import {
   createGmailDraft,
+  createGmailReplyDraft,
   readGmailMessage,
   searchGmailMessages
 } from '../connectors/google/gmail.js'
@@ -89,6 +90,42 @@ export const GMAIL_TOOLS = [
         required: [
           'to',
           'subject',
+          'body'
+        ]
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'gmail_create_reply_draft',
+      description:
+        'Create a Gmail reply draft inside the existing email thread. ' +
+        'This does not send the reply. ' +
+        'Use gmail_search_messages first when the original message ID is unknown. ' +
+        'When the user clearly asks to prepare or draft a reply and the reply body is known, call this tool immediately. ' +
+        'Do not ask for additional confirmation because the message remains a draft.',
+      parameters: {
+        type: 'object',
+        properties: {
+          messageId: {
+            type: 'string',
+            description:
+              'Gmail message ID being replied to.'
+          },
+          body: {
+            type: 'string',
+            description:
+              'Plain-text reply body.'
+          },
+          cc: {
+            type: 'string',
+            description:
+              'Optional CC email address or comma-separated addresses.'
+          }
+        },
+        required: [
+          'messageId',
           'body'
         ]
       }
@@ -224,6 +261,24 @@ export async function executeGmailTool(
     return JSON.stringify({
       created: true,
       sent: false,
+      draft
+    }, null, 2)
+  }
+
+  if (name === 'gmail_create_reply_draft') {
+    const draft = await createGmailReplyDraft(
+      context.userId,
+      {
+        messageId: args?.messageId,
+        body: args?.body,
+        cc: args?.cc || ''
+      }
+    )
+
+    return JSON.stringify({
+      created: true,
+      sent: false,
+      replyDraft: true,
       draft
     }, null, 2)
   }
