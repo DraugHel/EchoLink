@@ -9,7 +9,8 @@ const TOKEN_URL =
 
 export const GOOGLE_SCOPES = [
   'https://www.googleapis.com/auth/calendar.readonly',
-  'https://www.googleapis.com/auth/calendar.events'
+  'https://www.googleapis.com/auth/calendar.events',
+  'https://www.googleapis.com/auth/gmail.readonly'
 ]
 
 function exposedError(message, statusCode = 500) {
