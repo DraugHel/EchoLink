@@ -231,12 +231,57 @@ function validateTimeZone(value) {
   return timeZone
 }
 
+function parseDateOnly(value, name) {
+  const text = String(value || '').trim()
+
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) {
+    throw exposedError(
+      `${name} muss YYYY-MM-DD entsprechen`,
+      400
+    )
+  }
+
+  const [year, month, day] =
+    text.split('-').map(Number)
+
+  const date = new Date(
+    Date.UTC(year, month - 1, day)
+  )
+
+  if (
+    date.getUTCFullYear() !== year ||
+    date.getUTCMonth() !== month - 1 ||
+    date.getUTCDate() !== day
+  ) {
+    throw exposedError(
+      `${name} ist kein gültiges Datum`,
+      400
+    )
+  }
+
+  return text
+}
+
+function addDateOnlyDays(value, days) {
+  const [year, month, day] =
+    value.split('-').map(Number)
+
+  const date = new Date(
+    Date.UTC(year, month - 1, day + days)
+  )
+
+  return date.toISOString().slice(0, 10)
+}
+
 export async function createCalendarEvent(
   userId,
   {
     title,
     start,
     end,
+    allDay = false,
+    startDate = '',
+    endDate = '',
     timeZone = 'Europe/Vienna',
     location = '',
     description = ''
@@ -248,27 +293,60 @@ export async function createCalendarEvent(
     300
   )
 
-  const startDate = parseDate(start)
-  const endDate = parseDate(end)
+  let payload
 
-  if (endDate <= startDate) {
-    throw exposedError(
-      'Das Terminende muss nach dem Beginn liegen',
-      400
+  if (allDay) {
+    const firstDay = parseDateOnly(
+      startDate || start,
+      'Startdatum'
     )
-  }
 
-  const zone = validateTimeZone(timeZone)
+    const lastDay = parseDateOnly(
+      endDate || startDate || start,
+      'Enddatum'
+    )
 
-  const payload = {
-    summary,
-    start: {
-      dateTime: startDate.toISOString(),
-      timeZone: zone
-    },
-    end: {
-      dateTime: endDate.toISOString(),
-      timeZone: zone
+    if (lastDay < firstDay) {
+      throw exposedError(
+        'Das Enddatum darf nicht vor dem Startdatum liegen',
+        400
+      )
+    }
+
+    payload = {
+      summary,
+      start: {
+        date: firstDay
+      },
+      end: {
+        // Google verwendet bei Ganztagsterminen
+        // ein exklusives Enddatum.
+        date: addDateOnlyDays(lastDay, 1)
+      }
+    }
+  } else {
+    const startDateTime = parseDate(start)
+    const endDateTime = parseDate(end)
+
+    if (endDateTime <= startDateTime) {
+      throw exposedError(
+        'Das Terminende muss nach dem Beginn liegen',
+        400
+      )
+    }
+
+    const zone = validateTimeZone(timeZone)
+
+    payload = {
+      summary,
+      start: {
+        dateTime: startDateTime.toISOString(),
+        timeZone: zone
+      },
+      end: {
+        dateTime: endDateTime.toISOString(),
+        timeZone: zone
+      }
     }
   }
 
@@ -299,9 +377,13 @@ export async function createCalendarEvent(
     }
   )
 
+  const createdAllDay =
+    Boolean(event.start?.date)
+
   return {
     id: event.id,
     title: event.summary || summary,
+    allDay: createdAllDay,
     start:
       event.start?.dateTime ||
       event.start?.date ||
@@ -310,6 +392,14 @@ export async function createCalendarEvent(
       event.end?.dateTime ||
       event.end?.date ||
       null,
+    startDate:
+      createdAllDay
+        ? event.start?.date || null
+        : null,
+    endDate:
+      createdAllDay && event.end?.date
+        ? addDateOnlyDays(event.end.date, -1)
+        : null,
     location: event.location || '',
     description: event.description || '',
     status: event.status || '',

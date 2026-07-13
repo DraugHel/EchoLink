@@ -5,6 +5,7 @@ import {
 } from './webSearch.js'
 import { TASK_TOOLS } from './taskTools.js'
 import { CALENDAR_TOOLS } from './calendarTools.js'
+import { CALENDAR_EXTRA_TOOLS } from './calendarExtraTools.js'
 
 // Zentrale Tool-Liste für alle Modellanbieter.
 // Mail- und Kalender-Tools werden später nur hier ergänzt.
@@ -13,5 +14,6 @@ export const ALL_TOOLS = [
   FIRECRAWL_TOOL,
   TERMINAL_TOOL,
   ...CALENDAR_TOOLS,
+  ...CALENDAR_EXTRA_TOOLS,
   ...TASK_TOOLS
 ]

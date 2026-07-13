@@ -14,6 +14,14 @@ import {
   formatCalendarCreatePreview,
   prepareCalendarCreateEvent
 } from '../lib/calendarTools.js'
+import {
+  CALENDAR_EXTRA_TOOL_NAMES,
+  CALENDAR_EXTRA_WRITE_NAMES,
+  calendarExtraActionLabel,
+  executeCalendarExtraTool,
+  formatCalendarExtraPreview,
+  prepareCalendarExtraAction
+} from '../lib/calendarExtraTools.js'
 import { OLLAMA_URL, streamOllama } from '../providers/ollama.js'
 import { OPENAI_KEY, ZAI_KEY, streamZai, splitSystemTimeNote } from '../providers/openai-compatible.js'
 import { ANTHROPIC_KEY, streamAnthropic } from '../providers/anthropic.js'
@@ -297,6 +305,77 @@ async function executeTool(toolCall, res, conversationId) {
     return `Content from ${url}:\n\n${result.content}`
   }
 
+  if (
+    CALENDAR_EXTRA_WRITE_NAMES.has(name)
+  ) {
+    let action
+
+    try {
+      action = await prepareCalendarExtraAction(
+        name,
+        args,
+        conversationId
+      )
+    } catch (error) {
+      const message =
+        error?.message || String(error)
+
+      res.write(`data: ${JSON.stringify({
+        tool: name,
+        status: 'error',
+        error: message
+      })}\n\n`)
+
+      return `Calendar error: ${message}`
+    }
+
+    return new Promise(resolve => {
+      const actionId = crypto.randomUUID()
+
+      pendingCalendarActions.set(
+        actionId,
+        {
+          conversationId:
+            Number(conversationId),
+          toolName: name,
+          args: action,
+          executor: 'extra',
+          resolve
+        }
+      )
+
+      setTimeout(() => {
+        if (
+          pendingCalendarActions.has(actionId)
+        ) {
+          pendingCalendarActions.delete(
+            actionId
+          )
+
+          resolve(
+            'Calendar action approval expired'
+          )
+        }
+      }, 10 * 60 * 1000)
+
+      res.write(`data: ${JSON.stringify({
+        actionRequest: true,
+        actionId,
+        description:
+          calendarExtraActionLabel(name),
+        reason:
+          'Die Kalenderaktion wird erst nach deiner Bestätigung ausgeführt.',
+        command:
+          formatCalendarExtraPreview(
+            name,
+            action
+          ),
+        type: 'calendar',
+        source: 'chat'
+      })}\n\n`)
+    })
+  }
+
   if (name === 'calendar_create_event') {
     const event =
       prepareCalendarCreateEvent(args)
@@ -343,6 +422,43 @@ async function executeTool(toolCall, res, conversationId) {
         source: 'chat'
       })}\n\n`)
     })
+  }
+
+  if (
+    CALENDAR_EXTRA_TOOL_NAMES.has(name)
+  ) {
+    res.write(`data: ${JSON.stringify({
+      tool: name,
+      status: 'running',
+      query: args
+    })}\n\n`)
+
+    try {
+      const result =
+        await executeCalendarExtraTool(
+          name,
+          args,
+          conversationId
+        )
+
+      res.write(`data: ${JSON.stringify({
+        tool: name,
+        status: 'done'
+      })}\n\n`)
+
+      return result
+    } catch (error) {
+      const message =
+        error?.message || String(error)
+
+      res.write(`data: ${JSON.stringify({
+        tool: name,
+        status: 'error',
+        error: message
+      })}\n\n`)
+
+      return `Calendar error: ${message}`
+    }
   }
 
   if (CALENDAR_TOOL_NAMES.has(name)) {
@@ -529,10 +645,12 @@ router.post('/:conversationId', requireAuth, async (req, res) => {
   }
 
   const calendarToolPolicy = `[Calendar tool policy:
-- When the user explicitly requests creation of a calendar event and title, start, and end are known, call calendar_create_event immediately.
+- Use calendar_list_events to identify an event when its event ID is unknown.
+- When the user clearly requests creating, changing, or deleting an event and the target is unambiguous, call the appropriate calendar tool immediately.
 - Never ask the user to reply "yes" or otherwise confirm in natural language.
-- The calendar_create_event tool automatically triggers the application's Approve/Deny interface.
-- Ask a follow-up question only when required event information is genuinely missing.]`
+- Calendar write tools automatically trigger the application's Approve/Deny interface.
+- Ask a follow-up question only when the target event, date, or required time is genuinely ambiguous.
+- Use calendar_find_free_time for questions about availability or open time windows.]`
 
   systemContent = systemContent
     ? `${systemContent}\n\n${calendarToolPolicy}`
@@ -759,8 +877,13 @@ router.post(
       pendingCalendarActions.delete(actionId)
 
       try {
+        const executor =
+          calendarEntry.executor === 'extra'
+            ? executeCalendarExtraTool
+            : executeCalendarTool
+
         const result =
-          await executeCalendarTool(
+          await executor(
             calendarEntry.toolName,
             calendarEntry.args,
             calendarEntry.conversationId
@@ -955,13 +1078,22 @@ router.get(
         .map(([actionId, entry]) => ({
           actionId,
           description:
-            'Google-Kalendertermin erstellen',
+            entry.executor === 'extra'
+              ? calendarExtraActionLabel(
+                  entry.toolName
+                )
+              : 'Google-Kalendertermin erstellen',
           reason:
-            'Der Termin wird erst nach deiner Bestätigung gespeichert.',
+            'Die Kalenderaktion wird erst nach deiner Bestätigung ausgeführt.',
           command:
-            formatCalendarCreatePreview(
-              entry.args
-            ),
+            entry.executor === 'extra'
+              ? formatCalendarExtraPreview(
+                  entry.toolName,
+                  entry.args
+                )
+              : formatCalendarCreatePreview(
+                  entry.args
+                ),
           type: 'calendar',
           source: 'chat'
         }))

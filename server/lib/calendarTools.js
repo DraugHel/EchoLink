@@ -46,10 +46,11 @@ export const CALENDAR_TOOLS = [
       name: 'calendar_create_event',
       description:
         'Create a pending Google Calendar event approval request. ' +
-        'When the user explicitly asks to create, add, or schedule an event and title, start, and end are known, call this tool immediately. ' +
-        'Do NOT ask the user to confirm by replying yes; the application displays its own Approve and Deny buttons. ' +
-        'Only ask a follow-up question when a required title, date, start time, or end time is genuinely missing. ' +
-        'Use ISO 8601 timestamps including an offset. Default timezone is Europe/Vienna.',
+        'For timed events provide title, start, and end as ISO 8601 timestamps. ' +
+        'For all-day events set allDay=true and provide startDate and endDate as YYYY-MM-DD; endDate is the final included day. ' +
+        'For a one-day all-day event, startDate and endDate are identical. ' +
+        'Call this tool immediately when the required information is known. ' +
+        'Do NOT ask the user to confirm by replying yes; EchoLink displays Approve and Deny buttons.',
       parameters: {
         type: 'object',
         properties: {
@@ -67,6 +68,21 @@ export const CALENDAR_TOOLS = [
             description:
               'Event end as ISO 8601 timestamp including offset.'
           },
+          allDay: {
+            type: 'boolean',
+            description:
+              'True for an all-day event.'
+          },
+          startDate: {
+            type: 'string',
+            description:
+              'First included day as YYYY-MM-DD for an all-day event.'
+          },
+          endDate: {
+            type: 'string',
+            description:
+              'Final included day as YYYY-MM-DD for an all-day event.'
+          },
           timeZone: {
             type: 'string',
             description:
@@ -82,9 +98,7 @@ export const CALENDAR_TOOLS = [
           }
         },
         required: [
-          'title',
-          'start',
-          'end'
+          'title'
         ]
       }
     }
@@ -162,25 +176,38 @@ function validDate(value, name) {
   return date
 }
 
-export function prepareCalendarCreateEvent(
-  args = {}
-) {
-  const startDate = validDate(
-    args.start,
-    'Beginn'
-  )
+function validDateOnly(value, name) {
+  const result = String(value || '').trim()
 
-  const endDate = validDate(
-    args.end,
-    'Ende'
-  )
-
-  if (endDate <= startDate) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(result)) {
     throw new Error(
-      'Das Terminende muss nach dem Beginn liegen'
+      `${name} muss YYYY-MM-DD entsprechen`
     )
   }
 
+  const [year, month, day] =
+    result.split('-').map(Number)
+
+  const date = new Date(
+    Date.UTC(year, month - 1, day)
+  )
+
+  if (
+    date.getUTCFullYear() !== year ||
+    date.getUTCMonth() !== month - 1 ||
+    date.getUTCDate() !== day
+  ) {
+    throw new Error(
+      `${name} ist kein gültiges Datum`
+    )
+  }
+
+  return result
+}
+
+export function prepareCalendarCreateEvent(
+  args = {}
+) {
   const timeZone =
     optionalText(args.timeZone, 100) ||
     'Europe/Vienna'
@@ -188,21 +215,19 @@ export function prepareCalendarCreateEvent(
   try {
     new Intl.DateTimeFormat('de-AT', {
       timeZone
-    }).format(startDate)
+    }).format(new Date())
   } catch {
     throw new Error(
       `Ungültige Zeitzone: ${timeZone}`
     )
   }
 
-  return {
+  const common = {
     title: requiredText(
       args.title,
       'Titel',
       300
     ),
-    start: startDate.toISOString(),
-    end: endDate.toISOString(),
     timeZone,
     location: optionalText(
       args.location,
@@ -212,6 +237,54 @@ export function prepareCalendarCreateEvent(
       args.description,
       8000
     )
+  }
+
+  if (args.allDay === true) {
+    const startDate = validDateOnly(
+      args.startDate,
+      'Startdatum'
+    )
+
+    const endDate = validDateOnly(
+      args.endDate || args.startDate,
+      'Enddatum'
+    )
+
+    if (endDate < startDate) {
+      throw new Error(
+        'Das Enddatum darf nicht vor dem Startdatum liegen'
+      )
+    }
+
+    return {
+      ...common,
+      allDay: true,
+      startDate,
+      endDate
+    }
+  }
+
+  const startDateTime = validDate(
+    args.start,
+    'Beginn'
+  )
+
+  const endDateTime = validDate(
+    args.end,
+    'Ende'
+  )
+
+  if (endDateTime <= startDateTime) {
+    throw new Error(
+      'Das Terminende muss nach dem Beginn liegen'
+    )
+  }
+
+  return {
+    ...common,
+    allDay: false,
+    start: startDateTime.toISOString(),
+    end: endDateTime.toISOString()
   }
 }
 
@@ -226,6 +299,21 @@ function displayDate(value, timeZone) {
 export function formatCalendarCreatePreview(
   event
 ) {
+  if (event.allDay) {
+    return [
+      `Titel: ${event.title}`,
+      event.startDate === event.endDate
+        ? `Ganztägig am: ${event.startDate}`
+        : `Ganztägig: ${event.startDate} bis ${event.endDate}`,
+      event.location
+        ? `Ort: ${event.location}`
+        : null,
+      event.description
+        ? `Beschreibung: ${event.description}`
+        : null
+    ].filter(Boolean).join('\n')
+  }
+
   return [
     `Titel: ${event.title}`,
     `Beginn: ${displayDate(
