@@ -1,5 +1,6 @@
 import db from '../db.js'
 import {
+  createGmailDraft,
   readGmailMessage,
   searchGmailMessages
 } from '../connectors/google/gmail.js'
@@ -50,6 +51,45 @@ export const GMAIL_TOOLS = [
         },
         required: [
           'messageId'
+        ]
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'gmail_create_draft',
+      description:
+        'Create and save a Gmail draft. This does not send the email. ' +
+        'When the user clearly asks to draft or prepare an email and the recipient, subject, and body are known, call this tool immediately. ' +
+        'Do not ask for an additional confirmation because creating a draft does not send anything.',
+      parameters: {
+        type: 'object',
+        properties: {
+          to: {
+            type: 'string',
+            description:
+              'Recipient email address or comma-separated addresses.'
+          },
+          cc: {
+            type: 'string',
+            description:
+              'Optional CC email address or comma-separated addresses.'
+          },
+          subject: {
+            type: 'string',
+            description: 'Email subject'
+          },
+          body: {
+            type: 'string',
+            description:
+              'Plain-text email body'
+          }
+        },
+        required: [
+          'to',
+          'subject',
+          'body'
         ]
       }
     }
@@ -167,6 +207,24 @@ export async function executeGmailTool(
 
     return JSON.stringify({
       message
+    }, null, 2)
+  }
+
+  if (name === 'gmail_create_draft') {
+    const draft = await createGmailDraft(
+      context.userId,
+      {
+        to: args?.to,
+        cc: args?.cc || '',
+        subject: args?.subject,
+        body: args?.body
+      }
+    )
+
+    return JSON.stringify({
+      created: true,
+      sent: false,
+      draft
     }, null, 2)
   }
 

@@ -49,7 +49,11 @@ function cleanQuery(value) {
 
 async function gmailRequest(
   userId,
-  url
+  url,
+  {
+    method = 'GET',
+    requestBody = null
+  } = {}
 ) {
   for (let attempt = 0; attempt < 2; attempt++) {
     const accessToken =
@@ -58,10 +62,19 @@ async function gmailRequest(
       })
 
     const response = await fetch(url, {
+      method,
       headers: {
         authorization: `Bearer ${accessToken}`,
-        accept: 'application/json'
+        accept: 'application/json',
+        ...(requestBody
+          ? { 'content-type': 'application/json' }
+          : {})
       },
+      ...(requestBody
+        ? {
+            body: JSON.stringify(requestBody)
+          }
+        : {}),
       signal: AbortSignal.timeout(20_000)
     })
 
@@ -391,3 +404,181 @@ export async function readGmailMessage(
       collected.attachments.slice(0, 50)
   }
 }
+
+function cleanMailHeader(value, name, maxLength) {
+  if (typeof value !== 'string') {
+    throw exposedError(
+      `${name} muss Text sein`,
+      400
+    )
+  }
+
+  const result = value.trim()
+
+  if (!result) {
+    throw exposedError(
+      `${name} darf nicht leer sein`,
+      400
+    )
+  }
+
+  if (/[\r\n]/.test(result)) {
+    throw exposedError(
+      `${name} enthält ungültige Zeilenumbrüche`,
+      400
+    )
+  }
+
+  if (result.length > maxLength) {
+    throw exposedError(
+      `${name} ist zu lang`,
+      400
+    )
+  }
+
+  return result
+}
+
+function optionalMailHeader(
+  value,
+  name,
+  maxLength
+) {
+  if (value == null || value === '') {
+    return ''
+  }
+
+  return cleanMailHeader(
+    value,
+    name,
+    maxLength
+  )
+}
+
+function cleanMailBody(value) {
+  if (typeof value !== 'string') {
+    throw exposedError(
+      'E-Mail-Inhalt muss Text sein',
+      400
+    )
+  }
+
+  if (value.length > 200_000) {
+    throw exposedError(
+      'E-Mail-Inhalt ist zu lang',
+      400
+    )
+  }
+
+  return value
+}
+
+function encodeMimeHeader(value) {
+  if (/^[\x20-\x7E]*$/.test(value)) {
+    return value
+  }
+
+  return (
+    '=?UTF-8?B?' +
+    Buffer.from(value, 'utf8').toString('base64') +
+    '?='
+  )
+}
+
+function wrapBase64(value) {
+  return value.match(/.{1,76}/g)?.join('\r\n') || ''
+}
+
+function encodeBase64Url(value) {
+  return Buffer.from(value, 'utf8')
+    .toString('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/g, '')
+}
+
+function buildPlainTextMime({
+  to,
+  cc = '',
+  subject,
+  body
+}) {
+  const headers = [
+    `To: ${to}`,
+    cc ? `Cc: ${cc}` : null,
+    `Subject: ${encodeMimeHeader(subject)}`,
+    'MIME-Version: 1.0',
+    'Content-Type: text/plain; charset="UTF-8"',
+    'Content-Transfer-Encoding: base64'
+  ].filter(Boolean)
+
+  const encodedBody = wrapBase64(
+    Buffer.from(body, 'utf8').toString('base64')
+  )
+
+  return [
+    ...headers,
+    '',
+    encodedBody
+  ].join('\r\n')
+}
+
+export async function createGmailDraft(
+  userId,
+  {
+    to,
+    cc = '',
+    subject,
+    body
+  }
+) {
+  const cleanTo = cleanMailHeader(
+    to,
+    'Empfänger',
+    2000
+  )
+
+  const cleanCc = optionalMailHeader(
+    cc,
+    'CC',
+    2000
+  )
+
+  const cleanSubject = cleanMailHeader(
+    subject,
+    'Betreff',
+    998
+  )
+
+  const cleanBody = cleanMailBody(body)
+
+  const mime = buildPlainTextMime({
+    to: cleanTo,
+    cc: cleanCc,
+    subject: cleanSubject,
+    body: cleanBody
+  })
+
+  const result = await gmailRequest(
+    userId,
+    `${GMAIL_API}/users/me/drafts`,
+    {
+      method: 'POST',
+      requestBody: {
+        message: {
+          raw: encodeBase64Url(mime)
+        }
+      }
+    }
+  )
+
+  return {
+    draftId: result.id,
+    messageId: result.message?.id || null,
+    threadId: result.message?.threadId || null,
+    to: cleanTo,
+    cc: cleanCc,
+    subject: cleanSubject
+  }
+}
+
