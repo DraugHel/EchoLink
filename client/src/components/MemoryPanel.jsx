@@ -14,6 +14,7 @@ export default function MemoryPanel({
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState('')
   const [saving, setSaving] = useState(false)
+  const [deleting, setDeleting] = useState(false)
   const [error, setError] = useState('')
 
   async function loadMemory() {
@@ -95,6 +96,30 @@ export default function MemoryPanel({
       )
     } finally {
       setSaving(false)
+    }
+  }
+
+  async function clearMemory() {
+    const confirmed = window.confirm(
+      'Die gesamte User Memory wirklich löschen?'
+    )
+
+    if (!confirmed) return
+
+    setDeleting(true)
+    setError('')
+
+    try {
+      await api.delete('/api/memory')
+      setMemory('')
+      setDraft('')
+      setEditing(false)
+    } catch (err) {
+      setError(
+        err?.message || 'Memory konnte nicht gelöscht werden.'
+      )
+    } finally {
+      setDeleting(false)
     }
   }
 
@@ -496,6 +521,32 @@ export default function MemoryPanel({
             </>
           ) : (
             <>
+              <button
+                type="button"
+                onClick={clearMemory}
+                disabled={loading || updating || saving || deleting}
+                style={{
+                  marginRight: 'auto',
+                  padding: '9px 12px',
+                  border: '1px solid var(--danger)',
+                  borderRadius: 8,
+                  background: 'transparent',
+                  color: 'var(--danger)',
+                  fontFamily: 'var(--font-mono)',
+                  fontSize: 12,
+                  cursor:
+                    loading || updating || saving || deleting
+                      ? 'not-allowed'
+                      : 'pointer',
+                  opacity:
+                    loading || updating || saving || deleting
+                      ? 0.55
+                      : 1
+                }}
+              >
+                {deleting ? 'Lösche …' : 'Memory löschen'}
+              </button>
+
               <button
                 type="button"
                 onClick={loadMemory}
