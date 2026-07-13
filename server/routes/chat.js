@@ -521,6 +521,8 @@ router.post('/:conversationId', requireAuth, async (req, res) => {
           }
           workingMessages.push({
             role: 'tool',
+            // Echte Zuordnung statt ausschließlich über Nachrichtenreihenfolge.
+            ...(tc.id ? { tool_call_id: tc.id } : {}),
             content: result === '__TERMINAL_DONE__' ? '(terminal output saved to chat)' : result
           })
         }

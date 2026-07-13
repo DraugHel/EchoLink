@@ -42,7 +42,23 @@ function toResponsesInput(messages) {
       continue
     }
     if (m.role === 'tool') {
-      input.push({ type: 'function_call_output', call_id: pendingCallIds.shift() || `call_gen_${input.length}`, output: String(m.content ?? '') })
+      let callId = m.tool_call_id
+
+      if (callId) {
+        // Auch aus der Warteschlange entfernen, damit gemischte alte/neue
+        // Tool-Nachrichten nicht auf dieselbe Call-ID zeigen.
+        const pendingIndex = pendingCallIds.indexOf(callId)
+        if (pendingIndex !== -1) pendingCallIds.splice(pendingIndex, 1)
+      } else {
+        // Rückwärtskompatibilität für alte Chats ohne gespeicherte Call-ID.
+        callId = pendingCallIds.shift() || `call_gen_${input.length}`
+      }
+
+      input.push({
+        type: 'function_call_output',
+        call_id: callId,
+        output: String(m.content ?? '')
+      })
       continue
     }
     if (m.images?.length) {

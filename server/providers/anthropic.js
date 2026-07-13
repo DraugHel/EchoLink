@@ -52,8 +52,23 @@ function toAnthropic(messages) {
       continue
     }
     if (m.role === 'tool') {
-      const id = pendingToolIds.shift() || `toolu_gen_${out.length}`
-      const block = { type: 'tool_result', tool_use_id: id, content: String(m.content ?? '') }
+      let id = m.tool_call_id
+
+      if (id) {
+        // Passende ID entfernen, damit spätere Legacy-Nachrichten weiterhin
+        // den korrekten verbliebenen Tool-Call erhalten.
+        const pendingIndex = pendingToolIds.indexOf(id)
+        if (pendingIndex !== -1) pendingToolIds.splice(pendingIndex, 1)
+      } else {
+        // Rückwärtskompatibilität für alte Chats ohne gespeicherte Call-ID.
+        id = pendingToolIds.shift() || `toolu_gen_${out.length}`
+      }
+
+      const block = {
+        type: 'tool_result',
+        tool_use_id: id,
+        content: String(m.content ?? '')
+      }
       const last = out[out.length - 1]
       if (last && last.role === 'user' && Array.isArray(last.content) && last.content[0]?.type === 'tool_result') {
         last.content.push(block)
