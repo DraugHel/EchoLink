@@ -700,12 +700,17 @@ async function executeTool(toolCall, res, conversationId) {
 // Main chat endpoint
 
 // Auto-update memory after response (direct function call instead of HTTP)
-async function updateMemory(userId, conversationId, model) {
+function shouldForceMemoryUpdate(content) {
+  return /\b(?:merk dir|merke dir|bitte merken|speichere (?:das|dies)|ab jetzt|von nun an|ich bevorzuge)\b/i
+    .test(String(content || ''))
+}
+
+async function updateMemory(userId, conversationId, model, force = false) {
   const msgCount = db.prepare('SELECT COUNT(*) as count FROM messages WHERE conversation_id = ? AND role = ?')
     .get(conversationId, 'assistant').count
 
-  // Only update every ~10 assistant messages to avoid hammering
-  if (msgCount % 10 !== 0) return
+  // Regulär alle 10 Antworten, bei expliziten Memory-Aussagen sofort.
+  if (!force && msgCount % 10 !== 0) return
 
   try {
     const { extractMemory } = await import('./memory.js')
@@ -1025,7 +1030,12 @@ ${legacyMemory}]`
         res.write('data: ' + JSON.stringify({ done: true, ...(tokenUsage ? { tokens: tokenUsage } : {}) }) + '\n\n')
 
         // Auto-update memory periodically (non-blocking)
-        updateMemory(req.session.userId, convo.id, convo.model).catch(err => console.error('Memory update failed:', err.message))
+        updateMemory(
+          req.session.userId,
+          convo.id,
+          convo.model,
+          shouldForceMemoryUpdate(content)
+        ).catch(err => console.error('Memory update failed:', err.message))
       }
 
       break
