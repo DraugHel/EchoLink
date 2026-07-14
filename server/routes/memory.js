@@ -396,15 +396,216 @@ router.delete('/items/:itemId', requireAuth, (req, res) => {
   }
 })
 
+function normalizeMemoryFingerprint(value) {
+  return String(value || '')
+    .toLowerCase()
+    .normalize('NFKD')
+    .replace(/\p{M}/gu, '')
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .trim()
+}
+
+function parseMemoryExtractionJson(rawValue) {
+  let text = String(rawValue || '').trim()
+
+  text = text
+    .replace(/^```(?:json)?\s*/i, '')
+    .replace(/\s*```$/i, '')
+    .trim()
+
+  const start = text.indexOf('{')
+  const end = text.lastIndexOf('}')
+
+  if (start < 0 || end <= start) {
+    throw new Error('Memory-Modell lieferte kein JSON-Objekt')
+  }
+
+  const parsed = JSON.parse(text.slice(start, end + 1))
+
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('Memory-Modell lieferte ungültiges JSON')
+  }
+
+  return parsed
+}
+
+function clampNumber(value, minimum, maximum, fallback) {
+  const number = Number(value)
+  if (!Number.isFinite(number)) return fallback
+  return Math.min(maximum, Math.max(minimum, number))
+}
+
+function applyStructuredMemories({
+  userId,
+  conversationId,
+  sourceMessageId,
+  extractorModel,
+  candidates,
+  activeItems
+}) {
+  const result = {
+    created: 0,
+    confirmed: 0,
+    replaced: 0,
+    skipped: 0,
+    itemIds: []
+  }
+
+  const itemsById = new Map(activeItems.map(item => [item.id, item]))
+  const itemsByFingerprint = new Map(
+    activeItems.map(item => [normalizeMemoryFingerprint(item.content), item])
+  )
+
+  for (const candidate of Array.isArray(candidates) ? candidates.slice(0, 8) : []) {
+    try {
+      if (!candidate || typeof candidate !== 'object') {
+        result.skipped += 1
+        continue
+      }
+
+      const action = String(candidate.action || 'create').trim().toLowerCase()
+      const targetId = Number.parseInt(candidate.id, 10)
+
+      if (action === 'confirm') {
+        const existing = itemsById.get(targetId)
+        if (!existing) {
+          result.skipped += 1
+          continue
+        }
+
+        updateMemoryItem(userId, existing.id, { confirm: true })
+        result.confirmed += 1
+        result.itemIds.push(existing.id)
+        continue
+      }
+
+      if (action !== 'create' && action !== 'replace') {
+        result.skipped += 1
+        continue
+      }
+
+      const content = typeof candidate.content === 'string'
+        ? candidate.content.trim()
+        : ''
+
+      if (!content || content.length > 20000) {
+        result.skipped += 1
+        continue
+      }
+
+      const type = String(candidate.type || 'fact').trim()
+      const scope = String(candidate.scope || 'global').trim()
+      const expiresAt = candidate.expiresAt || null
+
+      if (type === 'temporary' && !expiresAt) {
+        result.skipped += 1
+        continue
+      }
+
+      const importance = Math.round(
+        clampNumber(candidate.importance, 0, 100, 50)
+      )
+
+      const confidence = clampNumber(
+        candidate.confidence,
+        0,
+        1,
+        0.8
+      )
+
+      const fingerprint = normalizeMemoryFingerprint(content)
+      const duplicate = itemsByFingerprint.get(fingerprint)
+
+      if (duplicate && action !== 'replace') {
+        updateMemoryItem(userId, duplicate.id, {
+          confirm: true,
+          importance: Math.max(duplicate.importance, importance),
+          confidence: Math.max(duplicate.confidence, confidence)
+        })
+
+        result.confirmed += 1
+        result.itemIds.push(duplicate.id)
+        continue
+      }
+
+      if (action === 'replace') {
+        const previous = itemsById.get(targetId)
+
+        if (!previous) {
+          result.skipped += 1
+          continue
+        }
+
+        const created = createMemoryItem(userId, {
+          type,
+          scope,
+          content,
+          importance,
+          confidence,
+          expiresAt,
+          supersedesId: previous.id,
+          sourceConversationId: conversationId,
+          sourceMessageId,
+          metadata: {
+            automaticallyExtracted: true,
+            extractorModel,
+            replacedMemoryId: previous.id
+          }
+        })
+
+        itemsById.delete(previous.id)
+        itemsById.set(created.id, created)
+        itemsByFingerprint.set(fingerprint, created)
+
+        result.replaced += 1
+        result.itemIds.push(created.id)
+        continue
+      }
+
+      const created = createMemoryItem(userId, {
+        type,
+        scope,
+        content,
+        importance,
+        confidence,
+        expiresAt,
+        sourceConversationId: conversationId,
+        sourceMessageId,
+        metadata: {
+          automaticallyExtracted: true,
+          extractorModel
+        }
+      })
+
+      itemsById.set(created.id, created)
+      itemsByFingerprint.set(fingerprint, created)
+
+      result.created += 1
+      result.itemIds.push(created.id)
+    } catch (error) {
+      result.skipped += 1
+      console.error('Structured memory candidate skipped:', error.message)
+    }
+  }
+
+  return result
+}
+
 // Update memory from a conversation — called directly by chat.js or via HTTP
 export async function extractMemory(userId, conversationId, model) {
-  const convo = db.prepare('SELECT * FROM conversations WHERE id = ? AND user_id = ?')
-    .get(conversationId, userId)
-  if (!convo) return { ok: true, skipped: true }
+  const convo = db.prepare(`
+    SELECT *
+    FROM conversations
+    WHERE id = ?
+      AND user_id = ?
+  `).get(conversationId, userId)
 
-  // Get messages from this conversation
+  if (!convo) {
+    return { ok: true, skipped: true, reason: 'conversation_not_found' }
+  }
+
   const messages = db.prepare(`
-    SELECT role, content
+    SELECT id, role, content
     FROM (
       SELECT id, role, content
       FROM messages
@@ -415,80 +616,196 @@ export async function extractMemory(userId, conversationId, model) {
     ORDER BY id ASC
   `).all(conversationId)
 
-  if (messages.length < 2) return { ok: true, skipped: true }
+  if (messages.length < 2) {
+    return { ok: true, skipped: true, reason: 'not_enough_messages' }
+  }
 
-  // Get existing memory
-  const user = db.prepare('SELECT memory FROM users WHERE id = ?').get(userId)
-  const existingMemory = user.memory || ''
+  const user = db.prepare(`
+    SELECT memory
+    FROM users
+    WHERE id = ?
+  `).get(userId)
 
-  // Build prompt for memory extraction
+  const existingMemory = user?.memory || ''
+
+  const activeItems = listMemoryItems(userId, {
+    status: 'active',
+    limit: 200
+  }).filter(item =>
+    item.type !== 'legacy' &&
+    (!item.expiresAt || item.expiresAt > Math.floor(Date.now() / 1000))
+  )
+
   const transcript = messages
-    .map(m => `${m.role === 'user' ? 'User' : 'Echo'}: ${m.content.slice(0, 500)}`)
+    .map(message => {
+      const role = message.role === 'user' ? 'User' : 'Echo'
+      return `[message ${message.id}] ${role}: ${String(message.content || '').slice(0, 800)}`
+    })
     .join('\n')
 
-  const extractPrompt = `You are a memory extraction system. Your job is to maintain a concise, reusable profile of the user.
+  const structuredSummary = activeItems.length
+    ? activeItems
+        .slice(0, 100)
+        .map(item => JSON.stringify({
+          id: item.id,
+          type: item.type,
+          scope: item.scope,
+          content: item.content.slice(0, 600),
+          importance: item.importance,
+          confidence: item.confidence
+        }))
+        .join('\n')
+    : '(none)'
 
-${existingMemory ? `Existing memory about this user:\n${existingMemory}\n\n` : ''}New conversation to analyze:
+  const extractPrompt = `You are a memory extraction system.
+
+Analyze the conversation and update two memory representations:
+
+1. legacyMarkdown:
+A concise backward-compatible user profile in Markdown.
+
+2. memories:
+Structured actions for individual durable memories.
+
+Existing legacy Markdown:
+---
+${existingMemory.slice(0, 16000) || '(none)'}
+---
+
+Existing active structured memories:
+---
+${structuredSummary}
+---
+
+Conversation:
 ---
 ${transcript}
 ---
 
-Create an updated memory in clear Markdown.
+Return ONLY valid JSON in exactly this general shape:
 
-Use only the following section headings when relevant:
-## Persönliches
-## Präferenzen
-## Projekte & Ziele
-## Arbeit & Fähigkeiten
-## Aktueller Kontext
+{
+  "legacyMarkdown": "## Persönliches\\n- ...",
+  "memories": [
+    {
+      "action": "create",
+      "type": "profile",
+      "scope": "global",
+      "content": "One self-contained durable fact.",
+      "importance": 70,
+      "confidence": 0.95,
+      "expiresAt": null
+    },
+    {
+      "action": "confirm",
+      "id": 12
+    },
+    {
+      "action": "replace",
+      "id": 8,
+      "type": "project",
+      "scope": "project:echolink",
+      "content": "The newer fact that replaces memory 8.",
+      "importance": 80,
+      "confidence": 0.95,
+      "expiresAt": null
+    }
+  ]
+}
 
-Rules:
-- Include only stable or meaningfully reusable facts
-- Remove outdated facts when newer information contradicts them
-- Merge duplicates and closely related facts
-- Maximum 20 bullet points across all sections
-- Write exactly one fact per bullet
-- Be specific rather than vague
-- Skip greetings, temporary small talk and one-off details
-- Omit empty sections
-- Do not invent information
-- Preserve useful existing facts that are still valid
-- Use the language of the existing memory or conversation; default to German
-- If there are no new facts, reorganize the existing memory into this structure without changing its meaning
-- Return only Markdown headings and bullet points, with no introduction or conclusion`
+Allowed memory types:
+profile, preference, project, instruction, episodic, temporary, persona, fact
 
-  const useModel =
-    model ||
-    convo.model ||
-    DEFAULT_MODEL
+Allowed scopes:
+global
+project:<short-slug>
+conversation:${conversationId}
+persona:<short-slug>
+temporary
 
-  let generatedMemory = ''
+Rules for structured memories:
+- Return no more than 8 actions.
+- Use "confirm" when an existing memory is still clearly supported.
+- Use "replace" only when the conversation clearly contradicts or updates an existing memory.
+- Use "create" only for a genuinely new durable or meaningfully reusable fact.
+- Do not create duplicates or paraphrased duplicates.
+- Each content value must contain exactly one self-contained fact.
+- Store explicit user statements, not guesses or model inferences.
+- Skip greetings, temporary small talk and one-off details.
+- Never store passwords, authentication tokens, API keys, banking data or private document contents.
+- Do not store complete emails, attachments or chat transcripts.
+- Temporary memories require expiresAt as an ISO date.
+- Persona and roleplay memories must use persona:<slug> scope.
+- Project-specific facts should use project:<slug>.
+- Use the conversation language; default to German.
+
+Rules for legacyMarkdown:
+- Preserve still-valid existing facts.
+- Remove facts clearly contradicted by newer information.
+- Merge duplicates.
+- Maximum 20 bullet points.
+- One fact per bullet.
+- Allowed headings:
+  ## Persönliches
+  ## Präferenzen
+  ## Projekte & Ziele
+  ## Arbeit & Fähigkeiten
+  ## Aktueller Kontext
+- Omit empty sections.
+- Do not invent information.`
+
+  const useModel = model || convo.model || DEFAULT_MODEL
+
+  let generated
 
   try {
-    generatedMemory =
-      await runMemoryModel(
-        useModel,
-        extractPrompt
-      )
+    generated = await runMemoryModel(useModel, extractPrompt)
   } catch (error) {
-    console.error(
-      'Memory model failed:',
-      error.message
-    )
-
-    return {
-      ok: true,
-      skipped: true,
-      reason: 'model_failed'
-    }
+    console.error('Memory model failed:', error.message)
+    return { ok: true, skipped: true, reason: 'model_failed' }
   }
 
-  const newMemory =
-    generatedMemory ||
-    existingMemory
+  let parsed
 
-  db.prepare('UPDATE users SET memory = ? WHERE id = ?').run(newMemory, userId)
-  return { ok: true, memory: newMemory }
+  try {
+    parsed = parseMemoryExtractionJson(generated)
+  } catch (error) {
+    console.error('Memory JSON parse failed:', error.message)
+    return { ok: true, skipped: true, reason: 'invalid_json' }
+  }
+
+  const legacyCandidate = typeof parsed.legacyMarkdown === 'string'
+    ? parsed.legacyMarkdown.trim()
+    : ''
+
+  const newMemory = legacyCandidate || existingMemory
+
+  if (newMemory !== existingMemory) {
+    db.prepare(`
+      UPDATE users
+      SET memory = ?
+      WHERE id = ?
+    `).run(newMemory.slice(0, 500000), userId)
+  }
+
+  const latestUserMessage = [...messages]
+    .reverse()
+    .find(message => message.role === 'user')
+
+  const structured = applyStructuredMemories({
+    userId,
+    conversationId: Number(conversationId),
+    sourceMessageId: latestUserMessage?.id || null,
+    extractorModel: useModel,
+    candidates: parsed.memories,
+    activeItems
+  })
+
+  return {
+    ok: true,
+    memory: newMemory,
+    structured
+  }
 }
 
 // Update memory from a conversation (HTTP endpoint)
