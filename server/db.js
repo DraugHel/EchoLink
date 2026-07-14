@@ -137,6 +137,111 @@ db.exec(`
   );
 `)
 
+
+// Strukturierte Einzel-Memories.
+// users.memory bleibt vorerst als rückwärtskompatibler Fallback bestehen.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS memory_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+
+    type TEXT NOT NULL DEFAULT 'fact'
+      CHECK (
+        type IN (
+          'profile',
+          'preference',
+          'project',
+          'instruction',
+          'episodic',
+          'temporary',
+          'persona',
+          'legacy',
+          'fact'
+        )
+      ),
+
+    scope TEXT NOT NULL DEFAULT 'global',
+    content TEXT NOT NULL,
+
+    confidence REAL NOT NULL DEFAULT 1.0
+      CHECK (
+        confidence >= 0.0
+        AND confidence <= 1.0
+      ),
+
+    importance INTEGER NOT NULL DEFAULT 50
+      CHECK (
+        importance >= 0
+        AND importance <= 100
+      ),
+
+    status TEXT NOT NULL DEFAULT 'active'
+      CHECK (
+        status IN (
+          'active',
+          'superseded',
+          'archived'
+        )
+      ),
+
+    source_conversation_id INTEGER,
+    source_message_id INTEGER,
+    supersedes_id INTEGER,
+
+    created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    last_confirmed_at INTEGER,
+    expires_at INTEGER,
+
+    metadata TEXT NOT NULL DEFAULT '{}',
+
+    FOREIGN KEY (user_id)
+      REFERENCES users(id)
+      ON DELETE CASCADE,
+
+    FOREIGN KEY (source_conversation_id)
+      REFERENCES conversations(id)
+      ON DELETE SET NULL,
+
+    FOREIGN KEY (source_message_id)
+      REFERENCES messages(id)
+      ON DELETE SET NULL,
+
+    FOREIGN KEY (supersedes_id)
+      REFERENCES memory_items(id)
+      ON DELETE SET NULL
+  );
+
+  CREATE INDEX IF NOT EXISTS
+    idx_memory_items_user_status
+    ON memory_items(
+      user_id,
+      status,
+      importance DESC,
+      updated_at DESC
+    );
+
+  CREATE INDEX IF NOT EXISTS
+    idx_memory_items_user_scope
+    ON memory_items(
+      user_id,
+      scope,
+      status
+    );
+
+  CREATE INDEX IF NOT EXISTS
+    idx_memory_items_source_conversation
+    ON memory_items(
+      source_conversation_id
+    );
+
+  CREATE INDEX IF NOT EXISTS
+    idx_memory_items_expires
+    ON memory_items(
+      expires_at
+    );
+`);
+
 // Add columns if they don't exist yet (for existing DBs)
 try { db.exec(`ALTER TABLE users ADD COLUMN default_system_prompt TEXT DEFAULT ''`) } catch {}
 try { db.exec(`ALTER TABLE users ADD COLUMN memory TEXT DEFAULT ''`) } catch {}
@@ -144,6 +249,78 @@ try { db.exec(`ALTER TABLE messages ADD COLUMN images TEXT DEFAULT ''`) } catch 
 try { db.exec(`ALTER TABLE messages ADD COLUMN usage TEXT DEFAULT ''`) } catch {}
 try { db.exec(`ALTER TABLE messages ADD COLUMN think TEXT DEFAULT ''`) } catch {}
 try { db.exec(`ALTER TABLE conversations ADD COLUMN reasoning_effort TEXT DEFAULT ''`) } catch {}
+
+
+// Bestehendes Markdown-Memory einmalig als Legacy-Eintrag übernehmen.
+// Es wird nicht aus users.memory gelöscht.
+try {
+  const usersWithMemory = db.prepare(`
+    SELECT id, memory
+    FROM users
+    WHERE trim(COALESCE(memory, '')) <> ''
+  `).all()
+
+  const hasItems = db.prepare(`
+    SELECT 1
+    FROM memory_items
+    WHERE user_id = ?
+    LIMIT 1
+  `)
+
+  const insertLegacy = db.prepare(`
+    INSERT INTO memory_items (
+      user_id,
+      type,
+      scope,
+      content,
+      confidence,
+      importance,
+      status,
+      last_confirmed_at,
+      metadata
+    )
+    VALUES (
+      ?,
+      'legacy',
+      'global',
+      ?,
+      1.0,
+      70,
+      'active',
+      unixepoch(),
+      ?
+    )
+  `)
+
+  const migrateLegacyMemory =
+    db.transaction(users => {
+      for (const user of users) {
+        if (hasItems.get(user.id)) {
+          continue
+        }
+
+        insertLegacy.run(
+          user.id,
+          user.memory,
+          JSON.stringify({
+            migratedFrom:
+              'users.memory',
+            migrationVersion:
+              1
+          })
+        )
+      }
+    })
+
+  migrateLegacyMemory(
+    usersWithMemory
+  )
+} catch (error) {
+  console.error(
+    'Memory-items migration error:',
+    error.message
+  )
+}
 
 // One-time migration: strip memory blocks from existing system_prompts
 try {

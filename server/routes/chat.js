@@ -1,6 +1,10 @@
 import { Router } from 'express'
 import { requireAuth } from '../middleware/auth.js'
 import db from '../db.js'
+import {
+  formatMemoryItemsForPrompt,
+  selectMemoryItemsForContext
+} from '../lib/memoryItems.js'
 import { extractUrls, fetchAllUrls } from '../lib/fetchUrl.js'
 import { UPLOAD_DIR, extractTextFromFile } from './uploads.js'
 import { webSearch, firecrawlScrape } from '../lib/webSearch.js'
@@ -760,10 +764,49 @@ router.post('/:conversationId', requireAuth, async (req, res) => {
   // Activity-Timestamp bumpen
   db.prepare('UPDATE conversations SET updated_at = unixepoch() WHERE id = ?').run(convo.id)
 
-  // System prompt with memory
-  const user = db.prepare('SELECT memory FROM users WHERE id = ?').get(req.session.userId)
-  const memory = user?.memory || ''
-  let systemContent = convo.system_prompt || ''
+  // System prompt with structured retrieval and legacy fallback
+  const user = db.prepare(
+    'SELECT memory FROM users WHERE id = ?'
+  ).get(req.session.userId)
+
+  const legacyMemory =
+    user?.memory || ''
+
+  const selectedMemoryItems =
+    selectMemoryItemsForContext(
+      req.session.userId,
+      content || '',
+      {
+        conversationId: convo.id,
+        limit: 10,
+        maxChars: 6000
+      }
+    )
+
+  const structuredMemory =
+    formatMemoryItemsForPrompt(
+      selectedMemoryItems
+    )
+
+  if (
+    process.env.MEMORY_DEBUG === '1' &&
+    selectedMemoryItems.length
+  ) {
+    console.log(
+      '[memory] selected:',
+      selectedMemoryItems.map(item => ({
+        id: item.id,
+        type: item.type,
+        scope: item.scope,
+        score: Math.round(
+          item.retrievalScore
+        )
+      }))
+    )
+  }
+
+  let systemContent =
+    convo.system_prompt || ''
   // Standing rules aus RULES.md — immer injizieren, wird von der Memory-Extraktion nie angefasst
   try {
     const rulesText = fs.readFileSync('/root/echolink/RULES.md', 'utf-8').trim()
@@ -790,10 +833,27 @@ router.post('/:conversationId', requireAuth, async (req, res) => {
       systemContent = systemContent ? `${systemContent}\n\n${skillsNote}` : skillsNote
     }
   }
-  if (memory) {
+  if (structuredMemory) {
+    const structuredBlock =
+      `[Relevant structured memories selected for this request:
+${structuredMemory}
+Use these as background context. Do not mention memory IDs or metadata unless the user explicitly asks.]`
+
     systemContent = systemContent
-      ? `${systemContent}\n\n[What you know about the user from past conversations:\n${memory}]`
-      : `[What you know about the user from past conversations:\n${memory}]`
+      ? `${systemContent}\n\n${structuredBlock}`
+      : structuredBlock
+  }
+
+  // Übergangs-Fallback, bis das alte Markdown vollständig
+  // in einzelne Memory-Items migriert wurde.
+  if (legacyMemory) {
+    const legacyBlock =
+      `[Legacy user memory from earlier conversations:
+${legacyMemory}]`
+
+    systemContent = systemContent
+      ? `${systemContent}\n\n${legacyBlock}`
+      : legacyBlock
   }
 
   const calendarToolPolicy = `[Calendar tool policy:

@@ -1,46 +1,621 @@
-import { useEffect, useState } from 'react'
+import {
+  useEffect,
+  useMemo,
+  useState
+} from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import api from '../lib/api.js'
+
+const TYPE_OPTIONS = [
+  ['profile', 'Profil'],
+  ['preference', 'Präferenz'],
+  ['project', 'Projekt'],
+  ['instruction', 'Anweisung'],
+  ['episodic', 'Episodisch'],
+  ['temporary', 'Temporär'],
+  ['persona', 'Persona'],
+  ['fact', 'Fakt']
+]
+
+const TYPE_LABELS =
+  Object.fromEntries(TYPE_OPTIONS)
+
+const STATUS_LABELS = {
+  active: 'Aktiv',
+  archived: 'Archiviert',
+  superseded: 'Ersetzt'
+}
+
+const emptyItem = {
+  type: 'fact',
+  scope: 'global',
+  content: '',
+  importance: 50,
+  confidence: 1,
+  expiresAt: ''
+}
+
+function buttonStyle({
+  accent = false,
+  danger = false,
+  disabled = false
+} = {}) {
+  let background = 'var(--bg3)'
+  let color = 'var(--text2)'
+  let border = '1px solid var(--border)'
+
+  if (accent) {
+    background = 'var(--accent)'
+    color = 'var(--user-text, #0d0d0d)'
+    border = '1px solid transparent'
+  }
+
+  if (danger) {
+    background = 'transparent'
+    color = 'var(--danger)'
+    border = '1px solid var(--danger)'
+  }
+
+  return {
+    minHeight: 34,
+    padding: '7px 11px',
+    border,
+    borderRadius: 8,
+    background,
+    color,
+    fontFamily: 'var(--font-mono)',
+    fontSize: 11,
+    fontWeight: accent ? 700 : 500,
+    cursor: disabled
+      ? 'not-allowed'
+      : 'pointer',
+    opacity: disabled ? 0.5 : 1
+  }
+}
+
+function fieldStyle() {
+  return {
+    width: '100%',
+    boxSizing: 'border-box',
+    padding: '9px 10px',
+    border: '1px solid var(--border)',
+    borderRadius: 8,
+    outline: 'none',
+    background: 'var(--bg3)',
+    color: 'var(--text1)',
+    fontFamily: 'var(--font-mono)',
+    fontSize: 12
+  }
+}
+
+function dateText(timestamp) {
+  if (!timestamp) return null
+
+  return new Date(
+    timestamp * 1000
+  ).toLocaleString('de-AT', {
+    dateStyle: 'medium',
+    timeStyle: 'short'
+  })
+}
+
+function ItemEditor({
+  value,
+  onChange,
+  onSave,
+  onCancel,
+  saving,
+  saveLabel = 'Speichern'
+}) {
+  function set(name, nextValue) {
+    onChange({
+      ...value,
+      [name]: nextValue
+    })
+  }
+
+  return (
+    <div
+      style={{
+        display: 'grid',
+        gap: 10
+      }}
+    >
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns:
+            'repeat(auto-fit, minmax(150px, 1fr))',
+          gap: 10
+        }}
+      >
+        <label>
+          <div style={labelStyle()}>
+            Typ
+          </div>
+
+          <select
+            value={value.type}
+            onChange={event =>
+              set('type', event.target.value)
+            }
+            style={fieldStyle()}
+          >
+            {TYPE_OPTIONS.map(
+              ([key, label]) => (
+                <option
+                  key={key}
+                  value={key}
+                >
+                  {label}
+                </option>
+              )
+            )}
+          </select>
+        </label>
+
+        <label>
+          <div style={labelStyle()}>
+            Scope
+          </div>
+
+          <input
+            value={value.scope}
+            onChange={event =>
+              set('scope', event.target.value)
+            }
+            placeholder="global oder project:echolink"
+            style={fieldStyle()}
+          />
+        </label>
+      </div>
+
+      <label>
+        <div style={labelStyle()}>
+          Inhalt
+        </div>
+
+        <textarea
+          value={value.content}
+          onChange={event =>
+            set('content', event.target.value)
+          }
+          rows={5}
+          placeholder="Eine klare, eigenständige Information …"
+          style={{
+            ...fieldStyle(),
+            resize: 'vertical',
+            lineHeight: 1.55
+          }}
+        />
+      </label>
+
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns:
+            'repeat(auto-fit, minmax(150px, 1fr))',
+          gap: 10
+        }}
+      >
+        <label>
+          <div style={labelStyle()}>
+            Wichtigkeit: {value.importance}
+          </div>
+
+          <input
+            type="range"
+            min="0"
+            max="100"
+            value={value.importance}
+            onChange={event =>
+              set(
+                'importance',
+                Number(event.target.value)
+              )
+            }
+            style={{ width: '100%' }}
+          />
+        </label>
+
+        <label>
+          <div style={labelStyle()}>
+            Sicherheit: {
+              Number(value.confidence)
+                .toFixed(2)
+            }
+          </div>
+
+          <input
+            type="range"
+            min="0"
+            max="1"
+            step="0.05"
+            value={value.confidence}
+            onChange={event =>
+              set(
+                'confidence',
+                Number(event.target.value)
+              )
+            }
+            style={{ width: '100%' }}
+          />
+        </label>
+
+        <label>
+          <div style={labelStyle()}>
+            Ablaufdatum
+          </div>
+
+          <input
+            type="datetime-local"
+            value={value.expiresAt || ''}
+            onChange={event =>
+              set(
+                'expiresAt',
+                event.target.value
+              )
+            }
+            style={fieldStyle()}
+          />
+        </label>
+      </div>
+
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'flex-end',
+          gap: 8
+        }}
+      >
+        <button
+          type="button"
+          onClick={onCancel}
+          disabled={saving}
+          style={buttonStyle({
+            disabled: saving
+          })}
+        >
+          Abbrechen
+        </button>
+
+        <button
+          type="button"
+          onClick={onSave}
+          disabled={
+            saving ||
+            !value.content.trim()
+          }
+          style={buttonStyle({
+            accent: true,
+            disabled:
+              saving ||
+              !value.content.trim()
+          })}
+        >
+          {saving
+            ? 'Speichere …'
+            : saveLabel}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function labelStyle() {
+  return {
+    marginBottom: 5,
+    color: 'var(--text3)',
+    fontFamily: 'var(--font-mono)',
+    fontSize: 10,
+    textTransform: 'uppercase',
+    letterSpacing: '0.06em'
+  }
+}
 
 export default function MemoryPanel({
   conversationId,
   streaming,
   onClose
 }) {
-  const [memory, setMemory] = useState('')
-  const [loading, setLoading] = useState(true)
-  const [updating, setUpdating] = useState(false)
-  const [editing, setEditing] = useState(false)
-  const [draft, setDraft] = useState('')
-  const [saving, setSaving] = useState(false)
-  const [deleting, setDeleting] = useState(false)
-  const [error, setError] = useState('')
+  const [tab, setTab] =
+    useState('items')
 
-  async function loadMemory() {
-    setLoading(true)
-    setError('')
+  const [items, setItems] =
+    useState([])
+
+  const [itemFilter, setItemFilter] =
+    useState('active')
+
+  const [itemsLoading, setItemsLoading] =
+    useState(true)
+
+  const [itemError, setItemError] =
+    useState('')
+
+  const [creating, setCreating] =
+    useState(false)
+
+  const [createDraft, setCreateDraft] =
+    useState(emptyItem)
+
+  const [editingId, setEditingId] =
+    useState(null)
+
+  const [editDraft, setEditDraft] =
+    useState(null)
+
+  const [actionId, setActionId] =
+    useState(null)
+
+  const [memory, setMemory] =
+    useState('')
+
+  const [legacyLoading, setLegacyLoading] =
+    useState(true)
+
+  const [legacyUpdating, setLegacyUpdating] =
+    useState(false)
+
+  const [legacyEditing, setLegacyEditing] =
+    useState(false)
+
+  const [legacyDraft, setLegacyDraft] =
+    useState('')
+
+  const [legacySaving, setLegacySaving] =
+    useState(false)
+
+  const [legacyDeleting, setLegacyDeleting] =
+    useState(false)
+
+  const [legacyError, setLegacyError] =
+    useState('')
+
+  async function loadItems() {
+    setItemsLoading(true)
+    setItemError('')
 
     try {
-      const data = await api.get('/api/memory')
-      const nextMemory = data?.memory || ''
-      setMemory(nextMemory)
+      const data = await api.get(
+        `/api/memory/items?status=${encodeURIComponent(
+          itemFilter
+        )}&limit=200`
+      )
 
-      if (!editing) {
-        setDraft(nextMemory)
-      }
-    } catch (err) {
-      setError(err?.message || 'Memory konnte nicht geladen werden.')
+      setItems(
+        Array.isArray(data?.items)
+          ? data.items
+          : []
+      )
+    } catch (error) {
+      setItemError(
+        error?.message ||
+        'Memories konnten nicht geladen werden.'
+      )
     } finally {
-      setLoading(false)
+      setItemsLoading(false)
     }
   }
 
-  async function updateMemory() {
-    if (!conversationId || streaming) return
+  async function loadLegacy() {
+    setLegacyLoading(true)
+    setLegacyError('')
 
-    setUpdating(true)
-    setError('')
+    try {
+      const data =
+        await api.get('/api/memory')
+
+      const nextMemory =
+        data?.memory || ''
+
+      setMemory(nextMemory)
+
+      if (!legacyEditing) {
+        setLegacyDraft(nextMemory)
+      }
+    } catch (error) {
+      setLegacyError(
+        error?.message ||
+        'Legacy-Memory konnte nicht geladen werden.'
+      )
+    } finally {
+      setLegacyLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    loadLegacy()
+  }, [])
+
+  useEffect(() => {
+    loadItems()
+  }, [itemFilter])
+
+  const visibleItems =
+    useMemo(
+      () =>
+        items.filter(
+          item =>
+            item.type !== 'legacy'
+        ),
+      [items]
+    )
+
+  async function createItem() {
+    setActionId('create')
+    setItemError('')
+
+    try {
+      await api.post(
+        '/api/memory/items',
+        {
+          ...createDraft,
+          expiresAt:
+            createDraft.expiresAt ||
+            null
+        }
+      )
+
+      setCreateDraft(emptyItem)
+      setCreating(false)
+      await loadItems()
+    } catch (error) {
+      setItemError(
+        error?.message ||
+        'Memory konnte nicht erstellt werden.'
+      )
+    } finally {
+      setActionId(null)
+    }
+  }
+
+  function beginEdit(item) {
+    setEditingId(item.id)
+
+    setEditDraft({
+      type: item.type,
+      scope: item.scope,
+      content: item.content,
+      importance: item.importance,
+      confidence: item.confidence,
+      expiresAt:
+        item.expiresAt
+          ? new Date(
+              item.expiresAt * 1000
+            )
+              .toISOString()
+              .slice(0, 16)
+          : ''
+    })
+  }
+
+  async function saveItem(itemId) {
+    setActionId(itemId)
+    setItemError('')
+
+    try {
+      await api.patch(
+        `/api/memory/items/${itemId}`,
+        {
+          ...editDraft,
+          expiresAt:
+            editDraft.expiresAt ||
+            null
+        }
+      )
+
+      setEditingId(null)
+      setEditDraft(null)
+      await loadItems()
+    } catch (error) {
+      setItemError(
+        error?.message ||
+        'Memory konnte nicht gespeichert werden.'
+      )
+    } finally {
+      setActionId(null)
+    }
+  }
+
+  async function confirmItem(itemId) {
+    setActionId(itemId)
+
+    try {
+      await api.patch(
+        `/api/memory/items/${itemId}`,
+        {
+          confirm: true
+        }
+      )
+
+      await loadItems()
+    } catch (error) {
+      setItemError(
+        error?.message ||
+        'Memory konnte nicht bestätigt werden.'
+      )
+    } finally {
+      setActionId(null)
+    }
+  }
+
+  async function archiveItem(itemId) {
+    setActionId(itemId)
+
+    try {
+      await api.post(
+        `/api/memory/items/${itemId}/archive`,
+        {}
+      )
+
+      await loadItems()
+    } catch (error) {
+      setItemError(
+        error?.message ||
+        'Memory konnte nicht archiviert werden.'
+      )
+    } finally {
+      setActionId(null)
+    }
+  }
+
+  async function restoreItem(itemId) {
+    setActionId(itemId)
+
+    try {
+      await api.patch(
+        `/api/memory/items/${itemId}`,
+        {
+          status: 'active'
+        }
+      )
+
+      await loadItems()
+    } catch (error) {
+      setItemError(
+        error?.message ||
+        'Memory konnte nicht wiederhergestellt werden.'
+      )
+    } finally {
+      setActionId(null)
+    }
+  }
+
+  async function deleteItem(item) {
+    const confirmed =
+      window.confirm(
+        `Memory wirklich löschen?\n\n${item.content}`
+      )
+
+    if (!confirmed) return
+
+    setActionId(item.id)
+
+    try {
+      await api.delete(
+        `/api/memory/items/${item.id}`
+      )
+
+      await loadItems()
+    } catch (error) {
+      setItemError(
+        error?.message ||
+        'Memory konnte nicht gelöscht werden.'
+      )
+    } finally {
+      setActionId(null)
+    }
+  }
+
+  async function updateLegacy() {
+    if (!conversationId || streaming) {
+      return
+    }
+
+    setLegacyUpdating(true)
+    setLegacyError('')
 
     try {
       const data = await api.post(
@@ -48,89 +623,78 @@ export default function MemoryPanel({
         {}
       )
 
-      if (typeof data?.memory === 'string') {
+      if (
+        typeof data?.memory ===
+        'string'
+      ) {
         setMemory(data.memory)
-        setDraft(data.memory)
+        setLegacyDraft(data.memory)
       } else {
-        await loadMemory()
+        await loadLegacy()
       }
-    } catch (err) {
-      setError(
-        err?.message || 'Memory konnte nicht aktualisiert werden.'
+    } catch (error) {
+      setLegacyError(
+        error?.message ||
+        'Legacy-Memory konnte nicht aktualisiert werden.'
       )
     } finally {
-      setUpdating(false)
+      setLegacyUpdating(false)
     }
   }
 
-  function startEditing() {
-    setDraft(memory)
-    setEditing(true)
-    setError('')
-  }
-
-  function cancelEditing() {
-    setDraft(memory)
-    setEditing(false)
-    setError('')
-  }
-
-  async function saveMemory() {
-    setSaving(true)
-    setError('')
+  async function saveLegacy() {
+    setLegacySaving(true)
+    setLegacyError('')
 
     try {
-      const data = await api.post('/api/memory/save', {
-        content: draft
-      })
+      const data = await api.post(
+        '/api/memory/save',
+        {
+          content: legacyDraft
+        }
+      )
 
       setMemory(
         typeof data?.memory === 'string'
           ? data.memory
-          : draft
+          : legacyDraft
       )
-      setEditing(false)
-    } catch (err) {
-      setError(
-        err?.message || 'Memory konnte nicht gespeichert werden.'
+
+      setLegacyEditing(false)
+    } catch (error) {
+      setLegacyError(
+        error?.message ||
+        'Legacy-Memory konnte nicht gespeichert werden.'
       )
     } finally {
-      setSaving(false)
+      setLegacySaving(false)
     }
   }
 
-  async function clearMemory() {
-    const confirmed = window.confirm(
-      'Die gesamte User Memory wirklich löschen?'
-    )
+  async function clearLegacy() {
+    const confirmed =
+      window.confirm(
+        'Das gesamte Legacy-Memory wirklich löschen?'
+      )
 
     if (!confirmed) return
 
-    setDeleting(true)
-    setError('')
+    setLegacyDeleting(true)
 
     try {
       await api.delete('/api/memory')
       setMemory('')
-      setDraft('')
-      setEditing(false)
-    } catch (err) {
-      setError(
-        err?.message || 'Memory konnte nicht gelöscht werden.'
+      setLegacyDraft('')
+      setLegacyEditing(false)
+    } catch (error) {
+      setLegacyError(
+        error?.message ||
+        'Legacy-Memory konnte nicht gelöscht werden.'
       )
     } finally {
-      setDeleting(false)
+      setLegacyDeleting(false)
     }
   }
-
-  useEffect(() => {
-    loadMemory()
-  }, [])
-
-  const factCount = memory
-    .split('\n')
-    .filter(line => /^\s*[-*]\s+/.test(line))
-    .length
 
   return (
     <div
@@ -148,17 +712,21 @@ export default function MemoryPanel({
       }}
     >
       <section
-        onClick={event => event.stopPropagation()}
+        onClick={event =>
+          event.stopPropagation()
+        }
         style={{
-          width: 'min(680px, 100%)',
-          maxHeight: '82vh',
+          width: 'min(820px, 100%)',
+          maxHeight: '88vh',
           display: 'flex',
           flexDirection: 'column',
           overflow: 'hidden',
-          border: '1px solid var(--border)',
+          border:
+            '1px solid var(--border)',
           borderRadius: 14,
           background: 'var(--bg2)',
-          boxShadow: '0 20px 60px rgba(0,0,0,0.55)'
+          boxShadow:
+            '0 20px 60px rgba(0,0,0,0.55)'
         }}
       >
         <header
@@ -166,15 +734,17 @@ export default function MemoryPanel({
             display: 'flex',
             alignItems: 'center',
             gap: 10,
-            padding: '14px 16px',
-            borderBottom: '1px solid var(--border)'
+            padding: '13px 15px',
+            borderBottom:
+              '1px solid var(--border)'
           }}
         >
           <div style={{ flex: 1 }}>
             <strong
               style={{
                 color: 'var(--text1)',
-                fontFamily: 'var(--font-mono)'
+                fontFamily:
+                  'var(--font-mono)'
               }}
             >
               User Memory
@@ -187,70 +757,20 @@ export default function MemoryPanel({
                 fontSize: 11
               }}
             >
-              {factCount > 0
-                ? `${factCount} gespeicherte ${factCount === 1 ? 'Information' : 'Informationen'}`
-                : 'Wird in Non-Agent-Chats in den Kontext eingefügt.'}
+              Strukturierte Erinnerungen mit
+              Scope, Quelle und Gültigkeit
             </div>
           </div>
-
-          {!editing && (
-            <button
-              type="button"
-              onClick={startEditing}
-              disabled={loading || updating || saving}
-              title="Memory bearbeiten"
-              style={{
-                height: 34,
-                display: 'flex',
-                alignItems: 'center',
-                gap: 6,
-                padding: '0 10px',
-                border: '1px solid var(--border)',
-                borderRadius: 8,
-                background: 'var(--bg3)',
-                color: 'var(--text2)',
-                fontFamily: 'var(--font-mono)',
-                fontSize: 11,
-                cursor:
-                  loading || updating || saving
-                    ? 'not-allowed'
-                    : 'pointer',
-                opacity:
-                  loading || updating || saving
-                    ? 0.55
-                    : 1
-              }}
-            >
-              <svg
-                width="14"
-                height="14"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.9"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <path d="M12 20h9" />
-                <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4z" />
-              </svg>
-              Bearbeiten
-            </button>
-          )}
 
           <button
             type="button"
             onClick={onClose}
             aria-label="Schließen"
             style={{
+              ...buttonStyle(),
               width: 34,
-              height: 34,
-              border: '1px solid var(--border)',
-              borderRadius: 8,
-              background: 'var(--bg3)',
-              color: 'var(--text2)',
-              fontSize: 20,
-              cursor: 'pointer'
+              padding: 0,
+              fontSize: 20
             }}
           >
             ×
@@ -259,346 +779,629 @@ export default function MemoryPanel({
 
         <div
           style={{
-            minHeight: 220,
-            flex: 1,
-            overflowY: 'auto',
-            padding: 16
+            display: 'flex',
+            gap: 6,
+            padding: '10px 15px',
+            borderBottom:
+              '1px solid var(--border)'
           }}
         >
-          {loading ? (
-            <div style={{ color: 'var(--text3)' }}>
-              Memory wird geladen …
-            </div>
-          ) : editing ? (
-            <div>
-              <textarea
-                autoFocus
-                value={draft}
-                onChange={event => setDraft(event.target.value)}
-                spellCheck
-                aria-label="Memory bearbeiten"
-                style={{
-                  width: '100%',
-                  minHeight: 340,
-                  boxSizing: 'border-box',
-                  resize: 'vertical',
-                  padding: 14,
-                  border: '1px solid var(--border)',
-                  borderRadius: 10,
-                  outline: 'none',
-                  background: 'var(--bg3)',
-                  color: 'var(--text1)',
-                  fontFamily: 'var(--font-mono)',
-                  fontSize: 12,
-                  lineHeight: 1.65
-                }}
-              />
-
-              <div
-                style={{
-                  marginTop: 7,
-                  textAlign: 'right',
-                  color: 'var(--text3)',
-                  fontFamily: 'var(--font-mono)',
-                  fontSize: 10
-                }}
-              >
-                {draft.length.toLocaleString()} Zeichen
-              </div>
-            </div>
-          ) : memory ? (
-            <div
+          {[
+            ['items', 'Einzel-Memories'],
+            ['legacy', 'Legacy-Markdown']
+          ].map(([key, label]) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => setTab(key)}
               style={{
-                color: 'var(--text1)',
-                fontSize: 13,
-                lineHeight: 1.6,
-                overflowWrap: 'anywhere'
+                ...buttonStyle({
+                  accent: tab === key
+                }),
+                flex: 1
               }}
             >
-              <ReactMarkdown
-                remarkPlugins={[remarkGfm]}
-                components={{
-                  h1: ({ children }) => (
-                    <h2
-                      style={{
-                        margin: '18px 0 8px',
-                        paddingBottom: 7,
-                        borderBottom: '1px solid var(--border)',
-                        color: 'var(--accent)',
-                        fontFamily: 'var(--font-mono)',
-                        fontSize: 13,
-                        fontWeight: 700,
-                        letterSpacing: '0.04em'
-                      }}
-                    >
-                      {children}
-                    </h2>
-                  ),
-
-                  h2: ({ children }) => (
-                    <h2
-                      style={{
-                        margin: '18px 0 8px',
-                        paddingBottom: 7,
-                        borderBottom: '1px solid var(--border)',
-                        color: 'var(--accent)',
-                        fontFamily: 'var(--font-mono)',
-                        fontSize: 13,
-                        fontWeight: 700,
-                        letterSpacing: '0.04em'
-                      }}
-                    >
-                      {children}
-                    </h2>
-                  ),
-
-                  h3: ({ children }) => (
-                    <h3
-                      style={{
-                        margin: '14px 0 7px',
-                        color: 'var(--text2)',
-                        fontFamily: 'var(--font-mono)',
-                        fontSize: 12,
-                        fontWeight: 700
-                      }}
-                    >
-                      {children}
-                    </h3>
-                  ),
-
-                  ul: ({ children }) => (
-                    <ul
-                      style={{
-                        margin: '4px 0 14px',
-                        paddingLeft: 22
-                      }}
-                    >
-                      {children}
-                    </ul>
-                  ),
-
-                  ol: ({ children }) => (
-                    <ol
-                      style={{
-                        margin: '4px 0 14px',
-                        paddingLeft: 24
-                      }}
-                    >
-                      {children}
-                    </ol>
-                  ),
-
-                  li: ({ children }) => (
-                    <li
-                      style={{
-                        margin: '7px 0',
-                        paddingLeft: 3,
-                        color: 'var(--text1)'
-                      }}
-                    >
-                      {children}
-                    </li>
-                  ),
-
-                  p: ({ children }) => (
-                    <p
-                      style={{
-                        margin: '7px 0',
-                        color: 'var(--text1)'
-                      }}
-                    >
-                      {children}
-                    </p>
-                  ),
-
-                  strong: ({ children }) => (
-                    <strong
-                      style={{
-                        color: 'var(--text1)',
-                        fontWeight: 700
-                      }}
-                    >
-                      {children}
-                    </strong>
-                  ),
-
-                  code: ({ children }) => (
-                    <code
-                      style={{
-                        padding: '2px 5px',
-                        borderRadius: 5,
-                        background: 'var(--bg3)',
-                        color: 'var(--accent)',
-                        fontFamily: 'var(--font-mono)',
-                        fontSize: '0.92em'
-                      }}
-                    >
-                      {children}
-                    </code>
-                  )
-                }}
-              >
-                {memory}
-              </ReactMarkdown>
-            </div>
-          ) : (
-            <div
-              style={{
-                padding: 30,
-                textAlign: 'center',
-                color: 'var(--text3)'
-              }}
-            >
-              Noch keine Memory gespeichert.
-            </div>
-          )}
-
-          {error && (
-            <div
-              style={{
-                marginTop: 14,
-                padding: 10,
-                border: '1px solid var(--danger)',
-                borderRadius: 8,
-                color: 'var(--danger)',
-                fontSize: 12
-              }}
-            >
-              {error}
-            </div>
-          )}
+              {label}
+            </button>
+          ))}
         </div>
 
-        <footer
+        <div
           style={{
-            display: 'flex',
-            justifyContent: 'flex-end',
-            gap: 8,
-            padding: '12px 16px calc(12px + env(safe-area-inset-bottom))',
-            borderTop: '1px solid var(--border)'
+            flex: 1,
+            minHeight: 250,
+            overflowY: 'auto',
+            padding: 15
           }}
         >
-          {editing ? (
+          {tab === 'items' ? (
             <>
-              <button
-                type="button"
-                onClick={cancelEditing}
-                disabled={saving}
+              <div
                 style={{
-                  padding: '9px 12px',
-                  border: '1px solid var(--border)',
-                  borderRadius: 8,
-                  background: 'var(--bg3)',
-                  color: 'var(--text2)',
-                  fontFamily: 'var(--font-mono)',
-                  fontSize: 12,
-                  cursor: saving ? 'not-allowed' : 'pointer',
-                  opacity: saving ? 0.55 : 1
+                  display: 'flex',
+                  flexWrap: 'wrap',
+                  alignItems: 'center',
+                  gap: 8,
+                  marginBottom: 13
                 }}
               >
-                Abbrechen
-              </button>
+                <select
+                  value={itemFilter}
+                  onChange={event =>
+                    setItemFilter(
+                      event.target.value
+                    )
+                  }
+                  style={{
+                    ...fieldStyle(),
+                    width: 'auto'
+                  }}
+                >
+                  <option value="active">
+                    Nur aktive
+                  </option>
+                  <option value="all">
+                    Alle Status
+                  </option>
+                </select>
 
-              <button
-                type="button"
-                onClick={saveMemory}
-                disabled={saving}
-                style={{
-                  padding: '9px 14px',
-                  border: 0,
-                  borderRadius: 8,
-                  background: 'var(--accent)',
-                  color: 'var(--user-text, #0d0d0d)',
-                  fontFamily: 'var(--font-mono)',
-                  fontSize: 12,
-                  fontWeight: 700,
-                  cursor: saving ? 'not-allowed' : 'pointer',
-                  opacity: saving ? 0.55 : 1
-                }}
-              >
-                {saving ? 'Speichere …' : 'Speichern'}
-              </button>
+                <button
+                  type="button"
+                  onClick={loadItems}
+                  disabled={itemsLoading}
+                  style={buttonStyle({
+                    disabled: itemsLoading
+                  })}
+                >
+                  Neu laden
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    setCreating(true)
+                  }
+                  disabled={creating}
+                  style={{
+                    ...buttonStyle({
+                      accent: true,
+                      disabled: creating
+                    }),
+                    marginLeft: 'auto'
+                  }}
+                >
+                  Neue Memory
+                </button>
+              </div>
+
+              {creating && (
+                <div
+                  style={{
+                    marginBottom: 14,
+                    padding: 13,
+                    border:
+                      '1px solid var(--accent)',
+                    borderRadius: 10,
+                    background: 'var(--bg1)'
+                  }}
+                >
+                  <ItemEditor
+                    value={createDraft}
+                    onChange={setCreateDraft}
+                    onSave={createItem}
+                    onCancel={() => {
+                      setCreating(false)
+                      setCreateDraft(emptyItem)
+                    }}
+                    saving={
+                      actionId === 'create'
+                    }
+                    saveLabel="Memory anlegen"
+                  />
+                </div>
+              )}
+
+              {itemsLoading ? (
+                <div
+                  style={{
+                    color: 'var(--text3)'
+                  }}
+                >
+                  Memories werden geladen …
+                </div>
+              ) : visibleItems.length ? (
+                <div
+                  style={{
+                    display: 'grid',
+                    gap: 10
+                  }}
+                >
+                  {visibleItems.map(item => (
+                    <article
+                      key={item.id}
+                      style={{
+                        padding: 13,
+                        border:
+                          '1px solid var(--border)',
+                        borderRadius: 10,
+                        background: 'var(--bg1)'
+                      }}
+                    >
+                      {editingId === item.id ? (
+                        <ItemEditor
+                          value={editDraft}
+                          onChange={setEditDraft}
+                          onSave={() =>
+                            saveItem(item.id)
+                          }
+                          onCancel={() => {
+                            setEditingId(null)
+                            setEditDraft(null)
+                          }}
+                          saving={
+                            actionId === item.id
+                          }
+                        />
+                      ) : (
+                        <>
+                          <div
+                            style={{
+                              display: 'flex',
+                              flexWrap: 'wrap',
+                              alignItems: 'center',
+                              gap: 7,
+                              marginBottom: 9
+                            }}
+                          >
+                            <span
+                              style={{
+                                padding: '3px 7px',
+                                borderRadius: 999,
+                                background:
+                                  'var(--bg3)',
+                                color:
+                                  'var(--accent)',
+                                fontFamily:
+                                  'var(--font-mono)',
+                                fontSize: 10
+                              }}
+                            >
+                              {
+                                TYPE_LABELS[
+                                  item.type
+                                ] || item.type
+                              }
+                            </span>
+
+                            <span
+                              style={{
+                                color:
+                                  'var(--text3)',
+                                fontFamily:
+                                  'var(--font-mono)',
+                                fontSize: 10
+                              }}
+                            >
+                              {item.scope}
+                            </span>
+
+                            <span
+                              style={{
+                                marginLeft: 'auto',
+                                color:
+                                  item.status ===
+                                  'active'
+                                    ? 'var(--accent)'
+                                    : 'var(--text3)',
+                                fontFamily:
+                                  'var(--font-mono)',
+                                fontSize: 10
+                              }}
+                            >
+                              {
+                                STATUS_LABELS[
+                                  item.status
+                                ] || item.status
+                              }
+                            </span>
+                          </div>
+
+                          <div
+                            style={{
+                              whiteSpace:
+                                'pre-wrap',
+                              overflowWrap:
+                                'anywhere',
+                              color:
+                                'var(--text1)',
+                              fontSize: 13,
+                              lineHeight: 1.55
+                            }}
+                          >
+                            {item.content}
+                          </div>
+
+                          <div
+                            style={{
+                              display: 'flex',
+                              flexWrap: 'wrap',
+                              gap: '5px 14px',
+                              marginTop: 10,
+                              color:
+                                'var(--text3)',
+                              fontFamily:
+                                'var(--font-mono)',
+                              fontSize: 9
+                            }}
+                          >
+                            <span>
+                              Wichtigkeit: {
+                                item.importance
+                              }
+                            </span>
+
+                            <span>
+                              Sicherheit: {
+                                Number(
+                                  item.confidence
+                                ).toFixed(2)
+                              }
+                            </span>
+
+                            {item.lastConfirmedAt && (
+                              <span>
+                                Bestätigt: {
+                                  dateText(
+                                    item.lastConfirmedAt
+                                  )
+                                }
+                              </span>
+                            )}
+
+                            {item.sourceConversationId && (
+                              <span>
+                                Quelle: Chat {
+                                  item.sourceConversationId
+                                }
+                              </span>
+                            )}
+
+                            {item.expiresAt && (
+                              <span>
+                                Läuft ab: {
+                                  dateText(
+                                    item.expiresAt
+                                  )
+                                }
+                              </span>
+                            )}
+                          </div>
+
+                          <div
+                            style={{
+                              display: 'flex',
+                              flexWrap: 'wrap',
+                              justifyContent:
+                                'flex-end',
+                              gap: 7,
+                              marginTop: 11
+                            }}
+                          >
+                            {item.status ===
+                              'active' && (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  confirmItem(
+                                    item.id
+                                  )
+                                }
+                                disabled={
+                                  actionId ===
+                                  item.id
+                                }
+                                style={buttonStyle({
+                                  disabled:
+                                    actionId ===
+                                    item.id
+                                })}
+                              >
+                                Bestätigen
+                              </button>
+                            )}
+
+                            <button
+                              type="button"
+                              onClick={() =>
+                                beginEdit(item)
+                              }
+                              disabled={
+                                actionId ===
+                                item.id
+                              }
+                              style={buttonStyle({
+                                disabled:
+                                  actionId ===
+                                  item.id
+                              })}
+                            >
+                              Bearbeiten
+                            </button>
+
+                            {item.status ===
+                            'active' ? (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  archiveItem(
+                                    item.id
+                                  )
+                                }
+                                disabled={
+                                  actionId ===
+                                  item.id
+                                }
+                                style={buttonStyle({
+                                  disabled:
+                                    actionId ===
+                                    item.id
+                                })}
+                              >
+                                Archivieren
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  restoreItem(
+                                    item.id
+                                  )
+                                }
+                                disabled={
+                                  actionId ===
+                                  item.id
+                                }
+                                style={buttonStyle({
+                                  disabled:
+                                    actionId ===
+                                    item.id
+                                })}
+                              >
+                                Wiederherstellen
+                              </button>
+                            )}
+
+                            <button
+                              type="button"
+                              onClick={() =>
+                                deleteItem(item)
+                              }
+                              disabled={
+                                actionId ===
+                                item.id
+                              }
+                              style={buttonStyle({
+                                danger: true,
+                                disabled:
+                                  actionId ===
+                                  item.id
+                              })}
+                            >
+                              Löschen
+                            </button>
+                          </div>
+                        </>
+                      )}
+                    </article>
+                  ))}
+                </div>
+              ) : (
+                <div
+                  style={{
+                    padding: 30,
+                    textAlign: 'center',
+                    color: 'var(--text3)'
+                  }}
+                >
+                  Noch keine strukturierten
+                  Einzel-Memories vorhanden.
+                </div>
+              )}
+
+              {itemError && (
+                <div
+                  style={{
+                    marginTop: 13,
+                    padding: 10,
+                    border:
+                      '1px solid var(--danger)',
+                    borderRadius: 8,
+                    color: 'var(--danger)',
+                    fontSize: 12
+                  }}
+                >
+                  {itemError}
+                </div>
+              )}
             </>
           ) : (
             <>
-              <button
-                type="button"
-                onClick={clearMemory}
-                disabled={loading || updating || saving || deleting}
+              <div
                 style={{
-                  marginRight: 'auto',
-                  padding: '9px 12px',
-                  border: '1px solid var(--danger)',
-                  borderRadius: 8,
-                  background: 'transparent',
-                  color: 'var(--danger)',
-                  fontFamily: 'var(--font-mono)',
-                  fontSize: 12,
-                  cursor:
-                    loading || updating || saving || deleting
-                      ? 'not-allowed'
-                      : 'pointer',
-                  opacity:
-                    loading || updating || saving || deleting
-                      ? 0.55
-                      : 1
+                  display: 'flex',
+                  flexWrap: 'wrap',
+                  gap: 8,
+                  marginBottom: 13
                 }}
               >
-                {deleting ? 'Lösche …' : 'Memory löschen'}
-              </button>
+                {!legacyEditing ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setLegacyDraft(memory)
+                      setLegacyEditing(true)
+                    }}
+                    disabled={legacyLoading}
+                    style={buttonStyle({
+                      disabled: legacyLoading
+                    })}
+                  >
+                    Bearbeiten
+                  </button>
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setLegacyDraft(memory)
+                        setLegacyEditing(false)
+                      }}
+                      disabled={legacySaving}
+                      style={buttonStyle({
+                        disabled: legacySaving
+                      })}
+                    >
+                      Abbrechen
+                    </button>
 
-              <button
-                type="button"
-                onClick={loadMemory}
-                disabled={loading || updating}
-                style={{
-                  padding: '9px 12px',
-                  border: '1px solid var(--border)',
-                  borderRadius: 8,
-                  background: 'var(--bg3)',
-                  color: 'var(--text2)',
-                  fontFamily: 'var(--font-mono)',
-                  fontSize: 12,
-                  cursor:
-                    loading || updating
-                      ? 'not-allowed'
-                      : 'pointer',
-                  opacity: loading || updating ? 0.55 : 1
-                }}
-              >
-                Neu laden
-              </button>
+                    <button
+                      type="button"
+                      onClick={saveLegacy}
+                      disabled={legacySaving}
+                      style={buttonStyle({
+                        accent: true,
+                        disabled: legacySaving
+                      })}
+                    >
+                      {legacySaving
+                        ? 'Speichere …'
+                        : 'Speichern'}
+                    </button>
+                  </>
+                )}
 
-              <button
-                type="button"
-                onClick={updateMemory}
-                disabled={loading || updating || streaming}
-                style={{
-                  padding: '9px 14px',
-                  border: 0,
-                  borderRadius: 8,
-                  background: 'var(--accent)',
-                  color: 'var(--user-text, #0d0d0d)',
-                  fontFamily: 'var(--font-mono)',
-                  fontSize: 12,
-                  fontWeight: 700,
-                  cursor:
-                    loading || updating || streaming
-                      ? 'not-allowed'
-                      : 'pointer',
-                  opacity:
-                    loading || updating || streaming
-                      ? 0.55
-                      : 1
-                }}
-              >
-                {updating
-                  ? 'Aktualisiere …'
-                  : 'Memory aktualisieren'}
-              </button>
+                <button
+                  type="button"
+                  onClick={loadLegacy}
+                  disabled={legacyLoading}
+                  style={buttonStyle({
+                    disabled: legacyLoading
+                  })}
+                >
+                  Neu laden
+                </button>
+
+                <button
+                  type="button"
+                  onClick={updateLegacy}
+                  disabled={
+                    legacyLoading ||
+                    legacyUpdating ||
+                    streaming
+                  }
+                  style={buttonStyle({
+                    accent: true,
+                    disabled:
+                      legacyLoading ||
+                      legacyUpdating ||
+                      streaming
+                  })}
+                >
+                  {legacyUpdating
+                    ? 'Aktualisiere …'
+                    : 'Aus Chat aktualisieren'}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={clearLegacy}
+                  disabled={legacyDeleting}
+                  style={{
+                    ...buttonStyle({
+                      danger: true,
+                      disabled:
+                        legacyDeleting
+                    }),
+                    marginLeft: 'auto'
+                  }}
+                >
+                  {legacyDeleting
+                    ? 'Lösche …'
+                    : 'Legacy löschen'}
+                </button>
+              </div>
+
+              {legacyLoading ? (
+                <div
+                  style={{
+                    color: 'var(--text3)'
+                  }}
+                >
+                  Legacy-Memory wird geladen …
+                </div>
+              ) : legacyEditing ? (
+                <textarea
+                  autoFocus
+                  value={legacyDraft}
+                  onChange={event =>
+                    setLegacyDraft(
+                      event.target.value
+                    )
+                  }
+                  rows={18}
+                  style={{
+                    ...fieldStyle(),
+                    resize: 'vertical',
+                    lineHeight: 1.6
+                  }}
+                />
+              ) : memory ? (
+                <div
+                  style={{
+                    color: 'var(--text1)',
+                    fontSize: 13,
+                    lineHeight: 1.6,
+                    overflowWrap: 'anywhere'
+                  }}
+                >
+                  <ReactMarkdown
+                    remarkPlugins={[
+                      remarkGfm
+                    ]}
+                  >
+                    {memory}
+                  </ReactMarkdown>
+                </div>
+              ) : (
+                <div
+                  style={{
+                    padding: 30,
+                    textAlign: 'center',
+                    color: 'var(--text3)'
+                  }}
+                >
+                  Kein Legacy-Memory vorhanden.
+                </div>
+              )}
+
+              {legacyError && (
+                <div
+                  style={{
+                    marginTop: 13,
+                    padding: 10,
+                    border:
+                      '1px solid var(--danger)',
+                    borderRadius: 8,
+                    color: 'var(--danger)',
+                    fontSize: 12
+                  }}
+                >
+                  {legacyError}
+                </div>
+              )}
             </>
           )}
-        </footer>
+        </div>
       </section>
     </div>
   )
