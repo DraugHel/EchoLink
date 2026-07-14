@@ -447,6 +447,7 @@ function applyStructuredMemories({
     created: 0,
     confirmed: 0,
     replaced: 0,
+    archived: 0,
     skipped: 0,
     itemIds: []
   }
@@ -475,6 +476,24 @@ function applyStructuredMemories({
 
         updateMemoryItem(userId, existing.id, { confirm: true })
         result.confirmed += 1
+        result.itemIds.push(existing.id)
+        continue
+      }
+
+      if (action === 'archive') {
+        const existing = itemsById.get(targetId)
+
+        if (!existing) {
+          result.skipped += 1
+          continue
+        }
+
+        updateMemoryItem(userId, existing.id, {
+          status: 'archived'
+        })
+
+        itemsById.delete(existing.id)
+        result.archived += 1
         result.itemIds.push(existing.id)
         continue
       }
@@ -701,6 +720,10 @@ Return ONLY valid JSON in exactly this general shape:
       "id": 12
     },
     {
+      "action": "archive",
+      "id": 12
+    },
+    {
       "action": "replace",
       "id": 8,
       "type": "project",
@@ -726,6 +749,7 @@ temporary
 Rules for structured memories:
 - Return no more than 8 actions.
 - Use "confirm" when an existing memory is still clearly supported.
+- Use "archive" when the user explicitly asks to forget or remove an existing memory.
 - Use "replace" only when the conversation clearly contradicts or updates an existing memory.
 - Use "create" only for a genuinely new durable or meaningfully reusable fact.
 - Do not create duplicates or paraphrased duplicates.

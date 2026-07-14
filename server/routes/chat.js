@@ -701,7 +701,7 @@ async function executeTool(toolCall, res, conversationId) {
 
 // Auto-update memory after response (direct function call instead of HTTP)
 function shouldForceMemoryUpdate(content) {
-  return /\b(?:merk dir|merke dir|bitte merken|speichere (?:das|dies)|ab jetzt|von nun an|ich bevorzuge)\b/i
+  return /\b(?:merk dir|merke dir|bitte merken|speichere (?:das|dies)|ab jetzt|von nun an|ich bevorzuge|vergiss|vergiss bitte|nicht mehr merken|aus (?:der )?memory entfernen)\b/i
     .test(String(content || ''))
 }
 
