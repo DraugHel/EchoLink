@@ -727,58 +727,65 @@ function memoryRetrievalScore(
     token => text.includes(token)
   ).length
 
-  let score =
-    Number(item.importance || 0) * 0.55 +
-    Number(item.confidence || 0) * 20 +
-    Math.min(overlap * 10, 50)
-
-  if (item.type === 'instruction') {
-    score += 18
-  } else if (item.type === 'preference') {
-    score += 13
-  } else if (item.type === 'profile') {
-    score += 10
-  } else if (item.type === 'project') {
-    score += 8
-  }
-
-  if (item.scope === 'global') {
-    score += 12
-  }
-
   const conversationScope =
     `conversation:${conversationId}`
 
-  if (item.scope === conversationScope) {
-    score += 40
-  } else if (
-    item.scope.startsWith('conversation:')
+  const exactConversation =
+    item.scope === conversationScope
+
+  const globalStanding =
+    item.scope === 'global' &&
+    ['instruction', 'preference', 'profile']
+      .includes(item.type) &&
+    Number(item.importance || 0) >= 70
+
+  // Projekt-, Persona- und normale Fakten nur laden,
+  // wenn sie tatsächlich zur aktuellen Frage passen.
+  if (
+    overlap === 0 &&
+    !exactConversation &&
+    !globalStanding
   ) {
-    score -= 100
+    return -1000
+  }
+
+  let score =
+    overlap * 20 +
+    Number(item.importance || 0) * 0.25 +
+    Number(item.confidence || 0) * 10
+
+  if (exactConversation) {
+    score += 50
+  }
+
+  if (globalStanding) {
+    score += 20
+  }
+
+  if (
+    item.scope.startsWith('project:') &&
+    overlap > 0
+  ) {
+    score += 6
   }
 
   if (
     item.scope.startsWith('persona:') &&
-    overlap === 0
+    overlap > 0
   ) {
-    score -= 80
+    score += 6
   }
 
-  if (item.scope.startsWith('project:')) {
-    score += 4
-  }
-
-  const ageSeconds =
-    Math.max(
-      0,
-      Math.floor(Date.now() / 1000) -
+  const ageSeconds = Math.max(
+    0,
+    Math.floor(Date.now() / 1000) -
       Number(item.updatedAt || 0)
-    )
+  )
 
   if (ageSeconds < 30 * 86400) {
-    score += 8
+    score += 3
   } else if (ageSeconds < 180 * 86400) {
-    score += 4
+    score += 1
   }
 
   return score
@@ -857,7 +864,7 @@ export function selectMemoryItemsForContext(
     })
     .filter(
       item =>
-        item.retrievalScore >= 25
+        item.retrievalScore >= 18
     )
     .sort(
       (a, b) =>
