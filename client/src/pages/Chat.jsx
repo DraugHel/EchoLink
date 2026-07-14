@@ -320,8 +320,7 @@ export default function Chat({ user, onLogout }) {
     if (activeConvo && !agentMode) {
       try { await api.post(`/api/memory/update/${activeConvo.id}`, {}) } catch {}
     }
-    const firstModel = availableModels[0] || null
-    const convo = await api.post('/api/conversations', firstModel ? { model: firstModel } : {})
+    const convo = await api.post('/api/conversations', {})
     setConversations(prev => [convo, ...prev])
     await selectConvo(convo)
   }
