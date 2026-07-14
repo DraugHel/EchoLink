@@ -770,14 +770,7 @@ router.post('/:conversationId', requireAuth, async (req, res) => {
   db.prepare('UPDATE conversations SET updated_at = unixepoch() WHERE id = ?').run(convo.id)
 
   // System prompt with structured retrieval and legacy fallback
-  const user = db.prepare(
-    'SELECT memory FROM users WHERE id = ?'
-  ).get(req.session.userId)
-
-  const legacyMemory =
-    user?.memory || ''
-
-  const selectedMemoryItems =
+const selectedMemoryItems =
     selectMemoryItemsForContext(
       req.session.userId,
       content || '',
@@ -849,17 +842,6 @@ Use these as background context. Do not mention memory IDs or metadata unless th
       : structuredBlock
   }
 
-  // Übergangs-Fallback, bis das alte Markdown vollständig
-  // in einzelne Memory-Items migriert wurde.
-  if (legacyMemory) {
-    const legacyBlock =
-      `[Legacy user memory from earlier conversations:
-${legacyMemory}]`
-
-    systemContent = systemContent
-      ? `${systemContent}\n\n${legacyBlock}`
-      : legacyBlock
-  }
 
   const calendarToolPolicy = `[Calendar tool policy:
 - Use calendar_list_events to identify an event when its event ID is unknown.
