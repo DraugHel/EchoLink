@@ -835,7 +835,7 @@ const selectedMemoryItems =
     const structuredBlock =
       `[Relevant structured memories selected for this request:
 ${structuredMemory}
-Use these as background context. Do not mention memory IDs or metadata unless the user explicitly asks.]`
+Use these as background context. If these memories fully answer the request, answer directly and do not call tools merely to verify them. Do not mention memory IDs or metadata unless the user explicitly asks.]`
 
     systemContent = systemContent
       ? `${systemContent}\n\n${structuredBlock}`

@@ -665,6 +665,7 @@ const MEMORY_STOPWORDS = new Set([
   'einer',
   'eines',
   'für',
+  'fur',
   'hat',
   'ich',
   'ist',
@@ -713,17 +714,22 @@ function memoryRetrievalScore(
   queryTokens,
   conversationId
 ) {
-  const text = [
-    item.type,
-    item.scope,
-    item.content
-  ]
-    .join(' ')
+  const text = String(item.content || '')
     .toLowerCase()
     .normalize('NFKD')
     .replace(/\p{M}/gu, '')
 
-  const overlap = queryTokens.filter(
+  const scopeToken = item.scope.startsWith('project:')
+    ? item.scope.slice('project:'.length).toLowerCase()
+    : item.scope.startsWith('persona:')
+      ? item.scope.slice('persona:'.length).toLowerCase()
+      : ''
+
+  const relevantQueryTokens = scopeToken
+    ? queryTokens.filter(token => token !== scopeToken)
+    : queryTokens
+
+  const overlap = relevantQueryTokens.filter(
     token => text.includes(token)
   ).length
 
@@ -735,9 +741,8 @@ function memoryRetrievalScore(
 
   const globalStanding =
     item.scope === 'global' &&
-    ['instruction', 'preference', 'profile']
-      .includes(item.type) &&
-    Number(item.importance || 0) >= 70
+    item.type === 'instruction' &&
+    item.metadata?.alwaysInclude === true
 
   // Projekt-, Persona- und normale Fakten nur laden,
   // wenn sie tatsächlich zur aktuellen Frage passen.
