@@ -405,6 +405,79 @@ function normalizeMemoryFingerprint(value) {
     .trim()
 }
 
+const MEMORY_DUPLICATE_STOPWORDS = new Set([
+  'aber', 'als', 'auch', 'bei', 'das', 'dass',
+  'dem', 'den', 'der', 'die', 'ein', 'eine',
+  'für', 'ich', 'ist', 'mit', 'nicht', 'oder',
+  'sich', 'und', 'von', 'the', 'this', 'with'
+])
+
+function memoryDuplicateTokens(value) {
+  return new Set(
+    normalizeMemoryFingerprint(value)
+      .split(/\s+/)
+      .filter(token =>
+        token.length >= 3 &&
+        !MEMORY_DUPLICATE_STOPWORDS.has(token)
+      )
+  )
+}
+
+function memoryWordSimilarity(leftValue, rightValue) {
+  const left = memoryDuplicateTokens(leftValue)
+  const right = memoryDuplicateTokens(rightValue)
+
+  if (!left.size || !right.size) return 0
+
+  let overlap = 0
+
+  for (const token of left) {
+    if (right.has(token)) overlap += 1
+  }
+
+  const containment =
+    overlap / Math.min(left.size, right.size)
+
+  const union =
+    left.size + right.size - overlap
+
+  const jaccard =
+    union > 0 ? overlap / union : 0
+
+  return Math.max(
+    jaccard,
+    containment * 0.85
+  )
+}
+
+function findSimilarMemory(items, candidate) {
+  let best = null
+  let bestScore = 0
+
+  for (const item of items) {
+    if (
+      item.type !== candidate.type ||
+      item.scope !== candidate.scope
+    ) {
+      continue
+    }
+
+    const score = memoryWordSimilarity(
+      item.content,
+      candidate.content
+    )
+
+    if (score > bestScore) {
+      best = item
+      bestScore = score
+    }
+  }
+
+  return bestScore >= 0.72
+    ? best
+    : null
+}
+
 function parseMemoryExtractionJson(rawValue) {
   let text = String(rawValue || '').trim()
 
@@ -533,7 +606,12 @@ function applyStructuredMemories({
       )
 
       const fingerprint = normalizeMemoryFingerprint(content)
-      const duplicate = itemsByFingerprint.get(fingerprint)
+      const duplicate =
+        itemsByFingerprint.get(fingerprint) ||
+        findSimilarMemory(
+          [...itemsById.values()],
+          { type, scope, content }
+        )
 
       if (duplicate && action !== 'replace') {
         updateMemoryItem(userId, duplicate.id, {
@@ -752,6 +830,8 @@ Rules for structured memories:
 - Use "archive" when the user explicitly asks to forget or remove an existing memory.
 - Use "replace" only when the conversation clearly contradicts or updates an existing memory.
 - Use "create" only for a genuinely new durable or meaningfully reusable fact.
+- Compare every proposed memory by meaning with the existing memories.
+- If the same fact already exists with different wording, use "confirm" with its existing ID.
 - Do not create duplicates or paraphrased duplicates.
 - Each content value must contain exactly one self-contained fact.
 - Store explicit user statements, not guesses or model inferences.
