@@ -8,7 +8,8 @@
     "start": "node server/index.js",
     "adduser": "node scripts/adduser.js",
     "test:smoke": "node --test tests/*.test.mjs",
-    "test": "npm run test:smoke"
+    "test": "npm run test:smoke",
+    "deploy": "bash scripts/deploy.sh"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
