@@ -2,6 +2,7 @@ import './loadEnv.js'
 import db from './db.js'
 import { computeNextRunAt } from './lib/scheduler.js'
 import { sendPushToUser } from './lib/push.js'
+import { runScheduledAgent } from './lib/agentRunner.js'
 import {
   cleanupScheduledTasks
 } from './lib/taskCleanup.js'
@@ -264,9 +265,95 @@ async function executeReminder(task) {
   return content
 }
 
+function pushPreview(content) {
+  const plain = String(content || '')
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+    .replace(/[`*_>#]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+
+  return plain.length > 240
+    ? `${plain.slice(0, 237)}...`
+    : plain
+}
+
+async function executeAgent(task) {
+  const conversation = db.prepare(`
+    SELECT
+      id,
+      user_id,
+      model,
+      temperature,
+      top_k,
+      top_p,
+      reasoning_effort
+    FROM conversations
+    WHERE id = ? AND user_id = ?
+  `).get(
+    task.conversation_id,
+    task.user_id
+  )
+
+  if (!conversation) {
+    throw new Error(
+      'Ziel-Unterhaltung existiert nicht mehr'
+    )
+  }
+
+  const content = await runScheduledAgent({
+    task,
+    conversation
+  })
+
+  db.prepare(`
+    INSERT INTO messages (
+      conversation_id,
+      role,
+      content
+    )
+    VALUES (?, 'assistant', ?)
+  `).run(
+    conversation.id,
+    content
+  )
+
+  db.prepare(`
+    UPDATE conversations
+    SET updated_at = unixepoch()
+    WHERE id = ?
+  `).run(conversation.id)
+
+  const pushResult = await sendPushToUser(
+    task.user_id,
+    {
+      title: task.title,
+      body: pushPreview(content),
+      url: `/?conversation=${conversation.id}`,
+      tag: `echolink-task-${task.id}`,
+      conversationId: conversation.id
+    }
+  )
+
+  console.log(JSON.stringify({
+    level: 'info',
+    event: 'scheduled_agent_push',
+    taskId: task.id,
+    userId: task.user_id,
+    sent: pushResult.sent,
+    failed: pushResult.failed,
+    removed: pushResult.removed
+  }))
+
+  return content
+}
+
 async function executeTask(task) {
   if (task.task_type === 'reminder') {
     return executeReminder(task)
+  }
+
+  if (task.task_type === 'agent') {
+    return executeAgent(task)
   }
 
   throw new Error(

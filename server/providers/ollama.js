@@ -11,7 +11,7 @@ export async function streamOllama(model, messages, options, res, abortSignal) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       model, messages, stream: true,
-      tools: ALL_TOOLS,
+      tools: options?.tools ?? ALL_TOOLS,
       ...(options?.reasoningEffort === 'off' ? { think: false } : {}),
       options: { temperature: options?.temperature, top_k: options?.top_k, top_p: options?.top_p }
     }),

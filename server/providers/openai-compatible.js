@@ -80,7 +80,7 @@ async function streamOpenAICompatible(providerName, endpoint, key, model, messag
   const body = {
     model, stream: true,
     messages: toOpenAI(messages),
-    tools: ALL_TOOLS,
+    tools: options?.tools ?? ALL_TOOLS,
     stream_options: { include_usage: true },
     ...(options?.temperature != null ? { temperature: Math.min(options.temperature, 2) } : {}),
     ...(options?.top_p != null ? { top_p: options.top_p } : {}),

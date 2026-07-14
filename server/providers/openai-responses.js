@@ -85,7 +85,7 @@ export async function streamResponses(model, messages, options, res, abortSignal
     include: ['reasoning.encrypted_content'],
     input,
     ...(instructions ? { instructions } : {}),
-    tools: ALL_TOOLS.map(t => ({
+    tools: (options?.tools ?? ALL_TOOLS).map(t => ({
       type: 'function', name: t.function.name, description: t.function.description, parameters: t.function.parameters
     })),
     // Nur explizit bekannte Instant-Modelle erhalten keinen reasoning-Parameter.

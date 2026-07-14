@@ -14,6 +14,8 @@ export const TASK_TOOLS = [
       name: 'create_task',
       description:
         'Create a scheduled reminder or recurring task for the current conversation. ' +
+        'Use taskType reminder for static text that should simply be shown later. ' +
+        'Use taskType agent when EchoLink must generate fresh content at run time, for example news briefings, weather reports, pollen reports, inbox summaries, or other tasks that require current information and tools. ' +
         'Requests such as "in 2 minutes", "tomorrow", or "at 15:00" MUST use once. ' +
         'Use interval or cron only when the user explicitly asks for repetition, such as "every 2 minutes" or "jeden Montag". ' +
         'For once, scheduleValue must be an ISO 8601 timestamp including an offset, for example 2026-07-14T15:00:00+02:00. ' +
@@ -28,7 +30,13 @@ export const TASK_TOOLS = [
           prompt: {
             type: 'string',
             description:
-              'The reminder text or instruction that should appear when the task runs'
+              'For reminder: the text to display. For agent: the complete instruction the model should execute when the task runs.'
+          },
+          taskType: {
+            type: 'string',
+            enum: ['reminder', 'agent'],
+            description:
+              'reminder = send static text; agent = generate a fresh answer with read-only web tools when the task runs. Defaults to reminder.'
           },
           scheduleKind: {
             type: 'string',
@@ -99,6 +107,10 @@ export const TASK_TOOLS = [
           },
           prompt: {
             type: 'string'
+          },
+          taskType: {
+            type: 'string',
+            enum: ['reminder', 'agent']
           },
           scheduleKind: {
             type: 'string',
@@ -237,6 +249,21 @@ function parseEnabled(value, fallback) {
   return value
 }
 
+
+function readTaskType(value, fallback = 'reminder') {
+  const type = value === undefined
+    ? fallback
+    : String(value).trim()
+
+  if (!['reminder', 'agent'].includes(type)) {
+    throw new Error(
+      'taskType muss reminder oder agent sein'
+    )
+  }
+
+  return type
+}
+
 function unixToIso(value) {
   if (!value) return null
 
@@ -278,6 +305,8 @@ function createTask(args, context) {
     MAX_PROMPT_LENGTH
   )
 
+  const taskType = readTaskType(args.taskType)
+
   if (typeof args.recurring !== 'boolean') {
     throw new Error('recurring muss true oder false sein')
   }
@@ -314,10 +343,11 @@ function createTask(args, context) {
       enabled,
       next_run_at
     )
-    VALUES (?, ?, 'reminder', ?, ?, ?, ?, ?, 1, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
   `).run(
     context.userId,
     context.conversationId,
+    taskType,
     title,
     prompt,
     schedule.scheduleKind,
@@ -385,6 +415,11 @@ function updateTask(args, context) {
         MAX_PROMPT_LENGTH
       )
 
+  const taskType = readTaskType(
+    args.taskType,
+    existing.task_type
+  )
+
   const enabled = parseEnabled(
     args.enabled,
     Boolean(existing.enabled)
@@ -430,6 +465,7 @@ function updateTask(args, context) {
   db.prepare(`
     UPDATE scheduled_tasks
     SET
+      task_type = ?,
       title = ?,
       prompt = ?,
       schedule_kind = ?,
@@ -441,6 +477,7 @@ function updateTask(args, context) {
       updated_at = unixepoch()
     WHERE id = ? AND user_id = ?
   `).run(
+    taskType,
     title,
     prompt,
     scheduleKind,

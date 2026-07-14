@@ -5,8 +5,8 @@ import { imgMediaType } from '../lib/images.js'
 const ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages'
 export const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY || ''
 
-function anthropicTools() {
-  return ALL_TOOLS.map(t => ({
+function anthropicTools(tools = ALL_TOOLS) {
+  return tools.map(t => ({
     name: t.function.name,
     description: t.function.description,
     input_schema: t.function.parameters
@@ -144,7 +144,7 @@ export async function streamAnthropic(model, messages, options, res, abortSignal
   const body = {
     model, max_tokens: 16384, stream: true,
     messages: msgs,
-    tools: anthropicTools(),
+    tools: anthropicTools(options?.tools ?? ALL_TOOLS),
     ...(systemParam ? { system: systemParam } : {}),
     // Thinking an: adaptive + effort; temperature ist dann nicht erlaubt
     ...(thinkingOn
