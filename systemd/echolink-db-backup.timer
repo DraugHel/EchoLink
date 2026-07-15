@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily EchoLink SQLite database backup
+
+[Timer]
+OnCalendar=*-*-* 02:30:00 Europe/Vienna
+Persistent=true
+RandomizedDelaySec=300
+Unit=echolink-db-backup.service
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,12 @@
+[Unit]
+Description=EchoLink SQLite database backup
+After=local-fs.target
+
+[Service]
+Type=oneshot
+User=root
+WorkingDirectory=/root/echolink
+ExecStart=/root/echolink/scripts/backup-db.sh daily
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7

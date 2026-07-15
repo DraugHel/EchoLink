@@ -15,6 +15,9 @@ if [[ "${ALLOW_DIRTY:-0}" != "1" ]] &&
   exit 1
 fi
 
+echo "===== DATENBANK-BACKUP ====="
+"$ROOT_DIR/scripts/backup-db.sh" deploy
+
 if [[ "${SKIP_PULL:-0}" != "1" ]]; then
   echo "===== GIT PULL ====="
   git pull --ff-only
