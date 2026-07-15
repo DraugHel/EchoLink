@@ -957,6 +957,8 @@ export default function Chat({ user, onLogout }) {
       {showTasks && (
         <TaskPanel
           conversationId={activeConvo?.id || null}
+          conversations={conversations}
+          onConversationsChanged={loadConversations}
           onClose={() => setShowTasks(false)}
         />
       )}

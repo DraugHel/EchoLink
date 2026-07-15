@@ -2,6 +2,10 @@ import { Router } from 'express'
 import { requireAuth } from '../middleware/auth.js'
 import db from '../db.js'
 import {
+  createDedicatedTaskConversation,
+  getOwnedConversation
+} from '../lib/taskConversations.js'
+import {
   DEFAULT_TASK_TIMEZONE,
   normalizeSchedule
 } from '../lib/scheduler.js'
@@ -18,6 +22,7 @@ function taskToJson(task) {
     id: task.id,
     type: task.task_type,
     conversationId: task.conversation_id,
+    conversationTitle: task.conversation_title || null,
     title: task.title,
     prompt: task.prompt,
     scheduleKind: task.schedule_kind,
@@ -37,23 +42,15 @@ function taskToJson(task) {
   }
 }
 
-function getOwnedConversation(userId, conversationId) {
-  if (!Number.isInteger(conversationId) || conversationId < 1) {
-    return null
-  }
-
-  return db.prepare(`
-    SELECT id
-    FROM conversations
-    WHERE id = ? AND user_id = ?
-  `).get(conversationId, userId)
-}
-
 function getOwnedTask(userId, taskId) {
   return db.prepare(`
-    SELECT *
-    FROM scheduled_tasks
-    WHERE id = ? AND user_id = ?
+    SELECT
+      task.*,
+      conversation.title AS conversation_title
+    FROM scheduled_tasks AS task
+    LEFT JOIN conversations AS conversation
+      ON conversation.id = task.conversation_id
+    WHERE task.id = ? AND task.user_id = ?
   `).get(taskId, userId)
 }
 
@@ -105,11 +102,14 @@ router.get('/', requireAuth, (req, res) => {
   const tasks = db.prepare(`
     SELECT
       task.*,
+      conversation.title AS conversation_title,
       latest.status AS last_run_status,
       latest.error AS last_run_error,
       latest.started_at AS last_run_started_at,
       latest.finished_at AS last_run_finished_at
     FROM scheduled_tasks AS task
+    LEFT JOIN conversations AS conversation
+      ON conversation.id = task.conversation_id
     LEFT JOIN task_runs AS latest
       ON latest.id = (
         SELECT run.id
@@ -175,11 +175,28 @@ router.post('/', requireAuth, (req, res) => {
       req.body?.taskType ?? req.body?.type
     )
 
-    const conversationId = Number(
+    const conversationMode =
+      req.body?.conversationMode === 'auto' ||
+      req.body?.conversationId === undefined ||
+      req.body?.conversationId === null
+        ? 'auto'
+        : 'existing'
+
+    let conversationId = Number(
       req.body?.conversationId
     )
 
-    if (
+    if (conversationMode === 'auto') {
+      const dedicated = createDedicatedTaskConversation({
+        userId: req.session.userId,
+        title,
+        templateConversationId:
+          req.body?.templateConversationId ??
+          req.body?.conversationId
+      })
+
+      conversationId = dedicated.id
+    } else if (
       !getOwnedConversation(
         req.session.userId,
         conversationId
@@ -277,20 +294,31 @@ router.patch('/:id', requireAuth, (req, res) => {
       existing.task_type
     )
 
-    const conversationId =
-      req.body?.conversationId === undefined
-        ? existing.conversation_id
-        : Number(req.body.conversationId)
+    let conversationId = existing.conversation_id
 
-    if (
-      !getOwnedConversation(
-        req.session.userId,
-        conversationId
-      )
-    ) {
-      return res.status(400).json({
-        error: 'Ungültige Unterhaltung'
+    if (req.body?.conversationMode === 'auto') {
+      const dedicated = createDedicatedTaskConversation({
+        userId: req.session.userId,
+        title,
+        templateConversationId:
+          req.body?.templateConversationId ??
+          existing.conversation_id
       })
+
+      conversationId = dedicated.id
+    } else if (req.body?.conversationId !== undefined) {
+      conversationId = Number(req.body.conversationId)
+
+      if (
+        !getOwnedConversation(
+          req.session.userId,
+          conversationId
+        )
+      ) {
+        return res.status(400).json({
+          error: 'Ungültige Unterhaltung'
+        })
+      }
     }
 
     const scheduleChanged = [

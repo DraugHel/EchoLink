@@ -1,5 +1,8 @@
 import db from '../db.js'
 import {
+  createDedicatedTaskConversation
+} from './taskConversations.js'
+import {
   DEFAULT_TASK_TIMEZONE,
   normalizeSchedule
 } from './scheduler.js'
@@ -13,9 +16,9 @@ export const TASK_TOOLS = [
     function: {
       name: 'create_task',
       description:
-        'Create a scheduled reminder or recurring task for the current conversation. ' +
+        'Create a scheduled reminder or recurring task. ' +
         'Use taskType reminder for static text that should simply be shown later. ' +
-        'Use taskType agent when EchoLink must generate fresh content at run time, for example news briefings, weather reports, pollen reports, inbox summaries, or other tasks that require current information and tools. ' +
+        'Use taskType agent when EchoLink must generate fresh content at run time, for example news briefings, weather reports, pollen reports, inbox summaries, or other tasks that require current information and tools. Agent tasks automatically receive their own dedicated conversation. ' +
         'Requests such as "in 2 minutes", "tomorrow", or "at 15:00" MUST use once. ' +
         'Use interval or cron only when the user explicitly asks for repetition, such as "every 2 minutes" or "jeden Montag". ' +
         'For once, scheduleValue must be an ISO 8601 timestamp including an offset, for example 2026-07-14T15:00:00+02:00. ' +
@@ -203,9 +206,13 @@ function getOwnedTask(userId, taskId) {
   }
 
   return db.prepare(`
-    SELECT *
-    FROM scheduled_tasks
-    WHERE id = ? AND user_id = ?
+    SELECT
+      task.*,
+      conversation.title AS conversation_title
+    FROM scheduled_tasks AS task
+    LEFT JOIN conversations AS conversation
+      ON conversation.id = task.conversation_id
+    WHERE task.id = ? AND task.user_id = ?
   `).get(id, userId)
 }
 
@@ -275,6 +282,7 @@ function taskToJson(task) {
     id: task.id,
     type: task.task_type,
     conversationId: task.conversation_id,
+    conversationTitle: task.conversation_title || null,
     title: task.title,
     prompt: task.prompt,
     scheduleKind: task.schedule_kind,
@@ -330,6 +338,15 @@ function createTask(args, context) {
       args.timezone || DEFAULT_TASK_TIMEZONE
   })
 
+  const conversationId = taskType === 'agent'
+    ? createDedicatedTaskConversation({
+        userId: context.userId,
+        title,
+        templateConversationId:
+          context.conversationId
+      }).id
+    : context.conversationId
+
   const result = db.prepare(`
     INSERT INTO scheduled_tasks (
       user_id,
@@ -346,7 +363,7 @@ function createTask(args, context) {
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
   `).run(
     context.userId,
-    context.conversationId,
+    conversationId,
     taskType,
     title,
     prompt,

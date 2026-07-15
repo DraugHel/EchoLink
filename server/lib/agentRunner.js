@@ -14,7 +14,7 @@ import { streamResponses } from '../providers/openai-responses.js'
 
 const MAX_TOOL_ITERATIONS = 16
 const MAX_TOOL_CALLS = 24
-const AGENT_TIMEOUT_MS = 4 * 60 * 1000
+const AGENT_TIMEOUT_MS = 6 * 60 * 1000
 
 const READ_ONLY_TOOLS = [
   SEARCH_TOOL,
@@ -105,6 +105,17 @@ function systemPrompt(task) {
   ].join('\n')
 }
 
+function finalizationPrompt(reason) {
+  return [
+    'Stop using tools now.',
+    'Produce the best possible final user-facing answer using only the information already collected in this run.',
+    'Do not ask for more data and do not mention internal tool budgets, iteration limits, or implementation details.',
+    'If a section is incomplete or uncertain, say so briefly and clearly rather than omitting the entire result.',
+    'Return only the finished answer.',
+    `Reason for finalization: ${reason}`
+  ].join('\n')
+}
+
 async function executeReadOnlyTool(
   toolCall,
   allowedUrls
@@ -157,6 +168,79 @@ async function executeReadOnlyTool(
   return `Blocked tool: ${name || 'unknown'}`
 }
 
+async function callModel({
+  model,
+  conversation,
+  workingMessages,
+  tools,
+  controller
+}) {
+  const {
+    streamFn,
+    providerModel
+  } = providerFor(model)
+
+  const options = {
+    temperature: conversation.temperature,
+    top_k: conversation.top_k,
+    top_p: conversation.top_p,
+    reasoningEffort:
+      conversation.reasoning_effort || '',
+    tools
+  }
+
+  const providerMessages =
+    streamFn === streamZai ||
+    streamFn === streamResponses
+      ? splitSystemTimeNote(workingMessages)
+      : workingMessages
+
+  return streamFn(
+    providerModel,
+    providerMessages,
+    options,
+    silentResponse,
+    controller.signal
+  )
+}
+
+async function finalizeWithoutTools({
+  model,
+  conversation,
+  workingMessages,
+  controller,
+  reason
+}) {
+  const finalMessages = [
+    ...workingMessages,
+    {
+      role: 'system',
+      content: finalizationPrompt(reason)
+    }
+  ]
+
+  const {
+    fullContent
+  } = await callModel({
+    model,
+    conversation,
+    workingMessages: finalMessages,
+    tools: [],
+    controller
+  })
+
+  const content = cleanFinalContent(fullContent)
+
+  if (content) {
+    return content
+  }
+
+  return [
+    'Das Ergebnis konnte nur teilweise erstellt werden.',
+    'Für eine verlässliche vollständige Antwort lagen nach der Recherche nicht genügend verwertbare Informationen vor.'
+  ].join(' ')
+}
+
 export async function runScheduledAgent({
   task,
   conversation
@@ -192,46 +276,18 @@ export async function runScheduledAgent({
       iteration++
     ) {
       const {
-        streamFn,
-        providerModel
-      } = providerFor(model)
-
-      const options = {
-        temperature: conversation.temperature,
-        top_k: conversation.top_k,
-        top_p: conversation.top_p,
-        reasoningEffort:
-          conversation.reasoning_effort || '',
-        tools: READ_ONLY_TOOLS
-      }
-
-      const providerMessages =
-        streamFn === streamZai ||
-        streamFn === streamResponses
-          ? splitSystemTimeNote(workingMessages)
-          : workingMessages
-
-      const {
         fullContent,
         toolCalls,
         rawOutput
-      } = await streamFn(
-        providerModel,
-        providerMessages,
-        options,
-        silentResponse,
-        controller.signal
-      )
+      } = await callModel({
+        model,
+        conversation,
+        workingMessages,
+        tools: READ_ONLY_TOOLS,
+        controller
+      })
 
       if (toolCalls?.length) {
-        toolCallCount += toolCalls.length
-
-        if (toolCallCount > MAX_TOOL_CALLS) {
-          throw new Error(
-            'Agent tool-call limit reached'
-          )
-        }
-
         workingMessages.push({
           role: 'assistant',
           content: fullContent || '',
@@ -239,7 +295,15 @@ export async function runScheduledAgent({
           ...(rawOutput ? { _raw: rawOutput } : {})
         })
 
-        for (const toolCall of toolCalls) {
+        const remaining = Math.max(
+          0,
+          MAX_TOOL_CALLS - toolCallCount
+        )
+
+        const executable = toolCalls.slice(0, remaining)
+        const skipped = toolCalls.slice(remaining)
+
+        for (const toolCall of executable) {
           const result = await executeReadOnlyTool(
             toolCall,
             allowedUrls
@@ -254,23 +318,57 @@ export async function runScheduledAgent({
           })
         }
 
+        toolCallCount += executable.length
+
+        for (const toolCall of skipped) {
+          workingMessages.push({
+            role: 'tool',
+            ...(toolCall.id
+              ? { tool_call_id: toolCall.id }
+              : {}),
+            content:
+              'Tool not executed: the research budget for this run is exhausted. Finish with the information already collected.'
+          })
+        }
+
+        if (
+          skipped.length > 0 ||
+          toolCallCount >= MAX_TOOL_CALLS
+        ) {
+          return finalizeWithoutTools({
+            model,
+            conversation,
+            workingMessages,
+            controller,
+            reason: 'research budget exhausted'
+          })
+        }
+
         continue
       }
 
       const content = cleanFinalContent(fullContent)
 
       if (!content) {
-        throw new Error(
-          'Agent returned an empty response'
-        )
+        return finalizeWithoutTools({
+          model,
+          conversation,
+          workingMessages,
+          controller,
+          reason: 'the model returned no final text after research'
+        })
       }
 
       return content
     }
 
-    throw new Error(
-      'Agent reached the maximum tool iterations'
-    )
+    return finalizeWithoutTools({
+      model,
+      conversation,
+      workingMessages,
+      controller,
+      reason: 'maximum research iterations reached'
+    })
   } finally {
     clearTimeout(timeout)
   }

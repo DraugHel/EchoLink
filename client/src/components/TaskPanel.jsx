@@ -23,6 +23,7 @@ const emptyTask = {
   scheduleKind: 'once',
   scheduleValue: '',
   timezone: 'Europe/Vienna',
+  conversationTarget: 'auto',
   enabled: true
 }
 
@@ -266,6 +267,9 @@ function taskToDraft(task) {
       ? toDateTimeLocal(task.scheduleValue)
       : String(task.scheduleValue || ''),
     timezone: task.timezone || 'Europe/Vienna',
+    conversationTarget: task.conversationId
+      ? String(task.conversationId)
+      : 'auto',
     enabled: Boolean(task.enabled)
   }
 }
@@ -282,8 +286,27 @@ function scheduleValueFromDraft(draft) {
   return scheduleValue
 }
 
-function payloadFromDraft(draft, conversationId, creating) {
-  const payload = {
+function conversationPayload(draft, templateConversationId) {
+  if (draft.conversationTarget === 'auto') {
+    return {
+      conversationMode: 'auto',
+      ...(templateConversationId
+        ? { templateConversationId }
+        : {})
+    }
+  }
+
+  const conversationId = Number(draft.conversationTarget)
+
+  if (!Number.isInteger(conversationId) || conversationId < 1) {
+    throw new Error('Bitte eine gültige Ziel-Unterhaltung auswählen.')
+  }
+
+  return { conversationId }
+}
+
+function payloadFromDraft(draft, templateConversationId) {
+  return {
     title: draft.title.trim(),
     prompt: draft.prompt.trim(),
     taskType: draft.taskType,
@@ -291,14 +314,12 @@ function payloadFromDraft(draft, conversationId, creating) {
     scheduleValue: scheduleValueFromDraft(draft),
     timezone:
       draft.timezone.trim() || 'Europe/Vienna',
-    enabled: Boolean(draft.enabled)
+    enabled: Boolean(draft.enabled),
+    ...conversationPayload(
+      draft,
+      templateConversationId
+    )
   }
-
-  if (creating) {
-    payload.conversationId = conversationId
-  }
-
-  return payload
 }
 
 function payloadForEdit(draft, existing) {
@@ -335,6 +356,31 @@ function payloadForEdit(draft, existing) {
     payload.timezone = timezone
   }
 
+  if (draft.conversationTarget === 'auto') {
+    payload.conversationMode = 'auto'
+    if (existing.conversationId) {
+      payload.templateConversationId =
+        existing.conversationId
+    }
+  } else {
+    const selectedConversationId = Number(
+      draft.conversationTarget
+    )
+
+    if (
+      !Number.isInteger(selectedConversationId) ||
+      selectedConversationId < 1
+    ) {
+      throw new Error(
+        'Bitte eine gültige Ziel-Unterhaltung auswählen.'
+      )
+    }
+
+    if (selectedConversationId !== existing.conversationId) {
+      payload.conversationId = selectedConversationId
+    }
+  }
+
   return payload
 }
 
@@ -344,8 +390,8 @@ function TaskEditor({
   onSave,
   onCancel,
   saving,
-  createMode = false,
-  canCreate = true
+  conversations = [],
+  createMode = false
 }) {
   function set(name, nextValue) {
     onChange({
@@ -357,8 +403,7 @@ function TaskEditor({
   const valid =
     value.title.trim() &&
     value.prompt.trim() &&
-    String(value.scheduleValue || '').trim() &&
-    canCreate
+    String(value.scheduleValue || '').trim()
 
   return (
     <div style={{ display: 'grid', gap: 10 }}>
@@ -416,6 +461,38 @@ function TaskEditor({
           />
         </label>
       </div>
+
+      <label>
+        <div style={labelStyle()}>Ziel-Unterhaltung</div>
+        <select
+          value={value.conversationTarget}
+          onChange={event =>
+            set('conversationTarget', event.target.value)
+          }
+          style={fieldStyle()}
+        >
+          <option value="auto">
+            Automatisch: eigene Task-Unterhaltung
+          </option>
+          {conversations.map(conversation => (
+            <option
+              key={conversation.id}
+              value={String(conversation.id)}
+            >
+              {conversation.title}
+            </option>
+          ))}
+        </select>
+        <div
+          style={{
+            marginTop: 5,
+            color: 'var(--text3)',
+            fontSize: 10
+          }}
+        >
+          Bei „Automatisch“ wird eine dauerhafte eigene Unterhaltung für diesen Task angelegt.
+        </div>
+      </label>
 
       <label>
         <div style={labelStyle()}>Titel</div>
@@ -538,17 +615,6 @@ function TaskEditor({
         </label>
       )}
 
-      {createMode && !canCreate && (
-        <div
-          style={{
-            color: 'var(--danger)',
-            fontSize: 12
-          }}
-        >
-          Zum Anlegen bitte zuerst eine Unterhaltung auswählen.
-        </div>
-      )}
-
       <div
         style={{
           display: 'flex',
@@ -588,6 +654,8 @@ function TaskEditor({
 
 export default function TaskPanel({
   conversationId,
+  conversations = [],
+  onConversationsChanged,
   onClose
 }) {
   const [tasks, setTasks] = useState([])
@@ -662,14 +730,14 @@ export default function TaskPanel({
     try {
       const payload = payloadFromDraft(
         createDraft,
-        conversationId,
-        true
+        conversationId
       )
 
       await api.post('/api/tasks', payload)
       setCreating(false)
-      setCreateDraft(emptyTask)
+      setCreateDraft({ ...emptyTask })
       await loadTasks({ quiet: true })
+      await onConversationsChanged?.()
     } catch (createError) {
       setError(
         createError?.message ||
@@ -712,6 +780,7 @@ export default function TaskPanel({
       setEditingId(null)
       setEditDraft(null)
       await loadTasks({ quiet: true })
+      await onConversationsChanged?.()
     } catch (saveError) {
       setError(
         saveError?.message ||
@@ -936,16 +1005,12 @@ export default function TaskPanel({
           <button
             type="button"
             onClick={() => setCreating(true)}
-            disabled={creating || !conversationId}
-            title={
-              conversationId
-                ? 'Neue Aufgabe anlegen'
-                : 'Zum Anlegen eine Unterhaltung auswählen'
-            }
+            disabled={creating}
+            title="Neue Aufgabe anlegen"
             style={{
               ...buttonStyle({
                 accent: true,
-                disabled: creating || !conversationId
+                disabled: creating
               }),
               marginLeft: 'auto'
             }}
@@ -993,11 +1058,11 @@ export default function TaskPanel({
                 onSave={createTask}
                 onCancel={() => {
                   setCreating(false)
-                  setCreateDraft(emptyTask)
+                  setCreateDraft({ ...emptyTask })
                 }}
                 saving={actionId === 'create'}
+                conversations={conversations}
                 createMode
-                canCreate={Boolean(conversationId)}
               />
             </div>
           )}
@@ -1047,6 +1112,7 @@ export default function TaskPanel({
                           setEditDraft(null)
                         }}
                         saving={busy}
+                        conversations={conversations}
                       />
                     ) : (
                       <>
@@ -1118,6 +1184,17 @@ export default function TaskPanel({
                               }}
                             >
                               {scheduleText(task)} · {task.timezone}
+                            </div>
+
+                            <div
+                              style={{
+                                marginTop: 4,
+                                color: 'var(--text3)',
+                                fontSize: 11
+                              }}
+                            >
+                              Ziel: {task.conversationTitle ||
+                                `Unterhaltung #${task.conversationId || '–'}`}
                             </div>
 
                             <div

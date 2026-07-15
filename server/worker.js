@@ -4,6 +4,9 @@ import { computeNextRunAt } from './lib/scheduler.js'
 import { sendPushToUser } from './lib/push.js'
 import { runScheduledAgent } from './lib/agentRunner.js'
 import {
+  createDedicatedTaskConversation
+} from './lib/taskConversations.js'
+import {
   cleanupScheduledTasks
 } from './lib/taskCleanup.js'
 
@@ -201,9 +204,16 @@ function failTask(task, now, nextRunAt) {
   )
 }
 
-async function executeReminder(task) {
-  const conversation = db.prepare(`
-    SELECT id
+function resolveTaskConversation(task) {
+  let conversation = db.prepare(`
+    SELECT
+      id,
+      user_id,
+      model,
+      temperature,
+      top_k,
+      top_p,
+      reasoning_effort
     FROM conversations
     WHERE id = ? AND user_id = ?
   `).get(
@@ -211,11 +221,41 @@ async function executeReminder(task) {
     task.user_id
   )
 
-  if (!conversation) {
-    throw new Error(
-      'Ziel-Unterhaltung existiert nicht mehr'
-    )
+  if (conversation) {
+    return conversation
   }
+
+  conversation = createDedicatedTaskConversation({
+    userId: task.user_id,
+    title: task.title,
+    templateConversationId: null
+  })
+
+  db.prepare(`
+    UPDATE scheduled_tasks
+    SET
+      conversation_id = ?,
+      updated_at = unixepoch()
+    WHERE id = ? AND user_id = ?
+  `).run(
+    conversation.id,
+    task.id,
+    task.user_id
+  )
+
+  console.log(JSON.stringify({
+    level: 'warn',
+    event: 'scheduled_task_conversation_recreated',
+    taskId: task.id,
+    userId: task.user_id,
+    conversationId: conversation.id
+  }))
+
+  return conversation
+}
+
+async function executeReminder(task) {
+  const conversation = resolveTaskConversation(task)
 
   const content = [
     `**Erinnerung: ${task.title}**`,
@@ -278,27 +318,7 @@ function pushPreview(content) {
 }
 
 async function executeAgent(task) {
-  const conversation = db.prepare(`
-    SELECT
-      id,
-      user_id,
-      model,
-      temperature,
-      top_k,
-      top_p,
-      reasoning_effort
-    FROM conversations
-    WHERE id = ? AND user_id = ?
-  `).get(
-    task.conversation_id,
-    task.user_id
-  )
-
-  if (!conversation) {
-    throw new Error(
-      'Ziel-Unterhaltung existiert nicht mehr'
-    )
-  }
+  const conversation = resolveTaskConversation(task)
 
   const content = await runScheduledAgent({
     task,
