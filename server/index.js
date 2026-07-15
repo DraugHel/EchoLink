@@ -14,7 +14,6 @@ import memoryRoutes from './routes/memory.js'
 import pushRoutes from './routes/push.js'
 import taskRoutes from './routes/tasks.js'
 import uploadRoutes, { cleanupOrphanedFiles } from './routes/uploads.js'
-import hermesRoutes from './routes/hermes.js'
 import externalRoutes from './routes/external.js'
 import systemRoutes from './routes/system.js'
 import googleRoutes from './routes/google.js'
@@ -102,7 +101,6 @@ app.use('/api/memory', memoryRoutes)
 app.use('/api/push', pushRoutes)
 app.use('/api/tasks', taskRoutes)
 app.use('/api/uploads', uploadRoutes)
-app.use('/api/hermes', hermesRoutes)
 app.use('/api/external', externalRoutes)
 app.use('/api/system', systemRoutes)
 app.use('/api/google', googleRoutes)
