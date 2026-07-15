@@ -267,12 +267,14 @@ async function executeReminder(task) {
     INSERT INTO messages (
       conversation_id,
       role,
-      content
+      content,
+      source_task_id
     )
-    VALUES (?, 'assistant', ?)
+    VALUES (?, 'assistant', ?, ?)
   `).run(
     conversation.id,
-    content
+    content,
+    task.id
   )
 
   db.prepare(`
@@ -280,6 +282,8 @@ async function executeReminder(task) {
     SET updated_at = unixepoch()
     WHERE id = ?
   `).run(conversation.id)
+
+  pruneTaskMessages(task, conversation.id)
 
   const pushResult = await sendPushToUser(
     task.user_id,
@@ -303,6 +307,49 @@ async function executeReminder(task) {
   }))
 
   return content
+}
+
+function pruneTaskMessages(task, conversationId) {
+  const retentionDays = Number(task.retention_days)
+
+  if (
+    !Number.isInteger(retentionDays) ||
+    retentionDays < 1
+  ) {
+    return
+  }
+
+  try {
+    const cutoff = Math.floor(Date.now() / 1000) -
+      retentionDays * 24 * 60 * 60
+
+    const result = db.prepare(`
+      DELETE FROM messages
+      WHERE
+        source_task_id = ?
+        AND conversation_id = ?
+        AND created_at < ?
+    `).run(task.id, conversationId, cutoff)
+
+    if (result.changes > 0) {
+      console.log(JSON.stringify({
+        level: 'info',
+        event: 'scheduled_task_messages_pruned',
+        taskId: task.id,
+        conversationId,
+        retentionDays,
+        deletedMessages: result.changes
+      }))
+    }
+  } catch (error) {
+    console.error(JSON.stringify({
+      level: 'error',
+      event: 'scheduled_task_message_prune_failed',
+      taskId: task.id,
+      conversationId,
+      error: error?.message || String(error)
+    }))
+  }
 }
 
 function pushPreview(content) {
@@ -329,12 +376,14 @@ async function executeAgent(task) {
     INSERT INTO messages (
       conversation_id,
       role,
-      content
+      content,
+      source_task_id
     )
-    VALUES (?, 'assistant', ?)
+    VALUES (?, 'assistant', ?, ?)
   `).run(
     conversation.id,
-    content
+    content,
+    task.id
   )
 
   db.prepare(`
@@ -342,6 +391,8 @@ async function executeAgent(task) {
     SET updated_at = unixepoch()
     WHERE id = ?
   `).run(conversation.id)
+
+  pruneTaskMessages(task, conversation.id)
 
   const pushResult = await sendPushToUser(
     task.user_id,

@@ -14,7 +14,8 @@ const router = Router()
 
 const LIMITS = {
   title: 160,
-  prompt: 20_000
+  prompt: 20_000,
+  retentionDays: 3650
 }
 
 function taskToJson(task) {
@@ -28,6 +29,7 @@ function taskToJson(task) {
     scheduleKind: task.schedule_kind,
     scheduleValue: task.schedule_value,
     timezone: task.timezone,
+    retentionDays: task.retention_days ?? null,
     enabled: Boolean(task.enabled),
     nextRunAt: task.next_run_at,
     lastRunAt: task.last_run_at,
@@ -96,6 +98,28 @@ function readEnabled(value, fallback) {
   }
 
   return value
+}
+
+function readRetentionDays(value, fallback = null) {
+  if (value === undefined) return fallback
+
+  if (value === null || String(value).trim() === '') {
+    return null
+  }
+
+  const days = Number(value)
+
+  if (
+    !Number.isInteger(days) ||
+    days < 1 ||
+    days > LIMITS.retentionDays
+  ) {
+    throw new Error(
+      `Aufbewahrung muss zwischen 1 und ${LIMITS.retentionDays} Tagen liegen`
+    )
+  }
+
+  return days
 }
 
 router.get('/', requireAuth, (req, res) => {
@@ -219,6 +243,11 @@ router.post('/', requireAuth, (req, res) => {
       true
     )
 
+    const retentionDays = readRetentionDays(
+      req.body?.retentionDays,
+      null
+    )
+
     const result = db.prepare(`
       INSERT INTO scheduled_tasks (
         user_id,
@@ -229,10 +258,11 @@ router.post('/', requireAuth, (req, res) => {
         schedule_kind,
         schedule_value,
         timezone,
+        retention_days,
         enabled,
         next_run_at
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       req.session.userId,
       conversationId,
@@ -242,6 +272,7 @@ router.post('/', requireAuth, (req, res) => {
       schedule.scheduleKind,
       schedule.scheduleValue,
       schedule.timezone,
+      retentionDays,
       enabled ? 1 : 0,
       enabled ? schedule.nextRunAt : null
     )
@@ -363,6 +394,11 @@ router.patch('/:id', requireAuth, (req, res) => {
       nextRunAt = null
     }
 
+    const retentionDays = readRetentionDays(
+      req.body?.retentionDays,
+      existing.retention_days ?? null
+    )
+
     db.prepare(`
       UPDATE scheduled_tasks
       SET
@@ -373,6 +409,7 @@ router.patch('/:id', requireAuth, (req, res) => {
         schedule_kind = ?,
         schedule_value = ?,
         timezone = ?,
+        retention_days = ?,
         enabled = ?,
         next_run_at = ?,
         locked_at = NULL,
@@ -386,6 +423,7 @@ router.patch('/:id', requireAuth, (req, res) => {
       scheduleKind,
       scheduleValue,
       timezone,
+      retentionDays,
       enabled ? 1 : 0,
       nextRunAt,
       taskId,

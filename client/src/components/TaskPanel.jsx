@@ -24,6 +24,7 @@ const emptyTask = {
   scheduleValue: '',
   timezone: 'Europe/Vienna',
   conversationTarget: 'auto',
+  retentionDays: '',
   enabled: true
 }
 
@@ -270,6 +271,9 @@ function taskToDraft(task) {
     conversationTarget: task.conversationId
       ? String(task.conversationId)
       : 'auto',
+    retentionDays: task.retentionDays == null
+      ? ''
+      : String(task.retentionDays),
     enabled: Boolean(task.enabled)
   }
 }
@@ -284,6 +288,22 @@ function scheduleValueFromDraft(draft) {
   }
 
   return scheduleValue
+}
+
+function retentionDaysFromDraft(draft) {
+  const raw = String(draft.retentionDays ?? '').trim()
+
+  if (!raw) return null
+
+  const days = Number(raw)
+
+  if (!Number.isInteger(days) || days < 1 || days > 3650) {
+    throw new Error(
+      'Aufbewahrung muss zwischen 1 und 3650 Tagen liegen.'
+    )
+  }
+
+  return days
 }
 
 function conversationPayload(draft, templateConversationId) {
@@ -314,6 +334,7 @@ function payloadFromDraft(draft, templateConversationId) {
     scheduleValue: scheduleValueFromDraft(draft),
     timezone:
       draft.timezone.trim() || 'Europe/Vienna',
+    retentionDays: retentionDaysFromDraft(draft),
     enabled: Boolean(draft.enabled),
     ...conversationPayload(
       draft,
@@ -327,6 +348,7 @@ function payloadForEdit(draft, existing) {
     title: draft.title.trim(),
     prompt: draft.prompt.trim(),
     taskType: draft.taskType,
+    retentionDays: retentionDaysFromDraft(draft),
     enabled: Boolean(draft.enabled)
   }
 
@@ -491,6 +513,33 @@ function TaskEditor({
           }}
         >
           Bei „Automatisch“ wird eine dauerhafte eigene Unterhaltung für diesen Task angelegt.
+        </div>
+      </label>
+
+      <label>
+        <div style={labelStyle()}>
+          Task-Nachrichten behalten (Tage)
+        </div>
+        <input
+          type="number"
+          min={1}
+          max={3650}
+          step={1}
+          value={value.retentionDays}
+          onChange={event =>
+            set('retentionDays', event.target.value)
+          }
+          placeholder="Leer = unbegrenzt"
+          style={fieldStyle()}
+        />
+        <div
+          style={{
+            marginTop: 5,
+            color: 'var(--text3)',
+            fontSize: 10
+          }}
+        >
+          Löscht nur Nachrichten, die dieser Task selbst erzeugt hat. Andere Chat-Nachrichten bleiben erhalten.
         </div>
       </label>
 
@@ -1195,6 +1244,9 @@ export default function TaskPanel({
                             >
                               Ziel: {task.conversationTitle ||
                                 `Unterhaltung #${task.conversationId || '–'}`}
+                              {' · '}Aufbewahrung: {task.retentionDays
+                                ? `${task.retentionDays} Tage`
+                                : 'unbegrenzt'}
                             </div>
 
                             <div

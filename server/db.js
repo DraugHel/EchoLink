@@ -41,7 +41,9 @@ db.exec(`
     role TEXT NOT NULL CHECK(role IN ('user', 'assistant')),
     content TEXT NOT NULL,
     created_at INTEGER DEFAULT (unixepoch()),
-    FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
+    source_task_id INTEGER,
+    FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE,
+    FOREIGN KEY (source_task_id) REFERENCES scheduled_tasks(id) ON DELETE SET NULL
   );
 
   -- SQLite indiziert FKs nicht automatisch; wichtig fuer History-Queries + Cascade-Deletes
@@ -66,6 +68,7 @@ db.exec(`
       CHECK(schedule_kind IN ('once', 'interval', 'cron')),
     schedule_value TEXT NOT NULL,
     timezone TEXT NOT NULL DEFAULT 'Europe/Vienna',
+    retention_days INTEGER,
     enabled INTEGER NOT NULL DEFAULT 1,
     next_run_at INTEGER,
     last_run_at INTEGER,
@@ -249,6 +252,13 @@ try { db.exec(`ALTER TABLE messages ADD COLUMN images TEXT DEFAULT ''`) } catch 
 try { db.exec(`ALTER TABLE messages ADD COLUMN usage TEXT DEFAULT ''`) } catch {}
 try { db.exec(`ALTER TABLE messages ADD COLUMN think TEXT DEFAULT ''`) } catch {}
 try { db.exec(`ALTER TABLE conversations ADD COLUMN reasoning_effort TEXT DEFAULT ''`) } catch {}
+try { db.exec(`ALTER TABLE messages ADD COLUMN source_task_id INTEGER`) } catch {}
+try { db.exec(`ALTER TABLE scheduled_tasks ADD COLUMN retention_days INTEGER`) } catch {}
+
+db.exec(`
+  CREATE INDEX IF NOT EXISTS idx_messages_source_task_created
+    ON messages(source_task_id, created_at);
+`)
 
 
 // Bestehendes Markdown-Memory einmalig als Legacy-Eintrag übernehmen.
