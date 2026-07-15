@@ -137,8 +137,6 @@ export default function Chat({ user, onLogout }) {
   }, [activeConvo?.id])
   const [mobileSidebar, setMobileSidebar] = useState(false)
   const [availableModels, setAvailableModels] = useState([])
-  const [agentMode, setAgentMode] = useState(false)
-  const [agentEnabled, setAgentEnabled] = useState(false)
   const [attachments, setAttachments] = useState([])  // array of {filename, originalName, size, kind}
   const [uploading, setUploading] = useState(false)
   const [editingId, setEditingId] = useState(null)
@@ -174,7 +172,6 @@ export default function Chat({ user, onLogout }) {
   }, [mobileSidebar])
 
   useEffect(() => {
-    api.get("/api/hermes/access").then(d => setAgentEnabled(d.enabled)).catch(() => {})
     loadConversations().then(convos => {
       if (convos && convos.length > 0) selectConvo(convos[0])
     })
@@ -319,7 +316,7 @@ export default function Chat({ user, onLogout }) {
   }
 
   async function createConvo() {
-    if (activeConvo && !agentMode) {
+    if (activeConvo) {
       try { await api.post(`/api/memory/update/${activeConvo.id}`, {}) } catch {}
     }
     const convo = await api.post('/api/conversations', {})
@@ -378,7 +375,7 @@ export default function Chat({ user, onLogout }) {
     abortControllerRef.current = new AbortController()
 
     // SSE stream with auto-reconnect (max 3 retries, exponential backoff)
-    const endpoint = agentMode ? `/api/hermes/${activeConvo.id}` : `/api/chat/${activeConvo.id}`
+    const endpoint = `/api/chat/${activeConvo.id}`
     const maxRetries = 3
     let retryCount = 0
 
@@ -565,10 +562,7 @@ export default function Chat({ user, onLogout }) {
 
   async function handleActionApprove(actionId, actionRequest) {
     try {
-      // source: 'chat' = Non-Agent terminal, otherwise Hermes
-      const endpoint = actionRequest?.source === 'chat'
-        ? '/api/chat/action/' + actionId + '/approve'
-        : '/api/hermes/run/' + actionId + '/approve'
+      const endpoint = '/api/chat/action/' + actionId + '/approve'
       await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' }
@@ -593,9 +587,7 @@ export default function Chat({ user, onLogout }) {
 
   async function handleActionDeny(actionId, actionRequest) {
     try {
-      const endpoint = actionRequest?.source === 'chat'
-        ? '/api/chat/action/' + actionId + '/deny'
-        : '/api/hermes/run/' + actionId + '/deny'
+      const endpoint = '/api/chat/action/' + actionId + '/deny'
       await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' }
@@ -768,23 +760,6 @@ export default function Chat({ user, onLogout }) {
               </div>
             </>
           )}
-          {agentEnabled && (
-            <button
-              style={{
-                display: "inline-flex", alignItems: "center", gap: 4,
-                padding: mobile ? "6px" : "6px 10px", borderRadius: 8,
-                border: "1px solid " + (agentMode ? "var(--accent)" : "var(--border)"),
-                background: agentMode ? "var(--accent)" : "transparent",
-                color: agentMode ? "var(--user-text, #0d0d0d)" : "var(--text2)",
-                fontSize: 12, fontWeight: 600, cursor: "pointer",
-                fontFamily: "var(--font-mono)", transition: "all var(--transition)"
-              }}
-              onClick={() => setAgentMode(m => !m)}
-              title={agentMode ? "Agent mode ON" : "Agent mode OFF"}
-            >
-              <BoltIcon /> {mobile ? null : 'Agent'}
-            </button>
-          )}
           <button
             type="button"
             onClick={() => {
@@ -802,7 +777,7 @@ export default function Chat({ user, onLogout }) {
           >
             <ClockIcon />
           </button>
-          {activeConvo && !agentMode && (
+          {activeConvo && (
             <button
               type="button"
               onClick={() => {
@@ -963,7 +938,7 @@ export default function Chat({ user, onLogout }) {
         />
       )}
 
-      {showMemory && activeConvo && !agentMode && (
+      {showMemory && activeConvo && (
         <MemoryPanel
           conversationId={activeConvo.id}
           streaming={streaming}
@@ -982,11 +957,6 @@ export default function Chat({ user, onLogout }) {
   )
 }
 
-const BoltIcon = () => (
-  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style={{ marginRight: 4, verticalAlign: -2 }}>
-    <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
-  </svg>
-)
 const MenuIcon = () => (
   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
     <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>
