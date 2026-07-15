@@ -75,6 +75,7 @@ export default function Chat({ user, onLogout }) {
   const [streaming, setStreaming] = useState(false)
   const [sysStatus, setSysStatus] = useState(null)
   const [showSysPanel, setShowSysPanel] = useState(false)
+  const [monitoredApps, setMonitoredApps] = useState(() => { try { const saved = localStorage.getItem('echolink.monitoredApps'); return saved ? JSON.parse(saved) : ['echolink', 'echolink-worker'] } catch { return ['echolink', 'echolink-worker'] } })
   const [showSettings, setShowSettings] = useState(false)
   const [showMemory, setShowMemory] = useState(false)
   const [showTasks, setShowTasks] = useState(false)
@@ -216,6 +217,14 @@ export default function Chat({ user, onLogout }) {
     const iv = setInterval(load, 30000)
     return () => { alive = false; clearInterval(iv) }
   }, [])
+
+  function toggleMonitoredApp(name) {
+    setMonitoredApps(current => {
+      const next = current.includes(name) ? current.filter(item => item !== name) : [...current, name]
+      localStorage.setItem('echolink.monitoredApps', JSON.stringify(next))
+      return next
+    })
+  }
 
   async function loadConversations() {
     const convos = await api.get('/api/conversations')
@@ -725,9 +734,9 @@ export default function Chat({ user, onLogout }) {
           {sysStatus && (
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginRight: 4, cursor: 'pointer' }}
               onClick={() => setShowSysPanel(v => !v)}>
-              <CorsnFace mood={sysStatus.apps.some(a => a.status !== 'online') ? 'panic' : (streaming ? 'focus' : 'ok')} />
+              <CorsnFace mood={sysStatus.apps.filter(a => monitoredApps.includes(a.name)).some(a => a.status !== 'online') ? 'panic' : (streaming ? 'focus' : 'ok')} />
               <div style={{ display: 'flex', gap: 3 }}>
-                {sysStatus.apps.map(a => (
+                {sysStatus.apps.filter(a => monitoredApps.includes(a.name)).map(a => (
                   <span key={a.name} style={{ width: 6, height: 6, borderRadius: '50%',
                     background: a.status === 'online' ? 'var(--accent)' : 'var(--danger)' }} />
                 ))}
@@ -746,9 +755,10 @@ export default function Chat({ user, onLogout }) {
                 padding: '10px 14px', minWidth: 210, fontFamily: 'var(--font-mono)', fontSize: 12,
                 boxShadow: '0 8px 24px rgba(0,0,0,0.45)'
               }}>
+                <div style={{ color: 'var(--text3)', paddingBottom: 6 }}>Tippen = Smiley-Ueberwachung</div>
                 {sysStatus.apps.map(a => (
-                  <div key={a.name} style={{ display: 'flex', justifyContent: 'space-between', gap: 12, padding: '3px 0' }}>
-                    <span style={{ color: a.status === 'online' ? 'var(--text1)' : 'var(--danger)' }}>{a.name}</span>
+                  <div key={a.name} onClick={() => toggleMonitoredApp(a.name)} style={{ display: 'flex', justifyContent: 'space-between', gap: 12, padding: '5px 0', cursor: 'pointer', opacity: monitoredApps.includes(a.name) ? 1 : 0.45 }}>
+                    <span style={{ color: a.status === 'online' ? 'var(--text1)' : 'var(--danger)' }}>{monitoredApps.includes(a.name) ? '☑ ' : '☐ '}{a.name}</span>
                     <span style={{ color: 'var(--text3)' }}>{a.status} · {a.restarts}x</span>
                   </div>
                 ))}
