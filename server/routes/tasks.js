@@ -27,7 +27,13 @@ function taskToJson(task) {
     nextRunAt: task.next_run_at,
     lastRunAt: task.last_run_at,
     createdAt: task.created_at,
-    updatedAt: task.updated_at
+    updatedAt: task.updated_at,
+    lastRunStatus: task.last_run_status || null,
+    lastRunError: task.last_run_error || null,
+    lastRunStartedAt:
+      task.last_run_started_at || null,
+    lastRunFinishedAt:
+      task.last_run_finished_at || null
   }
 }
 
@@ -71,12 +77,52 @@ function readText(value, name, maxLength) {
   return result
 }
 
+function readTaskType(value, fallback = 'reminder') {
+  const taskType = value === undefined
+    ? fallback
+    : String(value).trim()
+
+  if (!['reminder', 'agent'].includes(taskType)) {
+    throw new Error(
+      'taskType muss reminder oder agent sein'
+    )
+  }
+
+  return taskType
+}
+
+function readEnabled(value, fallback) {
+  if (value === undefined) return fallback
+
+  if (typeof value !== 'boolean') {
+    throw new Error('enabled muss true oder false sein')
+  }
+
+  return value
+}
+
 router.get('/', requireAuth, (req, res) => {
   const tasks = db.prepare(`
-    SELECT *
-    FROM scheduled_tasks
-    WHERE user_id = ?
-    ORDER BY enabled DESC, next_run_at ASC, id DESC
+    SELECT
+      task.*,
+      latest.status AS last_run_status,
+      latest.error AS last_run_error,
+      latest.started_at AS last_run_started_at,
+      latest.finished_at AS last_run_finished_at
+    FROM scheduled_tasks AS task
+    LEFT JOIN task_runs AS latest
+      ON latest.id = (
+        SELECT run.id
+        FROM task_runs AS run
+        WHERE run.task_id = task.id
+        ORDER BY run.id DESC
+        LIMIT 1
+      )
+    WHERE task.user_id = ?
+    ORDER BY
+      task.enabled DESC,
+      task.next_run_at ASC,
+      task.id DESC
   `).all(req.session.userId)
 
   res.json(tasks.map(taskToJson))
@@ -125,6 +171,10 @@ router.post('/', requireAuth, (req, res) => {
       LIMITS.prompt
     )
 
+    const taskType = readTaskType(
+      req.body?.taskType ?? req.body?.type
+    )
+
     const conversationId = Number(
       req.body?.conversationId
     )
@@ -147,6 +197,11 @@ router.post('/', requireAuth, (req, res) => {
         req.body?.timezone || DEFAULT_TASK_TIMEZONE
     })
 
+    const enabled = readEnabled(
+      req.body?.enabled,
+      true
+    )
+
     const result = db.prepare(`
       INSERT INTO scheduled_tasks (
         user_id,
@@ -160,16 +215,18 @@ router.post('/', requireAuth, (req, res) => {
         enabled,
         next_run_at
       )
-      VALUES (?, ?, 'reminder', ?, ?, ?, ?, ?, 1, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       req.session.userId,
       conversationId,
+      taskType,
       title,
       prompt,
       schedule.scheduleKind,
       schedule.scheduleValue,
       schedule.timezone,
-      schedule.nextRunAt
+      enabled ? 1 : 0,
+      enabled ? schedule.nextRunAt : null
     )
 
     const task = getOwnedTask(
@@ -215,6 +272,11 @@ router.patch('/:id', requireAuth, (req, res) => {
           LIMITS.prompt
         )
 
+    const taskType = readTaskType(
+      req.body?.taskType ?? req.body?.type,
+      existing.task_type
+    )
+
     const conversationId =
       req.body?.conversationId === undefined
         ? existing.conversation_id
@@ -237,9 +299,10 @@ router.patch('/:id', requireAuth, (req, res) => {
       'timezone'
     ].some(key => req.body?.[key] !== undefined)
 
-    const enabled = req.body?.enabled === undefined
-      ? Boolean(existing.enabled)
-      : Boolean(req.body.enabled)
+    const enabled = readEnabled(
+      req.body?.enabled,
+      Boolean(existing.enabled)
+    )
 
     let scheduleKind = existing.schedule_kind
     let scheduleValue = existing.schedule_value
@@ -276,6 +339,7 @@ router.patch('/:id', requireAuth, (req, res) => {
       UPDATE scheduled_tasks
       SET
         conversation_id = ?,
+        task_type = ?,
         title = ?,
         prompt = ?,
         schedule_kind = ?,
@@ -288,6 +352,7 @@ router.patch('/:id', requireAuth, (req, res) => {
       WHERE id = ? AND user_id = ?
     `).run(
       conversationId,
+      taskType,
       title,
       prompt,
       scheduleKind,

@@ -4,6 +4,7 @@ import Message from '../components/Message.jsx'
 import MessageInput from '../components/MessageInput.jsx'
 import SettingsPanel from '../components/SettingsPanel.jsx'
 import MemoryPanel from '../components/MemoryPanel.jsx'
+import TaskPanel from '../components/TaskPanel.jsx'
 import PushButton from '../components/PushButton.jsx'
 import api from '../lib/api.js'
 import ThemePicker, { useTheme } from '../components/ThemePicker.jsx'
@@ -76,6 +77,7 @@ export default function Chat({ user, onLogout }) {
   const [showSysPanel, setShowSysPanel] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
   const [showMemory, setShowMemory] = useState(false)
+  const [showTasks, setShowTasks] = useState(false)
 
   useEffect(() => {
     if (!('serviceWorker' in navigator)) return
@@ -783,10 +785,30 @@ export default function Chat({ user, onLogout }) {
               <BoltIcon /> Agent
             </button>
           )}
+          <button
+            type="button"
+            onClick={() => {
+              setShowTasks(true)
+              setShowMemory(false)
+            }}
+            title="Geplante Aufgaben anzeigen"
+            aria-label="Geplante Aufgaben anzeigen"
+            style={{
+              ...styles.settingsBtn,
+              color: showTasks
+                ? 'var(--accent)'
+                : 'var(--text2)'
+            }}
+          >
+            <ClockIcon />
+          </button>
           {activeConvo && !agentMode && (
             <button
               type="button"
-              onClick={() => setShowMemory(true)}
+              onClick={() => {
+                setShowMemory(true)
+                setShowTasks(false)
+              }}
               title="Memory anzeigen"
               aria-label="Memory anzeigen"
               style={{
@@ -932,6 +954,13 @@ export default function Chat({ user, onLogout }) {
         )}
       </main>
 
+      {showTasks && (
+        <TaskPanel
+          conversationId={activeConvo?.id || null}
+          onClose={() => setShowTasks(false)}
+        />
+      )}
+
       {showMemory && activeConvo && !agentMode && (
         <MemoryPanel
           conversationId={activeConvo.id}
@@ -961,6 +990,23 @@ const MenuIcon = () => (
     <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>
   </svg>
 )
+const ClockIcon = () => (
+  <svg
+    width="20"
+    height="20"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.8"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+  >
+    <circle cx="12" cy="12" r="8.5" />
+    <path d="M12 7.5v5l3.5 2" />
+    <path d="M7 3.8 4.5 6.3M17 3.8l2.5 2.5" />
+  </svg>
+)
+
 const BrainIcon = () => (
   <svg
     width="20"
