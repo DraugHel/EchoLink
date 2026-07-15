@@ -723,7 +723,7 @@ export default function Chat({ user, onLogout }) {
       )}
 
       <main style={styles.main}>
-        <div style={styles.topbar}>
+        <div style={{ ...styles.topbar, ...(mobile ? { gap: 6, padding: '0 8px' } : {}) }}>
           <button style={styles.menuBtn} onClick={() => setMobileSidebar(v => !v)}>
             <MenuIcon />
           </button>
@@ -772,7 +772,7 @@ export default function Chat({ user, onLogout }) {
             <button
               style={{
                 display: "inline-flex", alignItems: "center", gap: 4,
-                padding: "6px 10px", borderRadius: 8,
+                padding: mobile ? "6px" : "6px 10px", borderRadius: 8,
                 border: "1px solid " + (agentMode ? "var(--accent)" : "var(--border)"),
                 background: agentMode ? "var(--accent)" : "transparent",
                 color: agentMode ? "var(--user-text, #0d0d0d)" : "var(--text2)",
@@ -782,7 +782,7 @@ export default function Chat({ user, onLogout }) {
               onClick={() => setAgentMode(m => !m)}
               title={agentMode ? "Agent mode ON" : "Agent mode OFF"}
             >
-              <BoltIcon /> Agent
+              <BoltIcon /> {mobile ? null : 'Agent'}
             </button>
           )}
           <button
@@ -1043,7 +1043,7 @@ const styles = {
   },
   menuBtn: { color: 'var(--text2)', display: 'flex', alignItems: 'center', flexShrink: 0 },
   convoTitle: {
-    flex: 1, fontSize: 14, fontWeight: 500,
+    flex: 1, minWidth: 0, fontSize: 14, fontWeight: 500,
     overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
     fontFamily: 'var(--font-mono)'
   },
