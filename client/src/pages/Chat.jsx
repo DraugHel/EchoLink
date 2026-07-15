@@ -724,11 +724,11 @@ export default function Chat({ user, onLogout }) {
       )}
 
       <main style={styles.main}>
-        <div style={{ ...styles.topbar, ...(mobile ? { gap: 6, padding: '0 8px' } : {}) }}>
+        <div style={{ ...styles.topbar, ...(mobile ? { gap: 0, padding: '0 12px', justifyContent: 'space-between' } : {}) }}>
           <button style={styles.menuBtn} onClick={() => setMobileSidebar(v => !v)}>
             <MenuIcon />
           </button>
-          <span style={styles.convoTitle}>
+          <span style={{ ...styles.convoTitle, ...(mobile ? { flex: '0 1 auto', maxWidth: 72 } : {}) }}>
             {activeConvo ? activeConvo.title : 'EchoLink'}
           </span>
           {sysStatus && (
