@@ -502,6 +502,7 @@ function TaskEditor({
               value={String(conversation.id)}
             >
               {conversation.title}
+              {conversation.archived_at ? ' (archiviert)' : ''}
             </option>
           ))}
         </select>

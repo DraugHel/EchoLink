@@ -32,6 +32,7 @@ db.exec(`
     top_p REAL DEFAULT 0.9,
     created_at INTEGER DEFAULT (unixepoch()),
     updated_at INTEGER DEFAULT (unixepoch()),
+    archived_at INTEGER,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
   );
 
@@ -252,6 +253,7 @@ try { db.exec(`ALTER TABLE messages ADD COLUMN images TEXT DEFAULT ''`) } catch 
 try { db.exec(`ALTER TABLE messages ADD COLUMN usage TEXT DEFAULT ''`) } catch {}
 try { db.exec(`ALTER TABLE messages ADD COLUMN think TEXT DEFAULT ''`) } catch {}
 try { db.exec(`ALTER TABLE conversations ADD COLUMN reasoning_effort TEXT DEFAULT ''`) } catch {}
+try { db.exec(`ALTER TABLE conversations ADD COLUMN archived_at INTEGER`) } catch {}
 try { db.exec(`ALTER TABLE messages ADD COLUMN source_task_id INTEGER`) } catch {}
 try { db.exec(`ALTER TABLE scheduled_tasks ADD COLUMN retention_days INTEGER`) } catch {}
 

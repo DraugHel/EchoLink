@@ -95,7 +95,7 @@ export default function Chat({ user, onLogout }) {
           : Number(rawConversationId)
 
       try {
-        const convos = await api.get('/api/conversations')
+        const convos = await api.get('/api/conversations?includeArchived=1')
 
         if (Array.isArray(convos)) {
           setConversations(convos)
@@ -173,7 +173,11 @@ export default function Chat({ user, onLogout }) {
 
   useEffect(() => {
     loadConversations().then(convos => {
-      if (convos && convos.length > 0) selectConvo(convos[0])
+      const firstActive = Array.isArray(convos)
+        ? convos.find(conversation => !conversation.archived_at)
+        : null
+
+      if (firstActive) selectConvo(firstActive)
     })
     api.get('/api/chat/models/list')
       .then(m => setAvailableModels(m.map(x => x.name)))
@@ -226,7 +230,7 @@ export default function Chat({ user, onLogout }) {
   }
 
   async function loadConversations() {
-    const convos = await api.get('/api/conversations')
+    const convos = await api.get('/api/conversations?includeArchived=1')
     setConversations(convos)
     return convos
   }
@@ -257,7 +261,7 @@ export default function Chat({ user, onLogout }) {
         setMessages(msgs)
 
         const convos = await api.get(
-          `/api/conversations?refresh=${Date.now()}`
+          `/api/conversations?includeArchived=1&refresh=${Date.now()}`
         )
 
         if (Array.isArray(convos)) {
@@ -342,6 +346,38 @@ export default function Chat({ user, onLogout }) {
     const updated = await api.patch(`/api/conversations/${id}`, { title })
     setConversations(prev => prev.map(c => c.id === id ? updated : c))
     if (activeConvo?.id === id) setActiveConvo(updated)
+  }
+
+  async function archiveConvo(id) {
+    await api.post(`/api/conversations/${id}/archive`, {})
+    const convos = await loadConversations()
+
+    if (activeConvo?.id === id) {
+      const next = convos.find(
+        conversation =>
+          !conversation.archived_at &&
+          conversation.id !== id
+      )
+
+      if (next) {
+        await selectConvo(next)
+      } else {
+        setActiveConvo(null)
+        setMessages([])
+      }
+    }
+  }
+
+  async function restoreConvo(id) {
+    await api.post(`/api/conversations/${id}/restore`, {})
+    const convos = await loadConversations()
+
+    if (activeConvo?.id === id) {
+      const restored = convos.find(
+        conversation => conversation.id === id
+      )
+      if (restored) setActiveConvo(restored)
+    }
   }
 
   function updateConvo(updated) {
@@ -714,6 +750,8 @@ export default function Chat({ user, onLogout }) {
           onCreate={createConvo}
           onDelete={deleteConvo}
           onRename={renameConvo}
+          onArchive={archiveConvo}
+          onRestore={restoreConvo}
           user={user}
           onLogout={onLogout}
           mobileOpen={mobileSidebar}

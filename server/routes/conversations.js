@@ -5,14 +5,38 @@ import { deleteFilesForConvo, deleteFilesForMessage } from './uploads.js'
 
 const router = Router()
 
-// Get all conversations for current user
+// Get conversations for current user.
+// Archived conversations are hidden unless explicitly requested.
 router.get('/', requireAuth, (req, res) => {
+  const includeArchived = ['1', 'true', 'all'].includes(
+    String(req.query?.includeArchived || '').toLowerCase()
+  )
+
+  const archivedFilter = includeArchived
+    ? ''
+    : 'AND archived_at IS NULL'
+
   const convos = db.prepare(`
-    SELECT id, title, model, system_prompt, temperature, top_k, top_p, reasoning_effort, created_at, updated_at
+    SELECT
+      id,
+      title,
+      model,
+      system_prompt,
+      temperature,
+      top_k,
+      top_p,
+      reasoning_effort,
+      archived_at,
+      created_at,
+      updated_at
     FROM conversations
     WHERE user_id = ?
-    ORDER BY updated_at DESC
+      ${archivedFilter}
+    ORDER BY
+      CASE WHEN archived_at IS NULL THEN 0 ELSE 1 END,
+      updated_at DESC
   `).all(req.session.userId)
+
   res.json(convos)
 })
 
@@ -66,6 +90,52 @@ router.patch('/:id', requireAuth, (req, res) => {
     convo.id
   )
   res.json(db.prepare('SELECT * FROM conversations WHERE id = ?').get(convo.id))
+})
+
+// Archive conversation without deleting messages or task references
+router.post('/:id/archive', requireAuth, (req, res) => {
+  const convo = db.prepare(
+    'SELECT id FROM conversations WHERE id = ? AND user_id = ?'
+  ).get(req.params.id, req.session.userId)
+
+  if (!convo) {
+    return res.status(404).json({ error: 'Not found' })
+  }
+
+  db.prepare(`
+    UPDATE conversations
+    SET archived_at = unixepoch(), updated_at = unixepoch()
+    WHERE id = ? AND user_id = ?
+  `).run(req.params.id, req.session.userId)
+
+  res.json(
+    db.prepare(
+      'SELECT * FROM conversations WHERE id = ? AND user_id = ?'
+    ).get(req.params.id, req.session.userId)
+  )
+})
+
+// Restore an archived conversation
+router.post('/:id/restore', requireAuth, (req, res) => {
+  const convo = db.prepare(
+    'SELECT id FROM conversations WHERE id = ? AND user_id = ?'
+  ).get(req.params.id, req.session.userId)
+
+  if (!convo) {
+    return res.status(404).json({ error: 'Not found' })
+  }
+
+  db.prepare(`
+    UPDATE conversations
+    SET archived_at = NULL, updated_at = unixepoch()
+    WHERE id = ? AND user_id = ?
+  `).run(req.params.id, req.session.userId)
+
+  res.json(
+    db.prepare(
+      'SELECT * FROM conversations WHERE id = ? AND user_id = ?'
+    ).get(req.params.id, req.session.userId)
+  )
 })
 
 // Delete conversation

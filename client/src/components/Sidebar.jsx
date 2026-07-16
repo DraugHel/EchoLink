@@ -1,11 +1,24 @@
 import { useState } from 'react'
 import api from '../lib/api.js'
 
-export default function Sidebar({ conversations, activeId, onSelect, onCreate, onDelete, onRename, user, onLogout, mobileOpen, onMobileClose, mobile }) {
+export default function Sidebar({ conversations, activeId, onSelect, onCreate, onDelete, onRename, onArchive, onRestore, user, onLogout, mobileOpen, onMobileClose, mobile }) {
   const [editingId, setEditingId] = useState(null)
   const [editTitle, setEditTitle] = useState('')
   const [hoverId, setHoverId] = useState(null)
   const [creating, setCreating] = useState(false)
+  const [search, setSearch] = useState('')
+  const [view, setView] = useState('active')
+
+  const normalizedSearch = search.trim().toLocaleLowerCase('de')
+  const activeCount = conversations.filter(c => !c.archived_at).length
+  const archivedCount = conversations.filter(c => Boolean(c.archived_at)).length
+  const visibleConversations = conversations.filter(c => {
+    const archived = Boolean(c.archived_at)
+    if (view === 'active' && archived) return false
+    if (view === 'archived' && !archived) return false
+    return !normalizedSearch ||
+      String(c.title || '').toLocaleLowerCase('de').includes(normalizedSearch)
+  })
 
   function startEdit(e, c) {
     e.stopPropagation()
@@ -77,12 +90,38 @@ export default function Sidebar({ conversations, activeId, onSelect, onCreate, o
           </button>
         </div>
 
+        <div style={styles.controls}>
+          <input
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Unterhaltungen suchen"
+            aria-label="Unterhaltungen suchen"
+            style={styles.search}
+          />
+          <div style={styles.tabs}>
+            <button
+              type="button"
+              onClick={() => setView('active')}
+              style={{ ...styles.tab, ...(view === 'active' ? styles.tabActive : {}) }}
+            >
+              Aktiv {activeCount}
+            </button>
+            <button
+              type="button"
+              onClick={() => setView('archived')}
+              style={{ ...styles.tab, ...(view === 'archived' ? styles.tabActive : {}) }}
+            >
+              Archiv {archivedCount}
+            </button>
+          </div>
+        </div>
+
         {/* Conversations */}
         <div style={styles.list}>
-          {conversations.length === 0 && (
+          {visibleConversations.length === 0 && (
             <p style={styles.empty}>No conversations yet.<br/>Click + to start one.</p>
           )}
-          {conversations.map(c => (
+          {visibleConversations.map(c => (
             <div
               key={c.id}
               style={{
@@ -107,11 +146,22 @@ export default function Sidebar({ conversations, activeId, onSelect, onCreate, o
               ) : (
                 <>
                   <span style={styles.itemTitle}>{c.title}</span>
-                  <div style={{ ...styles.itemActions, opacity: hoverId === c.id || c.id === activeId ? 1 : 0 }}>
-                    <button style={styles.iconBtn} onClick={e => startEdit(e, c)} title="Rename">
-                      <PencilIcon />
-                    </button>
-                    <button style={{ ...styles.iconBtn, color: 'var(--danger)' }} onClick={e => { e.stopPropagation(); onDelete(c.id) }} title="Delete">
+                  <div style={{ ...styles.itemActions, opacity: mobile || hoverId === c.id || c.id === activeId ? 1 : 0 }}>
+                    {!c.archived_at && (
+                      <button style={styles.iconBtn} onClick={e => startEdit(e, c)} title="Umbenennen">
+                        <PencilIcon />
+                      </button>
+                    )}
+                    {c.archived_at ? (
+                      <button style={{ ...styles.iconBtn, color: 'var(--green)' }} onClick={e => { e.stopPropagation(); onRestore(c.id) }} title="Wiederherstellen">
+                        <RestoreIcon />
+                      </button>
+                    ) : (
+                      <button style={styles.iconBtn} onClick={e => { e.stopPropagation(); onArchive(c.id) }} title="Archivieren">
+                        <ArchiveIcon />
+                      </button>
+                    )}
+                    <button style={{ ...styles.iconBtn, color: 'var(--danger)' }} onClick={e => { e.stopPropagation(); onDelete(c.id) }} title="Endgültig löschen">
                       <TrashIcon />
                     </button>
                   </div>
@@ -144,6 +194,16 @@ const PencilIcon = () => (
     <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
   </svg>
 )
+const ArchiveIcon = () => (
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M3 6h18"/><path d="M5 6v14h14V6"/><path d="M9 10h6"/><path d="M4 3h16v3H4z"/>
+  </svg>
+)
+const RestoreIcon = () => (
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v6h6"/>
+  </svg>
+)
 const TrashIcon = () => (
   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
     <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/>
@@ -168,6 +228,22 @@ const styles = {
     display: 'flex', alignItems: 'center', justifyContent: 'center',
     color: 'var(--green)', border: '1px solid var(--border)',
     background: 'var(--bg3)'
+  },
+  controls: { padding: '10px 8px 8px', borderBottom: '1px solid var(--border)' },
+  search: {
+    width: '100%', minWidth: 0, padding: '8px 10px',
+    borderRadius: 8, border: '1px solid var(--border)',
+    background: 'var(--bg3)', color: 'var(--text)', fontSize: 13
+  },
+  tabs: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginTop: 8 },
+  tab: {
+    padding: '7px 8px', borderRadius: 7,
+    border: '1px solid var(--border)', background: 'transparent',
+    color: 'var(--text2)', fontSize: 12
+  },
+  tabActive: {
+    color: 'var(--text)', background: 'var(--green-bg)',
+    borderColor: 'var(--green-dim)'
   },
   list: { flex: 1, overflowY: 'auto', padding: '8px' },
   empty: { color: 'var(--text3)', fontSize: 13, padding: '20px 8px', lineHeight: 1.6 },
