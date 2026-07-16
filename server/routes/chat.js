@@ -855,22 +855,177 @@ Use these as background context. If these memories fully answer the request, ans
     ? `${systemContent}\n\n${calendarToolPolicy}`
     : calendarToolPolicy
 
-  // History with attachments
-  const history = db.prepare(`
+  // Context guard:
+  // - keeps a contiguous suffix of the conversation
+  // - never deletes anything from SQLite
+  // - avoids automatic summaries that could distort details
+  const contextBudgetTokens = Math.max(
+    8000,
+    Number.parseInt(
+      process.env.CHAT_CONTEXT_MAX_INPUT_TOKENS ||
+      '60000',
+      10
+    ) || 60000
+  )
+
+  const contextMinRecentMessages = Math.max(
+    4,
+    Number.parseInt(
+      process.env.CHAT_CONTEXT_MIN_RECENT_MESSAGES ||
+      '12',
+      10
+    ) || 12
+  )
+
+  const contextCharsPerToken = Math.max(
+    2,
+    Number.parseFloat(
+      process.env.CHAT_CONTEXT_CHARS_PER_TOKEN ||
+      '3.2'
+    ) || 3.2
+  )
+
+  const contextImageTokenEstimate = Math.max(
+    500,
+    Number.parseInt(
+      process.env.CHAT_CONTEXT_IMAGE_TOKEN_ESTIMATE ||
+      '1600',
+      10
+    ) || 1600
+  )
+
+  function estimateContextTokens(message) {
+    const textTokens = Math.ceil(
+      String(message?.content || '').length /
+      contextCharsPerToken
+    )
+
+    const imageTokens = Array.isArray(message?.images)
+      ? (
+          message.images.length *
+          contextImageTokenEstimate
+        )
+      : 0
+
+    return textTokens + imageTokens + 8
+  }
+
+  function trimContextMessages(
+    messages,
+    budgetTokens,
+    minRecentMessages
+  ) {
+    const hasSystem =
+      messages[0]?.role === 'system'
+
+    const systemMessages = hasSystem
+      ? [messages[0]]
+      : []
+
+    const historyMessages = hasSystem
+      ? messages.slice(1)
+      : messages
+
+    let estimatedTokens =
+      systemMessages.reduce(
+        (sum, message) =>
+          sum + estimateContextTokens(message),
+        0
+      )
+
+    const selected = []
+    let firstIncludedIndex =
+      historyMessages.length
+
+    for (
+      let index = historyMessages.length - 1;
+      index >= 0;
+      index -= 1
+    ) {
+      const message = historyMessages[index]
+      const messageTokens =
+        estimateContextTokens(message)
+
+      const mustKeep =
+        selected.length < minRecentMessages
+
+      if (
+        !mustKeep &&
+        estimatedTokens + messageTokens >
+          budgetTokens
+      ) {
+        break
+      }
+
+      selected.push(message)
+      estimatedTokens += messageTokens
+      firstIncludedIndex = index
+    }
+
+    selected.reverse()
+
+    return {
+      messages: [
+        ...systemMessages,
+        ...selected
+      ],
+      omittedMessages: firstIncludedIndex,
+      keptHistoryMessages: selected.length,
+      estimatedTokens,
+      overBudget:
+        estimatedTokens > budgetTokens
+    }
+  }
+
+  const fullHistory = db.prepare(`
     SELECT role, content, images FROM messages
     WHERE conversation_id = ?
-      AND NOT (role = 'assistant' AND content LIKE '**Terminal:** %')
+      AND NOT (
+        role = 'assistant' AND
+        content LIKE '**Terminal:** %'
+      )
     ORDER BY id ASC
   `).all(convo.id)
 
-  const ollamaMessages = []
-  const now = new Date().toLocaleString('de-DE', { timeZone: 'Europe/Berlin', dateStyle: 'full', timeStyle: 'short' })
-  const timeNote = `Current date and time: ${now} (CEST). Trust this — do not rely on your training data for the current date.`
+  let ollamaMessages = []
+
+  const now = new Date().toLocaleString(
+    'de-DE',
+    {
+      timeZone: 'Europe/Berlin',
+      dateStyle: 'full',
+      timeStyle: 'short'
+    }
+  )
+
+  const timeNote =
+    `Current date and time: ${now} (CEST). ` +
+    'Trust this — do not rely on your training ' +
+    'data for the current date.'
+
   if (systemContent) {
-    ollamaMessages.push({ role: 'system', content: systemContent + '\n\n' + timeNote })
+    ollamaMessages.push({
+      role: 'system',
+      content:
+        systemContent + '\n\n' + timeNote
+    })
   } else {
-    ollamaMessages.push({ role: 'system', content: timeNote })
+    ollamaMessages.push({
+      role: 'system',
+      content: timeNote
+    })
   }
+
+  const rawContextPlan = trimContextMessages(
+    [
+      ...ollamaMessages,
+      ...fullHistory
+    ],
+    contextBudgetTokens,
+    contextMinRecentMessages
+  )
+
+  const history = rawContextPlan.messages.slice(1)
 
   for (const m of history) {
     const msg = { role: m.role, content: m.content }
@@ -906,6 +1061,52 @@ Use these as background context. If these memories fully answer the request, ans
     }
     ollamaMessages.push(msg)
   }
+
+  const preparedContextPlan = trimContextMessages(
+    ollamaMessages,
+    contextBudgetTokens,
+    contextMinRecentMessages
+  )
+
+  ollamaMessages = preparedContextPlan.messages
+
+  const contextOmittedMessages =
+    rawContextPlan.omittedMessages +
+    preparedContextPlan.omittedMessages
+
+  const contextMeta = {
+    budgetTokens: contextBudgetTokens,
+    estimatedInputTokens:
+      preparedContextPlan.estimatedTokens,
+    keptMessages:
+      preparedContextPlan.keptHistoryMessages,
+    omittedMessages:
+      contextOmittedMessages,
+    overBudget:
+      preparedContextPlan.overBudget
+  }
+
+  if (
+    contextOmittedMessages > 0 &&
+    ollamaMessages[0]?.role === 'system'
+  ) {
+    ollamaMessages[0].content +=
+      '\n\n[Context notice: ' +
+      `${contextOmittedMessages} older ` +
+      'conversation messages were omitted from ' +
+      'this model request to stay within the ' +
+      'configured context budget. The complete ' +
+      'conversation remains stored in EchoLink.]'
+  }
+
+  console.log(
+    '[context-guard]',
+    JSON.stringify({
+      conversationId: convo.id,
+      model: convo.model,
+      ...contextMeta
+    })
+  )
 
   // Auto-route to a vision-capable model if any message has an image attached
   const hasImages = ollamaMessages.some(m => m.images && m.images.length > 0)
@@ -1005,11 +1206,31 @@ Use these as background context. If these memories fully answer the request, ans
           .run(convo.id, 'assistant', cleanResponse, allThinking || '', tokenUsage ? JSON.stringify({
             prompt_tokens: tokenUsage.promptTokens,
             completion_tokens: tokenUsage.completionTokens,
-            total_tokens: tokenUsage.totalTokens
+            total_tokens: tokenUsage.totalTokens,
+            context_budget_tokens:
+              contextMeta.budgetTokens,
+            context_estimated_input_tokens:
+              contextMeta.estimatedInputTokens,
+            context_kept_messages:
+              contextMeta.keptMessages,
+            context_omitted_messages:
+              contextMeta.omittedMessages,
+            context_over_budget:
+              contextMeta.overBudget
           }) : '')
         db.prepare('UPDATE conversations SET updated_at = unixepoch() WHERE id = ?').run(convo.id)
 
-        res.write('data: ' + JSON.stringify({ done: true, ...(tokenUsage ? { tokens: tokenUsage } : {}) }) + '\n\n')
+        res.write(
+          'data: ' +
+          JSON.stringify({
+            done: true,
+            context: contextMeta,
+            ...(tokenUsage
+              ? { tokens: tokenUsage }
+              : {})
+          }) +
+          '\n\n'
+        )
 
         // Auto-update memory periodically (non-blocking)
         updateMemory(
