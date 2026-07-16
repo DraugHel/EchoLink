@@ -384,6 +384,65 @@ db.exec(`
     ON shift_import_items(import_id, work_date);
 `);
 
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS shift_sync_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    import_id INTEGER NOT NULL,
+    time_zone TEXT NOT NULL DEFAULT 'Europe/Vienna',
+    status TEXT NOT NULL DEFAULT 'draft',
+    summary_json TEXT NOT NULL DEFAULT '{}',
+    created_at INTEGER DEFAULT (unixepoch()),
+    applied_at INTEGER,
+    rolled_back_at INTEGER,
+    FOREIGN KEY (user_id)
+      REFERENCES users(id)
+      ON DELETE CASCADE,
+    FOREIGN KEY (import_id)
+      REFERENCES shift_imports(id)
+      ON DELETE CASCADE
+  );
+
+  CREATE INDEX IF NOT EXISTS
+    idx_shift_sync_runs_import
+    ON shift_sync_runs(
+      import_id,
+      id DESC
+    );
+
+  CREATE TABLE IF NOT EXISTS shift_sync_actions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id INTEGER NOT NULL,
+    import_item_id INTEGER,
+    work_date TEXT NOT NULL DEFAULT '',
+    action_type TEXT NOT NULL,
+    selected INTEGER NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'pending',
+    event_id TEXT NOT NULL DEFAULT '',
+    old_event_json TEXT NOT NULL DEFAULT 'null',
+    new_event_json TEXT NOT NULL DEFAULT 'null',
+    message TEXT NOT NULL DEFAULT '',
+    error TEXT NOT NULL DEFAULT '',
+    created_at INTEGER DEFAULT (unixepoch()),
+    updated_at INTEGER DEFAULT (unixepoch()),
+    FOREIGN KEY (run_id)
+      REFERENCES shift_sync_runs(id)
+      ON DELETE CASCADE,
+    FOREIGN KEY (import_item_id)
+      REFERENCES shift_import_items(id)
+      ON DELETE SET NULL
+  );
+
+  CREATE INDEX IF NOT EXISTS
+    idx_shift_sync_actions_run
+    ON shift_sync_actions(
+      run_id,
+      work_date,
+      id
+    );
+`);
+
 // Bestehendes Markdown-Memory einmalig als Legacy-Eintrag übernehmen.
 // Es wird nicht aus users.memory gelöscht.
 try {

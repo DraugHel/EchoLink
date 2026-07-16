@@ -1,87 +1,323 @@
-import { useEffect, useMemo, useState } from 'react'
+import {
+  useEffect,
+  useMemo,
+  useState
+} from 'react'
+
 import api from '../lib/api.js'
 
 const PRESETS = {
-  '1': { startTime: '04:00', endTime: '12:00', title: 'Frühschicht' },
-  '2': { startTime: '12:00', endTime: '20:00', title: 'Spätschicht' },
-  '3': { startTime: '20:00', endTime: '04:00', title: 'Nachtschicht' }
+  '1': {
+    startTime: '04:00',
+    endTime: '12:00',
+    title: 'Frühschicht'
+  },
+  '2': {
+    startTime: '12:00',
+    endTime: '20:00',
+    title: 'Spätschicht'
+  },
+  '3': {
+    startTime: '20:00',
+    endTime: '04:00',
+    title: 'Nachtschicht'
+  }
 }
-const CODES = ['', '1', '2', '3', 'F', 'X', 'P', 'K', 'S', 'N']
+
+const CODES = [
+  '',
+  '1',
+  '2',
+  '3',
+  'F',
+  'X',
+  'P',
+  'K',
+  'S',
+  'N'
+]
+
+const ACTIONABLE = new Set([
+  'create',
+  'update',
+  'delete'
+])
 
 async function responseError(response) {
-  const data = await response.json().catch(() => ({}))
-  return new Error(data?.error || `HTTP ${response.status}`)
+  const data = await response
+    .json()
+    .catch(() => ({}))
+
+  return new Error(
+    data?.error ||
+    `HTTP ${response.status}`
+  )
 }
 
 function confidence(value) {
   const number = Number(value)
-  return Number.isFinite(number) ? `${Math.round(number * 100)} %` : '–'
+
+  return Number.isFinite(number)
+    ? `${Math.round(number * 100)} %`
+    : '–'
 }
 
 function statusText(status) {
   if (status === 'created') return 'Importiert'
-  if (status === 'duplicate') return 'Schon vorhanden'
+  if (status === 'duplicate') return 'Vorhanden'
   if (status === 'error') return 'Fehler'
   return ''
 }
 
-export default function ShiftImporter({ onClose }) {
+function actionLabel(type) {
+  if (type === 'create') return 'Neu'
+  if (type === 'update') return 'Ändern'
+  if (type === 'delete') return 'Entfernt'
+  if (type === 'unchanged') return 'Unverändert'
+  if (type === 'manual_existing') {
+    return 'Manuell vorhanden'
+  }
+  if (type === 'conflict') return 'Konflikt'
+  return type
+}
+
+function actionColor(type) {
+  if (type === 'create') return 'var(--green)'
+  if (type === 'update') return 'var(--accent)'
+  if (type === 'delete') return 'var(--danger)'
+  if (type === 'conflict') return 'var(--danger)'
+  return 'var(--text3)'
+}
+
+function runStatusText(status) {
+  if (status === 'draft') return 'Vorschau'
+  if (status === 'applied') return 'Synchronisiert'
+  if (status === 'partial') {
+    return 'Teilweise synchronisiert'
+  }
+  if (status === 'rolled_back') return 'Rückgängig'
+  if (status === 'rollback_partial') {
+    return 'Teilweise rückgängig'
+  }
+  return status || ''
+}
+
+function formatEvent(event) {
+  if (!event) return '–'
+
+  const timeZone =
+    event.timeZone ||
+    'Europe/Vienna'
+
+  const start = event.start
+    ? new Date(event.start)
+        .toLocaleString(
+          'de-AT',
+          {
+            dateStyle: 'short',
+            timeStyle: 'short',
+            timeZone
+          }
+        )
+    : '–'
+
+  const end = event.end
+    ? new Date(event.end)
+        .toLocaleString(
+          'de-AT',
+          {
+            dateStyle: 'short',
+            timeStyle: 'short',
+            timeZone
+          }
+        )
+    : '–'
+
+  return `${event.title} · ${start}–${end}`
+}
+
+export default function ShiftImporter({
+  onClose
+}) {
   const [file, setFile] = useState(null)
-  const [columnNumber, setColumnNumber] = useState(1)
+  const [columnNumber, setColumnNumber] =
+    useState(1)
   const [draft, setDraft] = useState(null)
   const [items, setItems] = useState([])
+  const [syncRun, setSyncRun] = useState(null)
+  const [actions, setActions] = useState([])
   const [loading, setLoading] = useState(true)
-  const [analyzing, setAnalyzing] = useState(false)
+  const [analyzing, setAnalyzing] =
+    useState(false)
   const [saving, setSaving] = useState(false)
-  const [importing, setImporting] = useState(false)
+  const [comparing, setComparing] =
+    useState(false)
+  const [syncing, setSyncing] = useState(false)
+  const [rollingBack, setRollingBack] =
+    useState(false)
   const [error, setError] = useState('')
   const [summary, setSummary] = useState(null)
 
   useEffect(() => {
     let alive = true
+
     api.get('/api/shift-imports/latest')
-      .then(data => {
+      .then(async data => {
         if (!alive || !data?.import) return
+
         setDraft(data.import)
         setItems(data.items || [])
-        setColumnNumber(data.import.columnNumber || 1)
+        setColumnNumber(
+          data.import.columnNumber || 1
+        )
+
+        try {
+          const sync = await api.get(
+            `/api/shift-sync/imports/${data.import.id}/latest`
+          )
+
+          if (!alive || !sync?.run) return
+
+          setSyncRun(sync.run)
+          setActions(sync.actions || [])
+          setSummary(sync.run.summary || null)
+        } catch {
+          // Kein früherer Vergleich ist normal.
+        }
       })
       .catch(() => {})
-      .finally(() => { if (alive) setLoading(false) })
-    return () => { alive = false }
+      .finally(() => {
+        if (alive) setLoading(false)
+      })
+
+    return () => {
+      alive = false
+    }
   }, [])
 
-  const enabledCount = useMemo(() => items.filter(item => item.enabled).length, [items])
-  const uncertainCount = useMemo(() => items.filter(item => Number(item.confidence) < 0.85).length, [items])
+  const enabledCount = useMemo(
+    () =>
+      items.filter(item => item.enabled)
+        .length,
+    [items]
+  )
+
+  const uncertainCount = useMemo(
+    () =>
+      items.filter(item =>
+        Number(item.confidence) < 0.85
+      ).length,
+    [items]
+  )
+
+  const selectedActionCount = useMemo(
+    () =>
+      actions.filter(
+        action =>
+          ACTIONABLE.has(
+            action.actionType
+          ) &&
+          action.selected
+      ).length,
+    [actions]
+  )
+
+  function clearComparison() {
+    setSyncRun(null)
+    setActions([])
+    setSummary(null)
+  }
 
   function updateItem(id, patch) {
-    setItems(previous => previous.map(item => item.id === id ? { ...item, ...patch } : item))
+    setItems(previous =>
+      previous.map(item =>
+        item.id === id
+          ? {
+              ...item,
+              ...patch
+            }
+          : item
+      )
+    )
+
+    clearComparison()
   }
 
   function changeCode(item, code) {
     const preset = PRESETS[code]
-    updateItem(item.id, preset
-      ? { code, ...preset, enabled: Number(item.confidence) >= 0.85 }
-      : { code, enabled: false })
+
+    updateItem(
+      item.id,
+      preset
+        ? {
+            code,
+            ...preset,
+            enabled:
+              Number(item.confidence) >= 0.85
+          }
+        : {
+            code,
+            enabled: false
+          }
+    )
+  }
+
+  function setActionSelected(id, selected) {
+    setActions(previous =>
+      previous.map(action =>
+        action.id === id
+          ? {
+              ...action,
+              selected
+            }
+          : action
+      )
+    )
   }
 
   async function analyze(event) {
     event.preventDefault()
-    if (!file) return setError('Bitte zuerst ein Foto auswählen.')
+
+    if (!file) {
+      setError(
+        'Bitte zuerst ein Foto auswählen.'
+      )
+      return
+    }
+
     setAnalyzing(true)
     setError('')
-    setSummary(null)
+    clearComparison()
+
     try {
       const body = new FormData()
       body.append('image', file)
-      body.append('columnNumber', String(columnNumber))
-      const response = await fetch('/api/shift-imports/analyze', { method: 'POST', body })
-      if (!response.ok) throw await responseError(response)
+      body.append(
+        'columnNumber',
+        String(columnNumber)
+      )
+
+      const response = await fetch(
+        '/api/shift-imports/analyze',
+        {
+          method: 'POST',
+          body
+        }
+      )
+
+      if (!response.ok) {
+        throw await responseError(response)
+      }
+
       const data = await response.json()
+
       setDraft(data.import)
       setItems(data.items || [])
     } catch (failure) {
-      setError(failure?.message || 'Analyse fehlgeschlagen')
+      setError(
+        failure?.message ||
+        'Analyse fehlgeschlagen'
+      )
     } finally {
       setAnalyzing(false)
     }
@@ -89,37 +325,157 @@ export default function ShiftImporter({ onClose }) {
 
   async function saveItems() {
     if (!draft?.id) return null
+
     setSaving(true)
     setError('')
+
     try {
-      const data = await api.put(`/api/shift-imports/${draft.id}/items`, { items })
+      const data = await api.put(
+        `/api/shift-imports/${draft.id}/items`,
+        { items }
+      )
+
       setDraft(data.import)
       setItems(data.items || [])
       return data
     } catch (failure) {
-      setError(failure?.message || 'Vorschau konnte nicht gespeichert werden')
+      setError(
+        failure?.message ||
+        'Vorschau konnte nicht gespeichert werden'
+      )
       return null
     } finally {
       setSaving(false)
     }
   }
 
-  async function importCalendar() {
-    if (!draft?.id || enabledCount === 0) return setError('Keine importierbaren Schichten ausgewählt.')
-    setImporting(true)
+  async function compareCalendar() {
+    if (
+      !draft?.id ||
+      enabledCount === 0
+    ) {
+      setError(
+        'Keine aktiven Schichten für den Vergleich.'
+      )
+      return
+    }
+
+    setComparing(true)
     setError('')
-    setSummary(null)
+    clearComparison()
+
     try {
       const saved = await saveItems()
       if (!saved) return
-      const data = await api.post(`/api/shift-imports/${draft.id}/import`, { timeZone: 'Europe/Vienna' })
-      setDraft(data.import)
-      setItems(data.items || [])
-      setSummary(data.summary || null)
+
+      const data = await api.post(
+        `/api/shift-sync/imports/${draft.id}/compare`,
+        {
+          timeZone: 'Europe/Vienna'
+        }
+      )
+
+      setSyncRun(data.run)
+      setActions(data.actions || [])
+      setSummary(data.run?.summary || null)
     } catch (failure) {
-      setError(failure?.message || 'Kalenderimport fehlgeschlagen')
+      setError(
+        failure?.message ||
+        'Kalendervergleich fehlgeschlagen'
+      )
     } finally {
-      setImporting(false)
+      setComparing(false)
+    }
+  }
+
+  async function applySync() {
+    if (
+      !syncRun?.id ||
+      selectedActionCount === 0
+    ) {
+      setError(
+        'Keine Kalenderänderungen ausgewählt.'
+      )
+      return
+    }
+
+    setSyncing(true)
+    setError('')
+
+    try {
+      const selectedActionIds = actions
+        .filter(
+          action =>
+            ACTIONABLE.has(
+              action.actionType
+            ) &&
+            action.selected
+        )
+        .map(action => action.id)
+
+      const data = await api.post(
+        `/api/shift-sync/runs/${syncRun.id}/apply`,
+        {
+          selectedActionIds
+        }
+      )
+
+      setSyncRun(data.run)
+      setActions(data.actions || [])
+      setSummary(
+        data.summary ||
+        data.run?.summary ||
+        null
+      )
+
+      const refreshed = await api.get(
+        `/api/shift-imports/${draft.id}`
+      )
+
+      setDraft(refreshed.import)
+      setItems(refreshed.items || [])
+    } catch (failure) {
+      setError(
+        failure?.message ||
+        'Kalendersynchronisation fehlgeschlagen'
+      )
+    } finally {
+      setSyncing(false)
+    }
+  }
+
+  async function rollbackSync() {
+    if (!syncRun?.id) return
+
+    const accepted = window.confirm(
+      'Diesen Lauf wirklich rückgängig machen? Später manuell veränderte Termine werden aus Sicherheitsgründen nicht überschrieben.'
+    )
+
+    if (!accepted) return
+
+    setRollingBack(true)
+    setError('')
+
+    try {
+      const data = await api.post(
+        `/api/shift-sync/runs/${syncRun.id}/rollback`,
+        {}
+      )
+
+      setSyncRun(data.run)
+      setActions(data.actions || [])
+      setSummary(
+        data.summary ||
+        data.run?.summary ||
+        null
+      )
+    } catch (failure) {
+      setError(
+        failure?.message ||
+        'Rückgängig fehlgeschlagen'
+      )
+    } finally {
+      setRollingBack(false)
     }
   }
 
@@ -127,36 +483,67 @@ export default function ShiftImporter({ onClose }) {
     setDraft(null)
     setItems([])
     setFile(null)
-    setSummary(null)
+    clearComparison()
     setError('')
   }
 
+  const runEditable =
+    !syncRun ||
+    syncRun.status === 'draft'
+
   return (
     <>
-      <div style={styles.backdrop} onClick={onClose} />
+      <div
+        style={styles.backdrop}
+        onClick={onClose}
+      />
+
       <section style={styles.panel}>
         <header style={styles.header}>
-          <div>
-            <h2 style={styles.title}>Schichtplan importieren</h2>
-            <p style={styles.subtitle}>Foto prüfen, korrigieren und gesammelt in Google Calendar eintragen.</p>
+          <div style={styles.headerText}>
+            <h2 style={styles.title}>
+              Schichtplan synchronisieren
+            </h2>
+
+            <p style={styles.subtitle}>
+              Foto prüfen, Kalender vergleichen und
+              Änderungen gesammelt anwenden.
+            </p>
           </div>
-          <button type="button" onClick={onClose} style={styles.close} aria-label="Schließen">×</button>
+
+          <button
+            type="button"
+            onClick={onClose}
+            style={styles.close}
+            aria-label="Schließen"
+          >
+            ×
+          </button>
         </header>
 
         <div style={styles.body}>
           {loading ? (
-            <div style={styles.loading}>Letzten Entwurf laden …</div>
+            <div style={styles.loading}>
+              Letzten Entwurf laden …
+            </div>
           ) : !draft ? (
-            <form onSubmit={analyze} style={styles.uploadCard}>
+            <form
+              onSubmit={analyze}
+              style={styles.uploadCard}
+            >
               <label style={styles.label}>
                 Schichtplanfoto
+
                 <span style={styles.filePicker}>
                   <span style={styles.fileButton}>
                     Foto auswählen
                   </span>
+
                   <span style={styles.fileName}>
-                    {file?.name || 'Keine Datei ausgewählt'}
+                    {file?.name ||
+                      'Keine Datei ausgewählt'}
                   </span>
+
                   <input
                     type="file"
                     accept="image/jpeg,image/png,image/webp"
@@ -170,78 +557,341 @@ export default function ShiftImporter({ onClose }) {
                   />
                 </span>
               </label>
+
               <label style={styles.label}>
                 Meine Mitarbeiterspalte
-                <input type="number" min="1" max="100" value={columnNumber} onChange={event => setColumnNumber(Math.max(1, Number(event.target.value) || 1))} style={styles.smallInput} />
+
+                <input
+                  type="number"
+                  min="1"
+                  max="100"
+                  value={columnNumber}
+                  onChange={event =>
+                    setColumnNumber(
+                      Math.max(
+                        1,
+                        Number(
+                          event.target.value
+                        ) || 1
+                      )
+                    )
+                  }
+                  style={styles.smallInput}
+                />
               </label>
-              <div style={styles.hint}>Spalte 1 ist die erste Mitarbeiterspalte direkt rechts von Datum und Tag. Die Analyse schreibt noch nichts in den Kalender.</div>
+
+              <div style={styles.hint}>
+                Spalte 1 ist die erste
+                Mitarbeiterspalte direkt rechts von
+                Datum und Tag. Die Analyse schreibt
+                noch nichts in den Kalender.
+              </div>
+
               <button
                 type="submit"
                 disabled={analyzing || !file}
                 style={{
                   ...styles.primary,
                   width: '100%',
-                  maxWidth: '100%',
-                  boxSizing: 'border-box',
                   opacity:
                     analyzing || !file
                       ? 0.55
                       : 1
                 }}
               >
-                {analyzing ? 'Bild wird analysiert …' : 'Vorschau erstellen'}
+                {analyzing
+                  ? 'Bild wird analysiert …'
+                  : 'Vorschau erstellen'}
               </button>
             </form>
           ) : (
             <>
               <div style={styles.summaryCard}>
-                <div>
-                  <strong>{draft.originalName}</strong>
-                  <div style={styles.muted}>Spalte {draft.columnNumber} · {draft.planStart || '–'} bis {draft.planEnd || '–'} · {draft.model || '–'}</div>
+                <div style={styles.summaryText}>
+                  <strong>
+                    {draft.originalName}
+                  </strong>
+
+                  <div style={styles.muted}>
+                    Spalte {draft.columnNumber}
+                    {' · '}
+                    {draft.planStart || '–'}
+                    {' bis '}
+                    {draft.planEnd || '–'}
+                    {' · '}
+                    {draft.model || '–'}
+                  </div>
                 </div>
-                <button type="button" onClick={startNew} style={styles.secondary}>Neues Foto</button>
+
+                <button
+                  type="button"
+                  onClick={startNew}
+                  style={styles.secondary}
+                >
+                  Neues Foto
+                </button>
               </div>
 
               {draft.warnings?.length > 0 && (
-                <div style={styles.warning}>{draft.warnings.map((text, index) => <div key={index}>{text}</div>)}</div>
+                <div style={styles.warning}>
+                  {draft.warnings.map(
+                    (text, index) => (
+                      <div key={index}>
+                        {text}
+                      </div>
+                    )
+                  )}
+                </div>
               )}
 
               <div style={styles.stats}>
-                <span>{items.length} Datumszeilen</span>
-                <span>{enabledCount} ausgewählt</span>
-                <span>{uncertainCount} unsicher</span>
+                <span>
+                  {items.length} Datumszeilen
+                </span>
+                <span>
+                  {enabledCount} aktiv
+                </span>
+                <span>
+                  {uncertainCount} unsicher
+                </span>
               </div>
 
               <div style={styles.tableWrap}>
                 <table style={styles.table}>
                   <thead>
                     <tr>
-                      {['Import', 'Datum', 'Code', 'Beginn', 'Ende', 'Titel', 'Sicherheit', 'Hinweis', 'Status'].map(label => <th key={label} style={styles.th}>{label}</th>)}
+                      {[
+                        'Aktiv',
+                        'Datum',
+                        'Code',
+                        'Beginn',
+                        'Ende',
+                        'Titel',
+                        'Sicherheit',
+                        'Hinweis',
+                        'Status'
+                      ].map(label => (
+                        <th
+                          key={label}
+                          style={styles.th}
+                        >
+                          {label}
+                        </th>
+                      ))}
                     </tr>
                   </thead>
+
                   <tbody>
                     {items.map(item => {
-                      const supported = Boolean(PRESETS[item.code])
-                      const uncertain = Number(item.confidence) < 0.85
-                      const locked = item.importStatus === 'created' || item.importStatus === 'duplicate'
+                      const supported =
+                        Boolean(
+                          PRESETS[item.code]
+                        )
+
+                      const uncertain =
+                        Number(item.confidence) <
+                        0.85
+
                       return (
-                        <tr key={item.id} style={uncertain ? styles.uncertain : undefined}>
-                          <td style={styles.td}><input type="checkbox" checked={item.enabled} disabled={!supported || locked} onChange={event => updateItem(item.id, { enabled: event.target.checked })} /></td>
-                          <td style={styles.td}><input type="date" value={item.workDate} onChange={event => updateItem(item.id, { workDate: event.target.value })} style={styles.input} /></td>
+                        <tr
+                          key={item.id}
+                          style={
+                            uncertain
+                              ? styles.uncertain
+                              : undefined
+                          }
+                        >
                           <td style={styles.td}>
-                            <select value={item.code} onChange={event => changeCode(item, event.target.value)} style={styles.input}>
-                              {!CODES.includes(item.code) && <option value={item.code}>{item.code}</option>}
-                              {CODES.map(code => <option key={code || 'empty'} value={code}>{code || '–'}</option>)}
+                            <input
+                              type="checkbox"
+                              checked={item.enabled}
+                              disabled={!supported}
+                              onChange={event =>
+                                updateItem(
+                                  item.id,
+                                  {
+                                    enabled:
+                                      event.target
+                                        .checked
+                                  }
+                                )
+                              }
+                            />
+                          </td>
+
+                          <td style={styles.td}>
+                            <input
+                              type="date"
+                              value={item.workDate}
+                              onChange={event =>
+                                updateItem(
+                                  item.id,
+                                  {
+                                    workDate:
+                                      event.target
+                                        .value
+                                  }
+                                )
+                              }
+                              style={styles.input}
+                            />
+                          </td>
+
+                          <td style={styles.td}>
+                            <select
+                              value={item.code}
+                              onChange={event =>
+                                changeCode(
+                                  item,
+                                  event.target.value
+                                )
+                              }
+                              style={styles.input}
+                            >
+                              {!CODES.includes(
+                                item.code
+                              ) && (
+                                <option
+                                  value={item.code}
+                                >
+                                  {item.code}
+                                </option>
+                              )}
+
+                              {CODES.map(code => (
+                                <option
+                                  key={
+                                    code || 'empty'
+                                  }
+                                  value={code}
+                                >
+                                  {code || '–'}
+                                </option>
+                              ))}
                             </select>
                           </td>
-                          <td style={styles.td}><input type="time" value={item.startTime || ''} onChange={event => updateItem(item.id, { startTime: event.target.value })} style={styles.input} /></td>
-                          <td style={styles.td}><input type="time" value={item.endTime || ''} onChange={event => updateItem(item.id, { endTime: event.target.value })} style={styles.input} /></td>
-                          <td style={styles.td}><input type="text" value={item.title || ''} onChange={event => updateItem(item.id, { title: event.target.value })} style={{ ...styles.input, minWidth: 130 }} /></td>
-                          <td style={{ ...styles.td, color: uncertain ? 'var(--danger)' : 'var(--text2)' }}>{confidence(item.confidence)}</td>
-                          <td style={styles.td}><textarea rows="2" value={item.note || ''} onChange={event => updateItem(item.id, { note: event.target.value })} style={{ ...styles.input, minWidth: 180, resize: 'vertical' }} /></td>
+
                           <td style={styles.td}>
-                            <span style={{ color: item.importStatus === 'error' ? 'var(--danger)' : item.importStatus === 'created' ? 'var(--green)' : 'var(--text3)' }}>{statusText(item.importStatus)}</span>
-                            {item.error && <div style={styles.rowError}>{item.error}</div>}
+                            <input
+                              type="time"
+                              value={
+                                item.startTime || ''
+                              }
+                              onChange={event =>
+                                updateItem(
+                                  item.id,
+                                  {
+                                    startTime:
+                                      event.target
+                                        .value
+                                  }
+                                )
+                              }
+                              style={styles.input}
+                            />
+                          </td>
+
+                          <td style={styles.td}>
+                            <input
+                              type="time"
+                              value={
+                                item.endTime || ''
+                              }
+                              onChange={event =>
+                                updateItem(
+                                  item.id,
+                                  {
+                                    endTime:
+                                      event.target
+                                        .value
+                                  }
+                                )
+                              }
+                              style={styles.input}
+                            />
+                          </td>
+
+                          <td style={styles.td}>
+                            <input
+                              type="text"
+                              value={item.title || ''}
+                              onChange={event =>
+                                updateItem(
+                                  item.id,
+                                  {
+                                    title:
+                                      event.target
+                                        .value
+                                  }
+                                )
+                              }
+                              style={{
+                                ...styles.input,
+                                minWidth: 130
+                              }}
+                            />
+                          </td>
+
+                          <td
+                            style={{
+                              ...styles.td,
+                              color: uncertain
+                                ? 'var(--danger)'
+                                : 'var(--text2)'
+                            }}
+                          >
+                            {confidence(
+                              item.confidence
+                            )}
+                          </td>
+
+                          <td style={styles.td}>
+                            <textarea
+                              rows="2"
+                              value={item.note || ''}
+                              onChange={event =>
+                                updateItem(
+                                  item.id,
+                                  {
+                                    note:
+                                      event.target
+                                        .value
+                                  }
+                                )
+                              }
+                              style={{
+                                ...styles.input,
+                                minWidth: 180,
+                                resize: 'vertical'
+                              }}
+                            />
+                          </td>
+
+                          <td style={styles.td}>
+                            <span
+                              style={{
+                                color:
+                                  item.importStatus ===
+                                  'error'
+                                    ? 'var(--danger)'
+                                    : item.importStatus ===
+                                        'created'
+                                      ? 'var(--green)'
+                                      : 'var(--text3)'
+                              }}
+                            >
+                              {statusText(
+                                item.importStatus
+                              )}
+                            </span>
+
+                            {item.error && (
+                              <div
+                                style={styles.rowError}
+                              >
+                                {item.error}
+                              </div>
+                            )}
                           </td>
                         </tr>
                       )
@@ -250,19 +900,318 @@ export default function ShiftImporter({ onClose }) {
                 </table>
               </div>
 
-              {summary && <div style={styles.success}>{summary.created} erstellt · {summary.duplicates} bereits vorhanden · {summary.errors} Fehler</div>}
-
               <div style={styles.footer}>
-                <button type="button" onClick={saveItems} disabled={saving || importing} style={styles.secondary}>{saving ? 'Speichert …' : 'Vorschau speichern'}</button>
-                <button type="button" onClick={importCalendar} disabled={saving || importing || enabledCount === 0} style={{ ...styles.primary, opacity: saving || importing || enabledCount === 0 ? 0.55 : 1 }}>
-                  {importing ? 'Kalenderimport läuft …' : `${enabledCount} Schichten importieren`}
+                <button
+                  type="button"
+                  onClick={saveItems}
+                  disabled={
+                    saving ||
+                    comparing ||
+                    syncing
+                  }
+                  style={styles.secondary}
+                >
+                  {saving
+                    ? 'Speichert …'
+                    : 'Vorschau speichern'}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={compareCalendar}
+                  disabled={
+                    saving ||
+                    comparing ||
+                    syncing ||
+                    enabledCount === 0
+                  }
+                  style={{
+                    ...styles.primary,
+                    opacity:
+                      saving ||
+                      comparing ||
+                      syncing ||
+                      enabledCount === 0
+                        ? 0.55
+                        : 1
+                  }}
+                >
+                  {comparing
+                    ? 'Kalender wird verglichen …'
+                    : syncRun
+                      ? 'Neu abgleichen'
+                      : 'Kalender abgleichen'}
                 </button>
               </div>
-              <div style={styles.hint}>Nur aktivierte Codes 1, 2 und 3 werden importiert. Ein Ende vor dem Beginn gilt als Folgetag. Bereits durch diesen Importer erstellte gleiche Schichten werden übersprungen.</div>
+
+              {syncRun && (
+                <section style={styles.syncSection}>
+                  <div style={styles.syncHeader}>
+                    <div>
+                      <h3 style={styles.syncTitle}>
+                        Kalendervergleich
+                      </h3>
+
+                      <div style={styles.muted}>
+                        {runStatusText(
+                          syncRun.status
+                        )}
+                        {' · '}
+                        Lauf #{syncRun.id}
+                      </div>
+                    </div>
+
+                    {['applied', 'partial'].includes(
+                      syncRun.status
+                    ) && (
+                      <button
+                        type="button"
+                        onClick={rollbackSync}
+                        disabled={rollingBack}
+                        style={styles.dangerButton}
+                      >
+                        {rollingBack
+                          ? 'Macht rückgängig …'
+                          : 'Lauf rückgängig'}
+                      </button>
+                    )}
+                  </div>
+
+                  {summary && (
+                    <div style={styles.syncStats}>
+                      {'create' in summary && (
+                        <span>
+                          {summary.create} neu
+                        </span>
+                      )}
+                      {'update' in summary && (
+                        <span>
+                          {summary.update} ändern
+                        </span>
+                      )}
+                      {'delete' in summary && (
+                        <span>
+                          {summary.delete} entfernt
+                        </span>
+                      )}
+                      {'unchanged' in summary && (
+                        <span>
+                          {summary.unchanged} gleich
+                        </span>
+                      )}
+                      {'manualExisting' in summary && (
+                        <span>
+                          {summary.manualExisting} manuell vorhanden
+                        </span>
+                      )}
+                      {'conflicts' in summary && (
+                        <span>
+                          {summary.conflicts} Konflikte
+                        </span>
+                      )}
+                      {'created' in summary && (
+                        <span>
+                          {summary.created} erstellt
+                        </span>
+                      )}
+                      {'updated' in summary && (
+                        <span>
+                          {summary.updated} aktualisiert
+                        </span>
+                      )}
+                      {'deleted' in summary && (
+                        <span>
+                          {summary.deleted} gelöscht
+                        </span>
+                      )}
+                      {'errors' in summary && (
+                        <span>
+                          {summary.errors} Fehler
+                        </span>
+                      )}
+                      {'rolledBack' in summary && (
+                        <span>
+                          {summary.rolledBack} rückgängig
+                        </span>
+                      )}
+                    </div>
+                  )}
+
+                  {summary?.warnings?.length > 0 && (
+                    <div style={styles.warning}>
+                      {summary.warnings.map(
+                        (text, index) => (
+                          <div key={index}>
+                            {text}
+                          </div>
+                        )
+                      )}
+                    </div>
+                  )}
+
+                  <div style={styles.actionList}>
+                    {actions.map(action => {
+                      const actionable =
+                        ACTIONABLE.has(
+                          action.actionType
+                        )
+
+                      const canSelect =
+                        actionable &&
+                        runEditable &&
+                        action.status ===
+                          'pending'
+
+                      return (
+                        <article
+                          key={action.id}
+                          style={styles.actionCard}
+                        >
+                          <div
+                            style={styles.actionTop}
+                          >
+                            <label
+                              style={styles.actionChoice}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={
+                                  action.selected
+                                }
+                                disabled={!canSelect}
+                                onChange={event =>
+                                  setActionSelected(
+                                    action.id,
+                                    event.target
+                                      .checked
+                                  )
+                                }
+                              />
+
+                              <strong
+                                style={{
+                                  color:
+                                    actionColor(
+                                      action.actionType
+                                    )
+                                }}
+                              >
+                                {actionLabel(
+                                  action.actionType
+                                )}
+                              </strong>
+                            </label>
+
+                            <span style={styles.dateBadge}>
+                              {action.workDate}
+                            </span>
+                          </div>
+
+                          {action.oldEvent && (
+                            <div
+                              style={styles.eventLine}
+                            >
+                              <span
+                                style={styles.eventKey}
+                              >
+                                Kalender
+                              </span>
+                              <span>
+                                {formatEvent(
+                                  action.oldEvent
+                                )}
+                              </span>
+                            </div>
+                          )}
+
+                          {action.newEvent && (
+                            <div
+                              style={styles.eventLine}
+                            >
+                              <span
+                                style={styles.eventKey}
+                              >
+                                Plan
+                              </span>
+                              <span>
+                                {formatEvent(
+                                  action.newEvent
+                                )}
+                              </span>
+                            </div>
+                          )}
+
+                          <div style={styles.actionMessage}>
+                            {action.message}
+                          </div>
+
+                          {action.status !==
+                            'pending' && (
+                            <div
+                              style={styles.actionStatus}
+                            >
+                              Status: {action.status}
+                            </div>
+                          )}
+
+                          {action.error && (
+                            <div style={styles.rowError}>
+                              {action.error}
+                            </div>
+                          )}
+                        </article>
+                      )
+                    })}
+                  </div>
+
+                  {runEditable && (
+                    <div style={styles.footer}>
+                      <div style={styles.safetyText}>
+                        Löschungen sind standardmäßig
+                        aus. Manuelle Konflikte werden
+                        nie automatisch verändert.
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={applySync}
+                        disabled={
+                          syncing ||
+                          selectedActionCount === 0
+                        }
+                        style={{
+                          ...styles.primary,
+                          opacity:
+                            syncing ||
+                            selectedActionCount === 0
+                              ? 0.55
+                              : 1
+                        }}
+                      >
+                        {syncing
+                          ? 'Synchronisiert …'
+                          : `${selectedActionCount} Änderungen anwenden`}
+                      </button>
+                    </div>
+                  )}
+                </section>
+              )}
+
+              <div style={styles.hint}>
+                Exakt passende manuelle Termine
+                bleiben unangetastet. Abweichende
+                manuelle Schichttermine erscheinen
+                als Konflikt und werden nicht
+                automatisch geändert.
+              </div>
             </>
           )}
 
-          {error && <div style={styles.error}>{error}</div>}
+          {error && (
+            <div style={styles.error}>
+              {error}
+            </div>
+          )}
         </div>
       </section>
     </>
@@ -270,36 +1219,379 @@ export default function ShiftImporter({ onClose }) {
 }
 
 const styles = {
-  backdrop: { position: 'fixed', inset: 0, zIndex: 110, background: 'rgba(0,0,0,0.7)' },
-  panel: { position: 'fixed', zIndex: 111, inset: 'max(10px, env(safe-area-inset-top)) 10px max(10px, env(safe-area-inset-bottom))', maxWidth: 1180, margin: '0 auto', display: 'flex', flexDirection: 'column', overflow: 'hidden', border: '1px solid var(--border)', borderRadius: 14, background: 'var(--bg2)', boxShadow: '0 24px 70px rgba(0,0,0,0.55)' },
-  header: { display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 20, padding: '16px 18px', borderBottom: '1px solid var(--border)' },
-  title: { margin: 0, fontSize: 18, color: 'var(--text)' },
-  subtitle: { margin: '5px 0 0', color: 'var(--text3)', fontSize: 12 },
-  close: { width: 32, height: 32, flexShrink: 0, borderRadius: 8, color: 'var(--text2)', background: 'var(--bg3)', fontSize: 22, lineHeight: 1 },
-  body: { flex: 1, minWidth: 0, minHeight: 0, overflowY: 'auto', overflowX: 'hidden', padding: 16, boxSizing: 'border-box' },
-  loading: { padding: 40, textAlign: 'center', color: 'var(--text3)' },
-  uploadCard: { width: '100%', maxWidth: 520, minWidth: 0, margin: '20px auto', padding: 18, boxSizing: 'border-box', overflow: 'hidden', display: 'grid', gap: 15, border: '1px solid var(--border)', borderRadius: 12, background: 'var(--bg3)' },
-  label: { display: 'grid', minWidth: 0, gap: 7, color: 'var(--text2)', fontSize: 12, fontWeight: 600 },
-  filePicker: { position: 'relative', width: '100%', minWidth: 0, maxWidth: '100%', minHeight: 44, boxSizing: 'border-box', overflow: 'hidden', display: 'flex', alignItems: 'center', gap: 10, padding: 6, border: '1px solid var(--border)', borderRadius: 9, background: 'var(--bg2)', cursor: 'pointer' },
-  fileButton: { flexShrink: 0, padding: '7px 10px', borderRadius: 7, background: 'var(--bg3)', color: 'var(--text)', fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap' },
-  fileName: { minWidth: 0, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--text3)', fontSize: 12, fontWeight: 400 },
-  hiddenFileInput: { position: 'absolute', inset: 0, width: '100%', height: '100%', opacity: 0, cursor: 'pointer' },
-  smallInput: { width: 100, maxWidth: '100%', padding: '9px 10px', boxSizing: 'border-box', border: '1px solid var(--border)', borderRadius: 8, background: 'var(--bg2)', color: 'var(--text)' },
-  hint: { marginTop: 10, color: 'var(--text3)', fontSize: 10, lineHeight: 1.5 },
-  summaryCard: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 15, padding: 12, border: '1px solid var(--border)', borderRadius: 10, background: 'var(--bg3)' },
-  muted: { marginTop: 4, color: 'var(--text3)', fontSize: 11 },
-  stats: { display: 'flex', flexWrap: 'wrap', gap: 12, margin: '12px 0', color: 'var(--text2)', fontSize: 11, fontFamily: 'var(--font-mono)' },
-  tableWrap: { maxWidth: '100%', overflowX: 'auto', WebkitOverflowScrolling: 'touch', border: '1px solid var(--border)', borderRadius: 10 },
-  table: { width: 'max-content', minWidth: '100%', borderCollapse: 'collapse', background: 'var(--bg2)' },
-  th: { position: 'sticky', top: 0, zIndex: 1, padding: '9px 8px', borderBottom: '1px solid var(--border)', background: 'var(--bg3)', color: 'var(--text3)', fontSize: 10, textAlign: 'left', whiteSpace: 'nowrap' },
-  td: { padding: 6, borderBottom: '1px solid var(--border)', color: 'var(--text2)', fontSize: 11, verticalAlign: 'top' },
-  uncertain: { background: 'rgba(255,90,90,0.045)' },
-  input: { minWidth: 90, maxWidth: 240, padding: '7px 8px', border: '1px solid var(--border)', borderRadius: 7, background: 'var(--bg3)', color: 'var(--text)', fontSize: 12 },
-  rowError: { marginTop: 4, maxWidth: 220, color: 'var(--danger)', fontSize: 10, overflowWrap: 'anywhere' },
-  footer: { display: 'flex', justifyContent: 'flex-end', flexWrap: 'wrap', gap: 8, marginTop: 14 },
-  primary: { minWidth: 0, maxWidth: '100%', padding: '10px 14px', boxSizing: 'border-box', borderRadius: 8, background: 'var(--accent)', color: '#0d0d0d', fontWeight: 700, fontSize: 12 },
-  secondary: { padding: '9px 12px', border: '1px solid var(--border)', borderRadius: 8, background: 'var(--bg3)', color: 'var(--text2)', fontSize: 12 },
-  warning: { marginTop: 10, padding: 10, border: '1px solid rgba(230,180,70,0.35)', borderRadius: 9, background: 'rgba(230,180,70,0.08)', color: 'var(--text2)', fontSize: 11, lineHeight: 1.5 },
-  success: { marginTop: 12, padding: 10, border: '1px solid var(--green-dim)', borderRadius: 9, background: 'var(--green-bg)', color: 'var(--green)', fontSize: 12 },
-  error: { marginTop: 12, padding: 10, border: '1px solid rgba(255,80,80,0.3)', borderRadius: 9, background: 'rgba(255,80,80,0.08)', color: 'var(--danger)', fontSize: 12 }
+  backdrop: {
+    position: 'fixed',
+    inset: 0,
+    zIndex: 110,
+    background: 'rgba(0,0,0,0.7)'
+  },
+  panel: {
+    position: 'fixed',
+    zIndex: 111,
+    inset:
+      'max(10px, env(safe-area-inset-top)) 10px max(10px, env(safe-area-inset-bottom))',
+    maxWidth: 1180,
+    margin: '0 auto',
+    display: 'flex',
+    flexDirection: 'column',
+    overflow: 'hidden',
+    border: '1px solid var(--border)',
+    borderRadius: 14,
+    background: 'var(--bg2)',
+    boxShadow:
+      '0 24px 70px rgba(0,0,0,0.55)'
+  },
+  header: {
+    minWidth: 0,
+    display: 'flex',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 12,
+    padding: '16px 18px',
+    borderBottom: '1px solid var(--border)'
+  },
+  headerText: {
+    minWidth: 0
+  },
+  title: {
+    margin: 0,
+    fontSize: 18,
+    color: 'var(--text)'
+  },
+  subtitle: {
+    margin: '5px 0 0',
+    color: 'var(--text3)',
+    fontSize: 12,
+    lineHeight: 1.35
+  },
+  close: {
+    width: 32,
+    height: 32,
+    flexShrink: 0,
+    borderRadius: 8,
+    color: 'var(--text2)',
+    background: 'var(--bg3)',
+    fontSize: 22,
+    lineHeight: 1
+  },
+  body: {
+    flex: 1,
+    minWidth: 0,
+    minHeight: 0,
+    overflowY: 'auto',
+    overflowX: 'hidden',
+    padding: 16,
+    boxSizing: 'border-box'
+  },
+  loading: {
+    padding: 40,
+    textAlign: 'center',
+    color: 'var(--text3)'
+  },
+  uploadCard: {
+    width: '100%',
+    maxWidth: 520,
+    minWidth: 0,
+    margin: '20px auto',
+    padding: 18,
+    boxSizing: 'border-box',
+    overflow: 'hidden',
+    display: 'grid',
+    gap: 15,
+    border: '1px solid var(--border)',
+    borderRadius: 12,
+    background: 'var(--bg3)'
+  },
+  label: {
+    display: 'grid',
+    minWidth: 0,
+    gap: 7,
+    color: 'var(--text2)',
+    fontSize: 12,
+    fontWeight: 600
+  },
+  filePicker: {
+    position: 'relative',
+    width: '100%',
+    minWidth: 0,
+    maxWidth: '100%',
+    minHeight: 44,
+    boxSizing: 'border-box',
+    overflow: 'hidden',
+    display: 'flex',
+    alignItems: 'center',
+    gap: 10,
+    padding: 6,
+    border: '1px solid var(--border)',
+    borderRadius: 9,
+    background: 'var(--bg2)',
+    cursor: 'pointer'
+  },
+  fileButton: {
+    flexShrink: 0,
+    padding: '7px 10px',
+    borderRadius: 7,
+    background: 'var(--bg3)',
+    color: 'var(--text)',
+    fontSize: 12,
+    fontWeight: 600,
+    whiteSpace: 'nowrap'
+  },
+  fileName: {
+    minWidth: 0,
+    flex: 1,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    color: 'var(--text3)',
+    fontSize: 12,
+    fontWeight: 400
+  },
+  hiddenFileInput: {
+    position: 'absolute',
+    inset: 0,
+    width: '100%',
+    height: '100%',
+    opacity: 0,
+    cursor: 'pointer'
+  },
+  smallInput: {
+    width: 100,
+    maxWidth: '100%',
+    padding: '9px 10px',
+    boxSizing: 'border-box',
+    border: '1px solid var(--border)',
+    borderRadius: 8,
+    background: 'var(--bg2)',
+    color: 'var(--text)'
+  },
+  hint: {
+    marginTop: 10,
+    color: 'var(--text3)',
+    fontSize: 10,
+    lineHeight: 1.5
+  },
+  summaryCard: {
+    minWidth: 0,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    padding: 12,
+    border: '1px solid var(--border)',
+    borderRadius: 10,
+    background: 'var(--bg3)'
+  },
+  summaryText: {
+    minWidth: 0,
+    overflowWrap: 'anywhere'
+  },
+  muted: {
+    marginTop: 4,
+    color: 'var(--text3)',
+    fontSize: 11
+  },
+  stats: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: 12,
+    margin: '12px 0',
+    color: 'var(--text2)',
+    fontSize: 11,
+    fontFamily: 'var(--font-mono)'
+  },
+  tableWrap: {
+    maxWidth: '100%',
+    overflowX: 'auto',
+    WebkitOverflowScrolling: 'touch',
+    border: '1px solid var(--border)',
+    borderRadius: 10
+  },
+  table: {
+    width: 'max-content',
+    minWidth: '100%',
+    borderCollapse: 'collapse',
+    background: 'var(--bg2)'
+  },
+  th: {
+    position: 'sticky',
+    top: 0,
+    zIndex: 1,
+    padding: '9px 8px',
+    borderBottom: '1px solid var(--border)',
+    background: 'var(--bg3)',
+    color: 'var(--text3)',
+    fontSize: 10,
+    textAlign: 'left',
+    whiteSpace: 'nowrap'
+  },
+  td: {
+    padding: 6,
+    borderBottom: '1px solid var(--border)',
+    color: 'var(--text2)',
+    fontSize: 11,
+    verticalAlign: 'top'
+  },
+  uncertain: {
+    background: 'rgba(255,90,90,0.045)'
+  },
+  input: {
+    minWidth: 90,
+    maxWidth: 240,
+    padding: '7px 8px',
+    border: '1px solid var(--border)',
+    borderRadius: 7,
+    background: 'var(--bg3)',
+    color: 'var(--text)',
+    fontSize: 12
+  },
+  rowError: {
+    marginTop: 4,
+    maxWidth: 280,
+    color: 'var(--danger)',
+    fontSize: 10,
+    overflowWrap: 'anywhere'
+  },
+  footer: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 14
+  },
+  primary: {
+    minWidth: 0,
+    maxWidth: '100%',
+    padding: '10px 14px',
+    boxSizing: 'border-box',
+    borderRadius: 8,
+    background: 'var(--accent)',
+    color: '#0d0d0d',
+    fontWeight: 700,
+    fontSize: 12
+  },
+  secondary: {
+    padding: '9px 12px',
+    border: '1px solid var(--border)',
+    borderRadius: 8,
+    background: 'var(--bg3)',
+    color: 'var(--text2)',
+    fontSize: 12
+  },
+  dangerButton: {
+    padding: '8px 10px',
+    border: '1px solid rgba(255,80,80,0.35)',
+    borderRadius: 8,
+    background: 'rgba(255,80,80,0.08)',
+    color: 'var(--danger)',
+    fontSize: 11
+  },
+  warning: {
+    marginTop: 10,
+    padding: 10,
+    border: '1px solid rgba(230,180,70,0.35)',
+    borderRadius: 9,
+    background: 'rgba(230,180,70,0.08)',
+    color: 'var(--text2)',
+    fontSize: 11,
+    lineHeight: 1.5
+  },
+  error: {
+    marginTop: 12,
+    padding: 10,
+    border: '1px solid rgba(255,80,80,0.3)',
+    borderRadius: 9,
+    background: 'rgba(255,80,80,0.08)',
+    color: 'var(--danger)',
+    fontSize: 12
+  },
+  syncSection: {
+    marginTop: 18,
+    paddingTop: 14,
+    borderTop: '1px solid var(--border)'
+  },
+  syncHeader: {
+    display: 'flex',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    flexWrap: 'wrap',
+    gap: 10
+  },
+  syncTitle: {
+    margin: 0,
+    color: 'var(--text)',
+    fontSize: 15
+  },
+  syncStats: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: 8,
+    margin: '10px 0',
+    color: 'var(--text2)',
+    fontSize: 10,
+    fontFamily: 'var(--font-mono)'
+  },
+  actionList: {
+    display: 'grid',
+    gap: 8
+  },
+  actionCard: {
+    minWidth: 0,
+    padding: 11,
+    border: '1px solid var(--border)',
+    borderRadius: 10,
+    background: 'var(--bg3)'
+  },
+  actionTop: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10
+  },
+  actionChoice: {
+    minWidth: 0,
+    display: 'flex',
+    alignItems: 'center',
+    gap: 8,
+    fontSize: 12
+  },
+  dateBadge: {
+    flexShrink: 0,
+    color: 'var(--text3)',
+    fontSize: 10,
+    fontFamily: 'var(--font-mono)'
+  },
+  eventLine: {
+    minWidth: 0,
+    display: 'grid',
+    gridTemplateColumns: '58px minmax(0, 1fr)',
+    gap: 8,
+    marginTop: 7,
+    color: 'var(--text2)',
+    fontSize: 11,
+    lineHeight: 1.4,
+    overflowWrap: 'anywhere'
+  },
+  eventKey: {
+    color: 'var(--text3)'
+  },
+  actionMessage: {
+    marginTop: 7,
+    color: 'var(--text3)',
+    fontSize: 10,
+    lineHeight: 1.45
+  },
+  actionStatus: {
+    marginTop: 6,
+    color: 'var(--text3)',
+    fontSize: 10,
+    fontFamily: 'var(--font-mono)'
+  },
+  safetyText: {
+    flex: '1 1 220px',
+    color: 'var(--text3)',
+    fontSize: 10,
+    lineHeight: 1.45
+  }
 }
