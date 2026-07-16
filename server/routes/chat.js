@@ -859,13 +859,239 @@ Use these as background context. If these memories fully answer the request, ans
   // - keeps a contiguous suffix of the conversation
   // - never deletes anything from SQLite
   // - avoids automatic summaries that could distort details
-  const contextBudgetTokens = Math.max(
+  function positiveContextInteger(value, fallback) {
+    const parsed = Number.parseInt(value, 10)
+
+    return Number.isFinite(parsed) && parsed > 0
+      ? parsed
+      : fallback
+  }
+
+  const defaultContextBudgetTokens = Math.max(
     8000,
-    Number.parseInt(
-      process.env.CHAT_CONTEXT_MAX_INPUT_TOKENS ||
-      '60000',
-      10
-    ) || 60000
+    positiveContextInteger(
+      process.env.CHAT_CONTEXT_DEFAULT_INPUT_TOKENS ||
+      process.env.CHAT_CONTEXT_MAX_INPUT_TOKENS,
+      250000
+    )
+  )
+
+  function parseContextBudgetRules() {
+    const raw = String(
+      process.env.CHAT_CONTEXT_MODEL_BUDGETS || ''
+    ).trim()
+
+    if (!raw) return []
+
+    return raw
+      .split(',')
+      .map(item => item.trim())
+      .filter(Boolean)
+      .map(item => {
+        const separator = item.lastIndexOf('=')
+
+        if (separator <= 0) return null
+
+        const pattern = item
+          .slice(0, separator)
+          .trim()
+          .toLowerCase()
+
+        const budgetTokens =
+          positiveContextInteger(
+            item.slice(separator + 1).trim(),
+            0
+          )
+
+        if (!pattern || budgetTokens < 8000) {
+          return null
+        }
+
+        return {
+          pattern,
+          budgetTokens
+        }
+      })
+      .filter(Boolean)
+      .sort((left, right) => {
+        const leftExact =
+          left.pattern.includes('*') ? 0 : 1
+
+        const rightExact =
+          right.pattern.includes('*') ? 0 : 1
+
+        return (
+          rightExact - leftExact ||
+          right.pattern.length -
+            left.pattern.length
+        )
+      })
+  }
+
+  const configuredContextBudgetRules =
+    parseContextBudgetRules()
+
+  function contextPatternMatches(pattern, modelName) {
+    if (!pattern.includes('*')) {
+      return pattern === modelName
+    }
+
+    const escaped = pattern
+      .replace(/[.+?^${}()|[\]\\]/g, '\\$&')
+      .replaceAll('*', '.*')
+
+    return new RegExp(`^${escaped}$`, 'i')
+      .test(modelName)
+  }
+
+  function resolveContextBudget(modelName) {
+    const normalizedModel = String(
+      modelName || ''
+    )
+      .trim()
+      .toLowerCase()
+
+    for (
+      const rule of configuredContextBudgetRules
+    ) {
+      if (
+        contextPatternMatches(
+          rule.pattern,
+          normalizedModel
+        )
+      ) {
+        return {
+          budgetTokens: rule.budgetTokens,
+          source: `env:${rule.pattern}`
+        }
+      }
+    }
+
+    // Conservative input budgets. The unused remainder is
+    // reserved for system context, tools and model output.
+    const nameHints = [
+      {
+        pattern:
+          /(?:^|[-_/:])(?:1m|1000k|1024k|1048k)(?:$|[-_/:])/,
+        budgetTokens: 800000,
+        source: 'name-hint:1m'
+      },
+      {
+        pattern:
+          /(?:^|[-_/:])512k(?:$|[-_/:])/,
+        budgetTokens: 400000,
+        source: 'name-hint:512k'
+      },
+      {
+        pattern:
+          /(?:^|[-_/:])256k(?:$|[-_/:])/,
+        budgetTokens: 200000,
+        source: 'name-hint:256k'
+      },
+      {
+        pattern:
+          /(?:^|[-_/:])200k(?:$|[-_/:])/,
+        budgetTokens: 160000,
+        source: 'name-hint:200k'
+      },
+      {
+        pattern:
+          /(?:^|[-_/:])128k(?:$|[-_/:])/,
+        budgetTokens: 100000,
+        source: 'name-hint:128k'
+      },
+      {
+        pattern:
+          /(?:^|[-_/:])64k(?:$|[-_/:])/,
+        budgetTokens: 50000,
+        source: 'name-hint:64k'
+      },
+      {
+        pattern:
+          /(?:^|[-_/:])32k(?:$|[-_/:])/,
+        budgetTokens: 24000,
+        source: 'name-hint:32k'
+      },
+      {
+        pattern:
+          /(?:^|[/_-])gpt-5\.6(?:$|[/_:-])/,
+        budgetTokens: 800000,
+        source: 'builtin:gpt-5.6'
+      }
+    ]
+
+    for (const hint of nameHints) {
+      if (hint.pattern.test(normalizedModel)) {
+        return {
+          budgetTokens: hint.budgetTokens,
+          source: hint.source
+        }
+      }
+    }
+
+    const providerDefaults = [
+      {
+        matches:
+          normalizedModel.startsWith('openai/'),
+        env:
+          process.env
+            .CHAT_CONTEXT_OPENAI_INPUT_TOKENS,
+        source: 'provider:openai'
+      },
+      {
+        matches:
+          normalizedModel.startsWith('claude'),
+        env:
+          process.env
+            .CHAT_CONTEXT_ANTHROPIC_INPUT_TOKENS,
+        source: 'provider:anthropic'
+      },
+      {
+        matches:
+          normalizedModel.startsWith('zai/'),
+        env:
+          process.env
+            .CHAT_CONTEXT_ZAI_INPUT_TOKENS,
+        source: 'provider:zai'
+      },
+      {
+        matches: true,
+        env:
+          process.env
+            .CHAT_CONTEXT_OLLAMA_INPUT_TOKENS,
+        source: 'provider:ollama'
+      }
+    ]
+
+    for (const provider of providerDefaults) {
+      if (!provider.matches || !provider.env) {
+        continue
+      }
+
+      return {
+        budgetTokens: Math.max(
+          8000,
+          positiveContextInteger(
+            provider.env,
+            defaultContextBudgetTokens
+          )
+        ),
+        source: provider.source
+      }
+    }
+
+    return {
+      budgetTokens: defaultContextBudgetTokens,
+      source: 'default'
+    }
+  }
+
+  const initialContextBudget =
+    resolveContextBudget(convo.model)
+
+  const preprocessingBudgetTokens = Math.max(
+    initialContextBudget.budgetTokens,
+    defaultContextBudgetTokens
   )
 
   const contextMinRecentMessages = Math.max(
@@ -1021,7 +1247,7 @@ Use these as background context. If these memories fully answer the request, ans
       ...ollamaMessages,
       ...fullHistory
     ],
-    contextBudgetTokens,
+    preprocessingBudgetTokens,
     contextMinRecentMessages
   )
 
@@ -1062,9 +1288,28 @@ Use these as background context. If these memories fully answer the request, ans
     ollamaMessages.push(msg)
   }
 
+  // Auto-route to a vision-capable model before the
+  // final context trim, because that model may have a
+  // different context budget.
+  const hasImages = ollamaMessages.some(
+    message =>
+      message.images &&
+      message.images.length > 0
+  )
+
+  const VISION_MODEL =
+    process.env.VISION_MODEL ||
+    'kimi-k2.7-code:cloud'
+
+  const activeModel =
+    hasImages ? VISION_MODEL : convo.model
+
+  const finalContextBudget =
+    resolveContextBudget(activeModel)
+
   const preparedContextPlan = trimContextMessages(
     ollamaMessages,
-    contextBudgetTokens,
+    finalContextBudget.budgetTokens,
     contextMinRecentMessages
   )
 
@@ -1075,7 +1320,10 @@ Use these as background context. If these memories fully answer the request, ans
     preparedContextPlan.omittedMessages
 
   const contextMeta = {
-    budgetTokens: contextBudgetTokens,
+    model: activeModel,
+    budgetSource: finalContextBudget.source,
+    budgetTokens:
+      finalContextBudget.budgetTokens,
     estimatedInputTokens:
       preparedContextPlan.estimatedTokens,
     keptMessages:
@@ -1103,15 +1351,10 @@ Use these as background context. If these memories fully answer the request, ans
     '[context-guard]',
     JSON.stringify({
       conversationId: convo.id,
-      model: convo.model,
+      requestedModel: convo.model,
       ...contextMeta
     })
   )
-
-  // Auto-route to a vision-capable model if any message has an image attached
-  const hasImages = ollamaMessages.some(m => m.images && m.images.length > 0)
-  const VISION_MODEL = process.env.VISION_MODEL || 'kimi-k2.7-code:cloud'
-  const activeModel = hasImages ? VISION_MODEL : convo.model
 
   if (urlContext && ollamaMessages.length > 0) {
     const last = ollamaMessages[ollamaMessages.length - 1]
@@ -1216,7 +1459,11 @@ Use these as background context. If these memories fully answer the request, ans
             context_omitted_messages:
               contextMeta.omittedMessages,
             context_over_budget:
-              contextMeta.overBudget
+              contextMeta.overBudget,
+            context_model:
+              contextMeta.model,
+            context_budget_source:
+              contextMeta.budgetSource
           }) : '')
         db.prepare('UPDATE conversations SET updated_at = unixepoch() WHERE id = ?').run(convo.id)
 
