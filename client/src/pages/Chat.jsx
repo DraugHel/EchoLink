@@ -58,6 +58,62 @@ function parseSseEvent(rawEvent) {
   }
 }
 
+function formatDuration(seconds) {
+  if (
+    seconds == null ||
+    !Number.isFinite(Number(seconds))
+  ) {
+    return '–'
+  }
+
+  const value = Math.max(
+    0,
+    Math.floor(Number(seconds))
+  )
+
+  const days = Math.floor(value / 86400)
+  const hours = Math.floor(
+    value % 86400 / 3600
+  )
+  const minutes = Math.floor(
+    value % 3600 / 60
+  )
+
+  if (days > 0) {
+    return `${days}d ${hours}h`
+  }
+
+  if (hours > 0) {
+    return `${hours}h ${minutes}m`
+  }
+
+  return `${minutes}m`
+}
+
+function formatBackupAge(backup) {
+  if (!backup?.found) return 'fehlt'
+  return `vor ${formatDuration(backup.ageSeconds)}`
+}
+
+function metricColor(value, warning, critical) {
+  if (
+    value == null ||
+    !Number.isFinite(Number(value))
+  ) {
+    return 'var(--text3)'
+  }
+
+  if (Number(value) >= critical) {
+    return 'var(--danger)'
+  }
+
+  if (Number(value) >= warning) {
+    return '#e7b955'
+  }
+
+  return 'var(--text2)'
+}
+
 function useIsMobile() {
   const [mobile, setMobile] = useState(typeof window !== 'undefined' && window.innerWidth < 768)
   useEffect(() => {
@@ -740,6 +796,37 @@ export default function Chat({ user, onLogout }) {
 
   const lastAssistantMsg = [...messages].reverse().find(m => m.role === 'assistant')
 
+  const monitoredProcessProblem =
+    sysStatus?.apps
+      ?.filter(app =>
+        monitoredApps.includes(app.name)
+      )
+      .some(app => app.status !== 'online') ||
+    false
+
+  const databaseBackupAge =
+    sysStatus?.backups?.database?.ageSeconds
+
+  const fullBackupAge =
+    sysStatus?.backups?.full?.ageSeconds
+
+  const systemResourceProblem =
+    Number(sysStatus?.memory?.usedPercent) >= 90 ||
+    Number(sysStatus?.disk) >= 90 ||
+    Number(sysStatus?.cpu) >= 95 ||
+    !sysStatus?.backups?.database?.found ||
+    Number(databaseBackupAge) > 172800 ||
+    !sysStatus?.backups?.full?.found ||
+    Number(fullBackupAge) > 1209600
+
+  const systemMood =
+    monitoredProcessProblem ||
+    systemResourceProblem
+      ? 'panic'
+      : streaming
+        ? 'focus'
+        : 'ok'
+
   return (
     <div style={styles.root}>
       {(!mobile || mobileSidebar) && (
@@ -771,7 +858,7 @@ export default function Chat({ user, onLogout }) {
           {sysStatus && (
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginRight: 4, cursor: 'pointer' }}
               onClick={() => setShowSysPanel(v => !v)}>
-              <CorsnFace mood={sysStatus.apps.filter(a => monitoredApps.includes(a.name)).some(a => a.status !== 'online') ? 'panic' : (streaming ? 'focus' : 'ok')} />
+              <CorsnFace mood={systemMood} />
               <div style={{ display: 'flex', gap: 3 }}>
                 {sysStatus.apps.filter(a => monitoredApps.includes(a.name)).map(a => (
                   <span key={a.name} style={{ width: 6, height: 6, borderRadius: '50%',
@@ -785,24 +872,286 @@ export default function Chat({ user, onLogout }) {
           )}
           {showSysPanel && sysStatus && (
             <>
-              <div style={{ position: 'fixed', inset: 0, zIndex: 40 }} onClick={() => setShowSysPanel(false)} />
-              <div style={{
-                position: 'fixed', top: 58, right: 8, zIndex: 41,
-                background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 10,
-                padding: '10px 14px', minWidth: 210, fontFamily: 'var(--font-mono)', fontSize: 12,
-                boxShadow: '0 8px 24px rgba(0,0,0,0.45)'
-              }}>
-                <div style={{ color: 'var(--text3)', paddingBottom: 6 }}>Tippen = Smiley-Ueberwachung</div>
-                {sysStatus.apps.map(a => (
-                  <div key={a.name} onClick={() => toggleMonitoredApp(a.name)} style={{ display: 'flex', justifyContent: 'space-between', gap: 12, padding: '5px 0', cursor: 'pointer', opacity: monitoredApps.includes(a.name) ? 1 : 0.45 }}>
-                    <span style={{ color: a.status === 'online' ? 'var(--text1)' : 'var(--danger)' }}>{monitoredApps.includes(a.name) ? '☑ ' : '☐ '}{a.name}</span>
-                    <span style={{ color: 'var(--text3)' }}>{a.status} · {a.restarts}x</span>
+              <div
+                style={{
+                  position: 'fixed',
+                  inset: 0,
+                  zIndex: 40
+                }}
+                onClick={() =>
+                  setShowSysPanel(false)
+                }
+              />
+
+              <div
+                style={{
+                  position: 'fixed',
+                  top:
+                    'calc(58px + env(safe-area-inset-top))',
+                  right: 8,
+                  zIndex: 41,
+                  width: 310,
+                  maxWidth: 'calc(100vw - 16px)',
+                  maxHeight:
+                    'calc(100vh - 74px - env(safe-area-inset-top))',
+                  overflowY: 'auto',
+                  background: 'var(--bg2)',
+                  border:
+                    '1px solid var(--border)',
+                  borderRadius: 10,
+                  padding: '12px 14px',
+                  fontFamily: 'var(--font-mono)',
+                  fontSize: 12,
+                  boxShadow:
+                    '0 8px 24px rgba(0,0,0,0.45)'
+                }}
+              >
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent:
+                      'space-between',
+                    gap: 12,
+                    paddingBottom: 8
+                  }}
+                >
+                  <strong
+                    style={{
+                      color: 'var(--text)'
+                    }}
+                  >
+                    Serverstatus
+                  </strong>
+
+                  <span
+                    style={{
+                      color:
+                        systemMood === 'panic'
+                          ? 'var(--danger)'
+                          : 'var(--green)'
+                    }}
+                  >
+                    {systemMood === 'panic'
+                      ? 'Warnung'
+                      : 'Alles okay'}
+                  </span>
+                </div>
+
+                <div
+                  style={{
+                    color: 'var(--text3)',
+                    paddingBottom: 6,
+                    fontSize: 10
+                  }}
+                >
+                  Prozess antippen = Smiley-Überwachung
+                </div>
+
+                {sysStatus.apps.map(app => (
+                  <div
+                    key={app.name}
+                    onClick={() =>
+                      toggleMonitoredApp(app.name)
+                    }
+                    style={{
+                      display: 'flex',
+                      justifyContent:
+                        'space-between',
+                      alignItems: 'center',
+                      gap: 12,
+                      padding: '6px 0',
+                      cursor: 'pointer',
+                      opacity:
+                        monitoredApps.includes(
+                          app.name
+                        )
+                          ? 1
+                          : 0.45
+                    }}
+                  >
+                    <span
+                      style={{
+                        color:
+                          app.status === 'online'
+                            ? 'var(--text)'
+                            : 'var(--danger)',
+                        minWidth: 0,
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis'
+                      }}
+                    >
+                      {monitoredApps.includes(
+                        app.name
+                      )
+                        ? '☑ '
+                        : '☐ '}
+                      {app.name}
+                    </span>
+
+                    <span
+                      style={{
+                        color: 'var(--text3)',
+                        whiteSpace: 'nowrap',
+                        fontSize: 10
+                      }}
+                    >
+                      {app.status}
+                      {' · '}
+                      {app.restarts}x
+                      {' · '}
+                      {app.cpu ?? '–'}%
+                      {' · '}
+                      {app.memoryMb ?? '–'} MB
+                    </span>
                   </div>
                 ))}
-                <div style={{ borderTop: '1px solid var(--border)', marginTop: 6, paddingTop: 6,
-                  display: 'flex', justifyContent: 'space-between', color: 'var(--text3)' }}>
-                  <span>disk {sysStatus.disk}%</span>
-                  <span>load {sysStatus.load}</span>
+
+                <div
+                  style={{
+                    borderTop:
+                      '1px solid var(--border)',
+                    marginTop: 6,
+                    paddingTop: 8,
+                    display: 'grid',
+                    gridTemplateColumns:
+                      '1fr auto',
+                    rowGap: 7,
+                    columnGap: 14
+                  }}
+                >
+                  <span style={{ color: 'var(--text3)' }}>
+                    CPU
+                  </span>
+                  <span
+                    style={{
+                      color: metricColor(
+                        sysStatus.cpu,
+                        80,
+                        95
+                      )
+                    }}
+                  >
+                    {sysStatus.cpu ?? '–'}%
+                    {' · load '}
+                    {sysStatus.load ?? '–'}
+                  </span>
+
+                  <span style={{ color: 'var(--text3)' }}>
+                    RAM
+                  </span>
+                  <span
+                    style={{
+                      color: metricColor(
+                        sysStatus.memory
+                          ?.usedPercent,
+                        80,
+                        90
+                      )
+                    }}
+                  >
+                    {sysStatus.memory
+                      ?.usedPercent ?? '–'}%
+                    {' · '}
+                    {sysStatus.memory
+                      ?.usedMb ?? '–'}
+                    /
+                    {sysStatus.memory
+                      ?.totalMb ?? '–'} MB
+                  </span>
+
+                  <span style={{ color: 'var(--text3)' }}>
+                    Speicher
+                  </span>
+                  <span
+                    style={{
+                      color: metricColor(
+                        sysStatus.disk,
+                        80,
+                        90
+                      )
+                    }}
+                  >
+                    {sysStatus.disk ?? '–'}%
+                    {' · '}
+                    {sysStatus.diskFreeGb ?? '–'}
+                    {' GB frei'}
+                  </span>
+
+                  <span style={{ color: 'var(--text3)' }}>
+                    Uptime
+                  </span>
+                  <span style={{ color: 'var(--text2)' }}>
+                    {formatDuration(
+                      sysStatus.uptimeSeconds
+                    )}
+                  </span>
+                </div>
+
+                <div
+                  style={{
+                    borderTop:
+                      '1px solid var(--border)',
+                    marginTop: 9,
+                    paddingTop: 8,
+                    display: 'grid',
+                    gridTemplateColumns:
+                      '1fr auto',
+                    rowGap: 7,
+                    columnGap: 14
+                  }}
+                >
+                  <span style={{ color: 'var(--text3)' }}>
+                    DB-Backup
+                  </span>
+                  <span
+                    title={
+                      sysStatus.backups
+                        ?.database?.name || ''
+                    }
+                    style={{
+                      color:
+                        !sysStatus.backups
+                          ?.database?.found ||
+                        Number(
+                          sysStatus.backups
+                            ?.database
+                            ?.ageSeconds
+                        ) > 172800
+                          ? 'var(--danger)'
+                          : 'var(--text2)'
+                    }}
+                  >
+                    {formatBackupAge(
+                      sysStatus.backups
+                        ?.database
+                    )}
+                  </span>
+
+                  <span style={{ color: 'var(--text3)' }}>
+                    Komplett-Backup
+                  </span>
+                  <span
+                    title={
+                      sysStatus.backups
+                        ?.full?.name || ''
+                    }
+                    style={{
+                      color:
+                        !sysStatus.backups
+                          ?.full?.found ||
+                        Number(
+                          sysStatus.backups
+                            ?.full?.ageSeconds
+                        ) > 1209600
+                          ? 'var(--danger)'
+                          : 'var(--text2)'
+                    }}
+                  >
+                    {formatBackupAge(
+                      sysStatus.backups?.full
+                    )}
+                  </span>
                 </div>
               </div>
             </>
