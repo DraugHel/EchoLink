@@ -292,14 +292,14 @@ function Message({ role, content, streaming, images, think, toolStatus, actionRe
                 components={{
                   code({ inline, className, children }) {
                     const lang = /language-(\w+)/.exec(className || '')?.[1]
-                    return !inline && lang
-                      ? <CodeBlock lang={lang} code={String(children).replace(/\n$/, '')} />
+                    return !inline
+                      ? <CodeBlock lang={lang || 'text'} code={String(children).replace(/\n$/, '')} />
                       : <code style={styles.inlineCode}>{children}</code>
                   },
-                  p: ({ children }) => <p style={{ marginBottom: 8 }}>{children}</p>,
+                  p: ({ children }) => <p style={{ margin: '0 0 8px', maxWidth: '100%', overflowWrap: 'anywhere' }}>{children}</p>,
                   ul: ({ children }) => <ul style={{ paddingLeft: 20, marginBottom: 8 }}>{children}</ul>,
                   ol: ({ children }) => <ol style={{ paddingLeft: 20, marginBottom: 8 }}>{children}</ol>,
-                  li: ({ children }) => <li style={{ marginBottom: 2 }}>{children}</li>,
+                  li: ({ children }) => <li style={{ marginBottom: 2, overflowWrap: 'anywhere' }}>{children}</li>,
                   h1: ({ children }) => <h1 style={{ fontSize: 18, fontWeight: 700, marginBottom: 8, color: 'var(--text)' }}>{children}</h1>,
                   h2: ({ children }) => <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 6, color: 'var(--text)' }}>{children}</h2>,
                   h3: ({ children }) => <h3 style={{ fontSize: 15, fontWeight: 600, marginBottom: 4 }}>{children}</h3>,
@@ -308,7 +308,9 @@ function Message({ role, content, streaming, images, think, toolStatus, actionRe
                       {children}
                     </blockquote>
                   ),
-                  a: ({ href, children }) => <a href={href} target="_blank" rel="noreferrer">{children}</a>,
+                  a: ({ href, children }) => <a href={href} target="_blank" rel="noreferrer" style={{ overflowWrap: 'anywhere', wordBreak: 'break-word' }}>{children}</a>,
+                  img: ({ src, alt }) => <img src={src} alt={alt || ''} loading="lazy" style={{ display: 'block', maxWidth: '100%', height: 'auto', objectFit: 'contain', borderRadius: 8, margin: '8px 0' }} />,
+                  hr: () => <hr style={{ border: 0, borderTop: '1px solid var(--border)', margin: '16px 0' }} />,
                   table: ({ children }) => (
                     <div style={{ overflowX: 'auto', maxWidth: '100%', marginBottom: 8, WebkitOverflowScrolling: 'touch', overscrollBehaviorX: 'contain' }}>
                       <table style={{ borderCollapse: 'collapse', width: 'max-content', minWidth: '100%', tableLayout: 'auto', fontSize: 14 }}>{children}</table>
@@ -413,7 +415,7 @@ function CodeBlock({ lang, code }) {
   }
 
   return (
-    <div style={{ position: 'relative', margin: '8px 0' }}>
+    <div style={{ position: 'relative', margin: '8px 0', maxWidth: '100%', minWidth: 0 }}>
       <div style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         padding: '6px 10px 6px 12px', fontSize: 11, color: 'var(--text2)',
@@ -452,7 +454,7 @@ function CodeBlock({ lang, code }) {
         </button>
       </div>
       <SyntaxHighlighter style={getCodeStyle()} language={lang} PreTag="div"
-        customStyle={{ borderRadius: '0 0 8px 8px', margin: 0, fontSize: 13 }}>
+        customStyle={{ borderRadius: '0 0 8px 8px', margin: 0, fontSize: 13, maxWidth: '100%', overflowX: 'auto', WebkitOverflowScrolling: 'touch', tabSize: 2 }}>
         {code}
       </SyntaxHighlighter>
     </div>
@@ -483,11 +485,11 @@ const styles = {
     maxWidth: '100%'
   },
   userText: { margin: 0 },
-  markdown: { minWidth: 0, wordBreak: 'break-word', overflowWrap: 'break-word' },
+  markdown: { minWidth: 0, maxWidth: '100%', overflowX: 'hidden', wordBreak: 'normal', overflowWrap: 'anywhere' },
   inlineCode: {
     background: 'var(--bg4)', padding: '1px 6px', borderRadius: 4,
     fontFamily: 'var(--font-mono)', fontSize: '0.88em', color: 'var(--green)',
-    wordBreak: 'break-all', overflowWrap: 'break-word', whiteSpace: 'pre-wrap'
+    wordBreak: 'normal', overflowWrap: 'anywhere', whiteSpace: 'break-spaces', boxDecorationBreak: 'clone', WebkitBoxDecorationBreak: 'clone'
   },
   toolStatus: {
     display: 'inline-flex', alignItems: 'center', gap: 8,
