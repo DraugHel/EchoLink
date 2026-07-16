@@ -149,6 +149,126 @@ router.delete('/:id', requireAuth, (req, res) => {
   res.json({ ok: true })
 })
 
+
+function buildMessageSearchQuery(input) {
+  const terms = String(input || '')
+    .normalize('NFKC')
+    .match(/[\p{L}\p{N}_]+/gu) || []
+
+  return terms
+    .slice(0, 8)
+    .map(term => `"${term.replaceAll('"', '""')}"*`)
+    .join(' AND ')
+}
+
+router.get('/search', requireAuth, (req, res) => {
+  const rawQuery = String(req.query?.q || '').trim()
+
+  if (rawQuery.length < 2) {
+    return res.json({
+      results: [],
+      offset: 0,
+      limit: 20,
+      hasMore: false
+    })
+  }
+
+  const query = buildMessageSearchQuery(rawQuery)
+
+  if (!query) {
+    return res.json({
+      results: [],
+      offset: 0,
+      limit: 20,
+      hasMore: false
+    })
+  }
+
+  const limit = Math.min(
+    50,
+    Math.max(
+      1,
+      Number.parseInt(req.query?.limit, 10) || 20
+    )
+  )
+
+  const offset = Math.min(
+    10000,
+    Math.max(
+      0,
+      Number.parseInt(req.query?.offset, 10) || 0
+    )
+  )
+
+  try {
+    const rows = db.prepare(`
+      SELECT
+        CAST(message_search.message_id AS INTEGER)
+          AS message_id,
+        messages.conversation_id,
+        messages.role,
+        messages.created_at,
+        conversations.title AS conversation_title,
+        conversations.archived_at,
+        snippet(
+          message_search,
+          1,
+          '',
+          '',
+          ' … ',
+          24
+        ) AS snippet,
+        bm25(message_search) AS score
+      FROM message_search
+      JOIN messages
+        ON messages.id =
+          CAST(message_search.message_id AS INTEGER)
+      JOIN conversations
+        ON conversations.id =
+          messages.conversation_id
+      WHERE
+        message_search MATCH ?
+        AND conversations.user_id = ?
+      ORDER BY
+        score ASC,
+        messages.created_at DESC
+      LIMIT ?
+      OFFSET ?
+    `).all(
+      query,
+      req.session.userId,
+      limit + 1,
+      offset
+    )
+
+    const hasMore = rows.length > limit
+
+    res.json({
+      results: rows.slice(0, limit).map(row => ({
+        messageId: row.message_id,
+        conversationId: row.conversation_id,
+        conversationTitle: row.conversation_title,
+        archivedAt: row.archived_at,
+        role: row.role,
+        createdAt: row.created_at,
+        snippet: row.snippet
+      })),
+      offset,
+      limit,
+      hasMore
+    })
+  } catch (error) {
+    console.error(
+      'Message search failed:',
+      error?.message || error
+    )
+
+    res.status(500).json({
+      error: 'Search failed'
+    })
+  }
+})
+
 // Get messages for a conversation
 router.get('/:id/messages', requireAuth, (req, res) => {
   const convo = db.prepare('SELECT * FROM conversations WHERE id = ? AND user_id = ?')

@@ -135,6 +135,7 @@ export default function Chat({ user, onLogout }) {
   const [showSettings, setShowSettings] = useState(false)
   const [showMemory, setShowMemory] = useState(false)
   const [showTasks, setShowTasks] = useState(false)
+  const [jumpMessageId, setJumpMessageId] = useState(null)
 
   useEffect(() => {
     if (!('serviceWorker' in navigator)) return
@@ -266,6 +267,43 @@ export default function Chat({ user, onLogout }) {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }
 
+  useEffect(() => {
+    if (!jumpMessageId || loading) return
+
+    const frame = window.requestAnimationFrame(() => {
+      const target = document.getElementById(
+        `message-${jumpMessageId}`
+      )
+
+      if (!target) return
+
+      target.scrollIntoView({
+        behavior: 'smooth',
+        block: 'center'
+      })
+
+      if (typeof target.animate === 'function') {
+        target.animate(
+          [
+            { filter: 'brightness(1)' },
+            { filter: 'brightness(1.35)' },
+            { filter: 'brightness(1)' }
+          ],
+          {
+            duration: 1400,
+            easing: 'ease-out'
+          }
+        )
+      }
+
+      setJumpMessageId(null)
+    })
+
+    return () => {
+      window.cancelAnimationFrame(frame)
+    }
+  }, [jumpMessageId, loading, messages])
+
   // Server-Puls: PM2-Apps, Disk, Load — alle 30s
   useEffect(() => {
     let alive = true
@@ -381,6 +419,43 @@ export default function Chat({ user, onLogout }) {
     } finally {
       setLoading(false)
     }
+  }
+
+  async function openSearchResult(result) {
+    const conversationId = Number(
+      result?.conversationId
+    )
+
+    const messageId = Number(
+      result?.messageId
+    )
+
+    if (
+      !Number.isInteger(conversationId) ||
+      conversationId <= 0 ||
+      !Number.isInteger(messageId) ||
+      messageId <= 0
+    ) {
+      return
+    }
+
+    let conversation = conversations.find(
+      item => Number(item.id) === conversationId
+    )
+
+    if (!conversation) {
+      const refreshed = await loadConversations()
+
+      conversation = refreshed.find(
+        item => Number(item.id) === conversationId
+      )
+    }
+
+    if (!conversation) return
+
+    stickToBottomRef.current = false
+    await selectConvo(conversation)
+    setJumpMessageId(messageId)
   }
 
   async function createConvo() {
@@ -839,6 +914,7 @@ export default function Chat({ user, onLogout }) {
           onRename={renameConvo}
           onArchive={archiveConvo}
           onRestore={restoreConvo}
+          onSearchResult={openSearchResult}
           user={user}
           onLogout={onLogout}
           mobileOpen={mobileSidebar}
@@ -1234,7 +1310,32 @@ export default function Chat({ user, onLogout }) {
                 const group = [m]
                 while (i + 1 < messages.length && isTerm(messages[i + 1])) group.push(messages[++i])
                 out.push(
-                  <TerminalTimeline key={'tg-' + group[0].id} items={group} onDelete={deleteMessage} />
+                  <div
+                    key={'tg-' + group[0].id}
+                    style={{
+                      position: 'relative',
+                      scrollMarginTop: 80
+                    }}
+                  >
+                    {group.map(item => (
+                      <span
+                        key={`anchor-${item.id}`}
+                        id={`message-${item.id}`}
+                        style={{
+                          position: 'absolute',
+                          top: 0,
+                          left: 0,
+                          width: 1,
+                          height: 1,
+                          pointerEvents: 'none'
+                        }}
+                      />
+                    ))}
+                    <TerminalTimeline
+                      items={group}
+                      onDelete={deleteMessage}
+                    />
+                  </div>
                 )
               } else {
                 const prev = out.length === 0 ? null : messages[i - 1]

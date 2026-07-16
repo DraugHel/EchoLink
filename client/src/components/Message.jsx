@@ -82,7 +82,16 @@ function Message({ role, content, streaming, images, think, toolStatus, actionRe
   }
 
   return (
-    <div style={{ ...styles.wrap, justifyContent: isUser ? 'flex-end' : 'flex-start' }} className="fade-in">
+    <div
+      id={id ? `message-${id}` : undefined}
+      style={{
+        ...styles.wrap,
+        justifyContent:
+          isUser ? 'flex-end' : 'flex-start',
+        scrollMarginTop: 80
+      }}
+      className="fade-in"
+    >
       {!isUser && (
         <div style={styles.avatar}>
           <svg width="14" height="14" viewBox="0 0 32 32" fill="none">

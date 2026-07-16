@@ -1,13 +1,32 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import api from '../lib/api.js'
 
-export default function Sidebar({ conversations, activeId, onSelect, onCreate, onDelete, onRename, onArchive, onRestore, user, onLogout, mobileOpen, onMobileClose, mobile }) {
+function formatSearchResultDate(timestamp) {
+  if (!timestamp) return ''
+
+  return new Date(timestamp * 1000)
+    .toLocaleDateString(
+      'de-DE',
+      {
+        day: '2-digit',
+        month: '2-digit',
+        year: '2-digit'
+      }
+    )
+}
+
+export default function Sidebar({ conversations, activeId, onSelect, onCreate, onDelete, onRename, onArchive, onRestore, onSearchResult, user, onLogout, mobileOpen, onMobileClose, mobile }) {
   const [editingId, setEditingId] = useState(null)
   const [editTitle, setEditTitle] = useState('')
   const [hoverId, setHoverId] = useState(null)
   const [creating, setCreating] = useState(false)
   const [search, setSearch] = useState('')
   const [view, setView] = useState('active')
+  const [messageResults, setMessageResults] = useState([])
+  const [searchLoading, setSearchLoading] = useState(false)
+  const [searchError, setSearchError] = useState('')
+  const [hasMoreResults, setHasMoreResults] = useState(false)
+  const searchRequestRef = useRef(0)
 
   const normalizedSearch = search.trim().toLocaleLowerCase('de')
   const activeCount = conversations.filter(c => !c.archived_at).length
@@ -19,6 +38,82 @@ export default function Sidebar({ conversations, activeId, onSelect, onCreate, o
     return !normalizedSearch ||
       String(c.title || '').toLocaleLowerCase('de').includes(normalizedSearch)
   })
+
+  async function loadMessageResults({
+    query,
+    offset = 0,
+    append = false
+  }) {
+    const requestId = ++searchRequestRef.current
+
+    setSearchLoading(true)
+    setSearchError('')
+
+    try {
+      const data = await api.get(
+        '/api/conversations/search' +
+        `?q=${encodeURIComponent(query)}` +
+        `&limit=20&offset=${offset}`
+      )
+
+      if (requestId !== searchRequestRef.current) {
+        return
+      }
+
+      const results = Array.isArray(data?.results)
+        ? data.results
+        : []
+
+      setMessageResults(previous =>
+        append
+          ? [...previous, ...results]
+          : results
+      )
+
+      setHasMoreResults(Boolean(data?.hasMore))
+    } catch (error) {
+      if (requestId !== searchRequestRef.current) {
+        return
+      }
+
+      setSearchError(
+        error?.message || 'Suche fehlgeschlagen'
+      )
+
+      if (!append) {
+        setMessageResults([])
+      }
+    } finally {
+      if (requestId === searchRequestRef.current) {
+        setSearchLoading(false)
+      }
+    }
+  }
+
+  useEffect(() => {
+    const query = search.trim()
+
+    if (query.length < 2) {
+      searchRequestRef.current += 1
+      setMessageResults([])
+      setHasMoreResults(false)
+      setSearchError('')
+      setSearchLoading(false)
+      return
+    }
+
+    const timer = window.setTimeout(() => {
+      loadMessageResults({
+        query,
+        offset: 0,
+        append: false
+      })
+    }, 300)
+
+    return () => {
+      window.clearTimeout(timer)
+    }
+  }, [search])
 
   function startEdit(e, c) {
     e.stopPropagation()
@@ -91,13 +186,27 @@ export default function Sidebar({ conversations, activeId, onSelect, onCreate, o
         </div>
 
         <div style={styles.controls}>
-          <input
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            placeholder="Unterhaltungen suchen"
-            aria-label="Unterhaltungen suchen"
-            style={styles.search}
-          />
+          <div style={styles.searchWrap}>
+            <SearchIcon />
+            <input
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              placeholder="Chats und Nachrichten suchen"
+              aria-label="Chats und Nachrichten suchen"
+              style={styles.search}
+            />
+            {search && (
+              <button
+                type="button"
+                onClick={() => setSearch('')}
+                title="Suche löschen"
+                aria-label="Suche löschen"
+                style={styles.clearSearch}
+              >
+                ×
+              </button>
+            )}
+          </div>
           <div style={styles.tabs}>
             <button
               type="button"
@@ -118,6 +227,86 @@ export default function Sidebar({ conversations, activeId, onSelect, onCreate, o
 
         {/* Conversations */}
         <div style={styles.list}>
+          {normalizedSearch.length >= 2 && (
+            <section style={styles.resultSection}>
+              <div style={styles.sectionTitle}>
+                <span>Nachrichten</span>
+                {searchLoading && (
+                  <span style={styles.searchState}>
+                    Suche …
+                  </span>
+                )}
+              </div>
+
+              {searchError && (
+                <div style={styles.searchError}>
+                  {searchError}
+                </div>
+              )}
+
+              {!searchLoading &&
+                !searchError &&
+                messageResults.length === 0 && (
+                  <div style={styles.noResults}>
+                    Keine Nachrichtentreffer.
+                  </div>
+                )}
+
+              {messageResults.map(result => (
+                <button
+                  type="button"
+                  key={result.messageId}
+                  onClick={() => {
+                    onSearchResult?.(result)
+                    onMobileClose?.()
+                  }}
+                  style={styles.result}
+                >
+                  <div style={styles.resultHeader}>
+                    <span style={styles.resultTitle}>
+                      {result.conversationTitle}
+                    </span>
+                    <span style={styles.resultMeta}>
+                      {result.archivedAt
+                        ? 'Archiv · '
+                        : ''}
+                      {result.role === 'user'
+                        ? 'Du'
+                        : 'EchoLink'}
+                      {' · '}
+                      {formatSearchResultDate(
+                        result.createdAt
+                      )}
+                    </span>
+                  </div>
+
+                  <div style={styles.resultSnippet}>
+                    {result.snippet}
+                  </div>
+                </button>
+              ))}
+
+              {hasMoreResults && (
+                <button
+                  type="button"
+                  disabled={searchLoading}
+                  onClick={() =>
+                    loadMessageResults({
+                      query: search.trim(),
+                      offset: messageResults.length,
+                      append: true
+                    })
+                  }
+                  style={styles.moreResults}
+                >
+                  {searchLoading
+                    ? 'Lädt …'
+                    : 'Mehr Treffer'}
+                </button>
+              )}
+            </section>
+          )}
+
           {visibleConversations.length === 0 && (
             <p style={styles.empty}>No conversations yet.<br/>Click + to start one.</p>
           )}
@@ -183,6 +372,21 @@ export default function Sidebar({ conversations, activeId, onSelect, onCreate, o
   )
 }
 
+const SearchIcon = () => (
+  <svg
+    width="14"
+    height="14"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+  >
+    <circle cx="11" cy="11" r="8" />
+    <path d="m21 21-4.35-4.35" />
+  </svg>
+)
+
 const PlusIcon = () => (
   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
     <path d="M12 5v14M5 12h14"/>
@@ -230,10 +434,36 @@ const styles = {
     background: 'var(--bg3)'
   },
   controls: { padding: '10px 8px 8px', borderBottom: '1px solid var(--border)' },
+  searchWrap: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 7,
+    width: '100%',
+    padding: '0 9px',
+    borderRadius: 8,
+    border: '1px solid var(--border)',
+    background: 'var(--bg3)',
+    color: 'var(--text3)'
+  },
   search: {
-    width: '100%', minWidth: 0, padding: '8px 10px',
-    borderRadius: 8, border: '1px solid var(--border)',
-    background: 'var(--bg3)', color: 'var(--text)', fontSize: 13
+    flex: 1,
+    minWidth: 0,
+    padding: '8px 0',
+    border: 0,
+    background: 'transparent',
+    color: 'var(--text)',
+    fontSize: 13,
+    outline: 'none'
+  },
+  clearSearch: {
+    flexShrink: 0,
+    width: 22,
+    height: 22,
+    borderRadius: 5,
+    color: 'var(--text3)',
+    background: 'transparent',
+    fontSize: 18,
+    lineHeight: 1
   },
   tabs: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginTop: 8 },
   tab: {
@@ -246,6 +476,94 @@ const styles = {
     borderColor: 'var(--green-dim)'
   },
   list: { flex: 1, overflowY: 'auto', padding: '8px' },
+  resultSection: {
+    paddingBottom: 8,
+    marginBottom: 8,
+    borderBottom: '1px solid var(--border)'
+  },
+  sectionTitle: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+    padding: '4px 4px 6px',
+    color: 'var(--text3)',
+    fontSize: 10,
+    fontFamily: 'var(--font-mono)',
+    textTransform: 'uppercase',
+    letterSpacing: '0.04em'
+  },
+  searchState: {
+    textTransform: 'none',
+    letterSpacing: 0
+  },
+  searchError: {
+    margin: '4px 0 8px',
+    padding: 8,
+    borderRadius: 7,
+    color: 'var(--danger)',
+    background: 'rgba(255,80,80,0.08)',
+    fontSize: 11
+  },
+  noResults: {
+    padding: '8px 6px 10px',
+    color: 'var(--text3)',
+    fontSize: 12
+  },
+  result: {
+    display: 'block',
+    width: '100%',
+    padding: '8px 9px',
+    marginBottom: 3,
+    borderRadius: 8,
+    border: '1px solid transparent',
+    background: 'var(--bg3)',
+    color: 'var(--text)',
+    textAlign: 'left',
+    cursor: 'pointer'
+  },
+  resultHeader: {
+    display: 'flex',
+    alignItems: 'baseline',
+    justifyContent: 'space-between',
+    gap: 8
+  },
+  resultTitle: {
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    color: 'var(--text)',
+    fontSize: 12,
+    fontWeight: 600
+  },
+  resultMeta: {
+    flexShrink: 0,
+    color: 'var(--text3)',
+    fontSize: 9
+  },
+  resultSnippet: {
+    marginTop: 4,
+    color: 'var(--text2)',
+    fontSize: 11,
+    lineHeight: 1.35,
+    display: '-webkit-box',
+    WebkitLineClamp: 3,
+    WebkitBoxOrient: 'vertical',
+    overflow: 'hidden',
+    overflowWrap: 'anywhere',
+    whiteSpace: 'pre-wrap'
+  },
+  moreResults: {
+    width: '100%',
+    marginTop: 5,
+    padding: '7px 8px',
+    borderRadius: 7,
+    border: '1px solid var(--border)',
+    background: 'var(--bg3)',
+    color: 'var(--text2)',
+    fontSize: 11
+  },
   empty: { color: 'var(--text3)', fontSize: 13, padding: '20px 8px', lineHeight: 1.6 },
   item: {
     display: 'flex', alignItems: 'center', justifyContent: 'space-between',

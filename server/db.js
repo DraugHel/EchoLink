@@ -263,6 +263,57 @@ db.exec(`
 `)
 
 
+
+// Volltextindex fuer die globale Nachrichtensuche.
+db.exec(`
+  CREATE VIRTUAL TABLE IF NOT EXISTS message_search
+  USING fts5(
+    message_id UNINDEXED,
+    content,
+    tokenize = 'unicode61 remove_diacritics 2'
+  );
+
+  CREATE TRIGGER IF NOT EXISTS message_search_ai
+  AFTER INSERT ON messages
+  BEGIN
+    INSERT INTO message_search(message_id, content)
+    VALUES (new.id, new.content);
+  END;
+
+  CREATE TRIGGER IF NOT EXISTS message_search_ad
+  AFTER DELETE ON messages
+  BEGIN
+    DELETE FROM message_search
+    WHERE message_id = old.id;
+  END;
+
+  CREATE TRIGGER IF NOT EXISTS message_search_au
+  AFTER UPDATE OF content ON messages
+  BEGIN
+    DELETE FROM message_search
+    WHERE message_id = old.id;
+
+    INSERT INTO message_search(message_id, content)
+    VALUES (new.id, new.content);
+  END;
+
+  INSERT INTO message_search(message_id, content)
+  SELECT messages.id, messages.content
+  FROM messages
+  WHERE NOT EXISTS (
+    SELECT 1
+    FROM message_search
+    WHERE message_search.message_id = messages.id
+  );
+
+  DELETE FROM message_search
+  WHERE NOT EXISTS (
+    SELECT 1
+    FROM messages
+    WHERE messages.id = message_search.message_id
+  );
+`);
+
 // Bestehendes Markdown-Memory einmalig als Legacy-Eintrag übernehmen.
 // Es wird nicht aus users.memory gelöscht.
 try {
