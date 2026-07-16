@@ -150,14 +150,45 @@ export default function ShiftImporter({ onClose }) {
             <form onSubmit={analyze} style={styles.uploadCard}>
               <label style={styles.label}>
                 Schichtplanfoto
-                <input type="file" accept="image/jpeg,image/png,image/webp" onChange={event => setFile(event.target.files?.[0] || null)} />
+                <span style={styles.filePicker}>
+                  <span style={styles.fileButton}>
+                    Foto auswählen
+                  </span>
+                  <span style={styles.fileName}>
+                    {file?.name || 'Keine Datei ausgewählt'}
+                  </span>
+                  <input
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp"
+                    onChange={event =>
+                      setFile(
+                        event.target.files?.[0] ||
+                        null
+                      )
+                    }
+                    style={styles.hiddenFileInput}
+                  />
+                </span>
               </label>
               <label style={styles.label}>
                 Meine Mitarbeiterspalte
                 <input type="number" min="1" max="100" value={columnNumber} onChange={event => setColumnNumber(Math.max(1, Number(event.target.value) || 1))} style={styles.smallInput} />
               </label>
               <div style={styles.hint}>Spalte 1 ist die erste Mitarbeiterspalte direkt rechts von Datum und Tag. Die Analyse schreibt noch nichts in den Kalender.</div>
-              <button type="submit" disabled={analyzing || !file} style={{ ...styles.primary, opacity: analyzing || !file ? 0.55 : 1 }}>
+              <button
+                type="submit"
+                disabled={analyzing || !file}
+                style={{
+                  ...styles.primary,
+                  width: '100%',
+                  maxWidth: '100%',
+                  boxSizing: 'border-box',
+                  opacity:
+                    analyzing || !file
+                      ? 0.55
+                      : 1
+                }}
+              >
                 {analyzing ? 'Bild wird analysiert …' : 'Vorschau erstellen'}
               </button>
             </form>
@@ -245,11 +276,15 @@ const styles = {
   title: { margin: 0, fontSize: 18, color: 'var(--text)' },
   subtitle: { margin: '5px 0 0', color: 'var(--text3)', fontSize: 12 },
   close: { width: 32, height: 32, flexShrink: 0, borderRadius: 8, color: 'var(--text2)', background: 'var(--bg3)', fontSize: 22, lineHeight: 1 },
-  body: { flex: 1, minHeight: 0, overflowY: 'auto', padding: 16 },
+  body: { flex: 1, minWidth: 0, minHeight: 0, overflowY: 'auto', overflowX: 'hidden', padding: 16, boxSizing: 'border-box' },
   loading: { padding: 40, textAlign: 'center', color: 'var(--text3)' },
-  uploadCard: { maxWidth: 520, margin: '30px auto', padding: 18, display: 'grid', gap: 15, border: '1px solid var(--border)', borderRadius: 12, background: 'var(--bg3)' },
-  label: { display: 'grid', gap: 7, color: 'var(--text2)', fontSize: 12, fontWeight: 600 },
-  smallInput: { width: 100, padding: '9px 10px', border: '1px solid var(--border)', borderRadius: 8, background: 'var(--bg2)', color: 'var(--text)' },
+  uploadCard: { width: '100%', maxWidth: 520, minWidth: 0, margin: '20px auto', padding: 18, boxSizing: 'border-box', overflow: 'hidden', display: 'grid', gap: 15, border: '1px solid var(--border)', borderRadius: 12, background: 'var(--bg3)' },
+  label: { display: 'grid', minWidth: 0, gap: 7, color: 'var(--text2)', fontSize: 12, fontWeight: 600 },
+  filePicker: { position: 'relative', width: '100%', minWidth: 0, maxWidth: '100%', minHeight: 44, boxSizing: 'border-box', overflow: 'hidden', display: 'flex', alignItems: 'center', gap: 10, padding: 6, border: '1px solid var(--border)', borderRadius: 9, background: 'var(--bg2)', cursor: 'pointer' },
+  fileButton: { flexShrink: 0, padding: '7px 10px', borderRadius: 7, background: 'var(--bg3)', color: 'var(--text)', fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap' },
+  fileName: { minWidth: 0, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--text3)', fontSize: 12, fontWeight: 400 },
+  hiddenFileInput: { position: 'absolute', inset: 0, width: '100%', height: '100%', opacity: 0, cursor: 'pointer' },
+  smallInput: { width: 100, maxWidth: '100%', padding: '9px 10px', boxSizing: 'border-box', border: '1px solid var(--border)', borderRadius: 8, background: 'var(--bg2)', color: 'var(--text)' },
   hint: { marginTop: 10, color: 'var(--text3)', fontSize: 10, lineHeight: 1.5 },
   summaryCard: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 15, padding: 12, border: '1px solid var(--border)', borderRadius: 10, background: 'var(--bg3)' },
   muted: { marginTop: 4, color: 'var(--text3)', fontSize: 11 },
@@ -262,7 +297,7 @@ const styles = {
   input: { minWidth: 90, maxWidth: 240, padding: '7px 8px', border: '1px solid var(--border)', borderRadius: 7, background: 'var(--bg3)', color: 'var(--text)', fontSize: 12 },
   rowError: { marginTop: 4, maxWidth: 220, color: 'var(--danger)', fontSize: 10, overflowWrap: 'anywhere' },
   footer: { display: 'flex', justifyContent: 'flex-end', flexWrap: 'wrap', gap: 8, marginTop: 14 },
-  primary: { padding: '10px 14px', borderRadius: 8, background: 'var(--accent)', color: '#0d0d0d', fontWeight: 700, fontSize: 12 },
+  primary: { minWidth: 0, maxWidth: '100%', padding: '10px 14px', boxSizing: 'border-box', borderRadius: 8, background: 'var(--accent)', color: '#0d0d0d', fontWeight: 700, fontSize: 12 },
   secondary: { padding: '9px 12px', border: '1px solid var(--border)', borderRadius: 8, background: 'var(--bg3)', color: 'var(--text2)', fontSize: 12 },
   warning: { marginTop: 10, padding: 10, border: '1px solid rgba(230,180,70,0.35)', borderRadius: 9, background: 'rgba(230,180,70,0.08)', color: 'var(--text2)', fontSize: 11, lineHeight: 1.5 },
   success: { marginTop: 12, padding: 10, border: '1px solid var(--green-dim)', borderRadius: 9, background: 'var(--green-bg)', color: 'var(--green)', fontSize: 12 },
