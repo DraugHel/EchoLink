@@ -314,6 +314,76 @@ db.exec(`
   );
 `);
 
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS shift_imports (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    filename TEXT NOT NULL,
+    original_name TEXT NOT NULL DEFAULT '',
+    column_number INTEGER NOT NULL DEFAULT 1,
+    status TEXT NOT NULL DEFAULT 'draft'
+      CHECK(status IN ('draft', 'imported', 'partial')),
+    model TEXT NOT NULL DEFAULT '',
+    plan_start TEXT NOT NULL DEFAULT '',
+    plan_end TEXT NOT NULL DEFAULT '',
+    warnings TEXT NOT NULL DEFAULT '[]',
+    created_at INTEGER DEFAULT (unixepoch()),
+    updated_at INTEGER DEFAULT (unixepoch()),
+    FOREIGN KEY (user_id)
+      REFERENCES users(id)
+      ON DELETE CASCADE
+  );
+
+  CREATE TABLE IF NOT EXISTS shift_import_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    import_id INTEGER NOT NULL,
+    work_date TEXT NOT NULL,
+    code TEXT NOT NULL DEFAULT '',
+    start_time TEXT NOT NULL DEFAULT '',
+    end_time TEXT NOT NULL DEFAULT '',
+    title TEXT NOT NULL DEFAULT '',
+    confidence REAL NOT NULL DEFAULT 0,
+    note TEXT NOT NULL DEFAULT '',
+    enabled INTEGER NOT NULL DEFAULT 0,
+    import_status TEXT NOT NULL DEFAULT 'pending'
+      CHECK(import_status IN ('pending', 'created', 'duplicate', 'error')),
+    event_id TEXT NOT NULL DEFAULT '',
+    error TEXT NOT NULL DEFAULT '',
+    created_at INTEGER DEFAULT (unixepoch()),
+    updated_at INTEGER DEFAULT (unixepoch()),
+    FOREIGN KEY (import_id)
+      REFERENCES shift_imports(id)
+      ON DELETE CASCADE,
+    UNIQUE(import_id, work_date)
+  );
+
+  CREATE TABLE IF NOT EXISTS shift_calendar_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    fingerprint TEXT NOT NULL,
+    event_id TEXT NOT NULL DEFAULT '',
+    title TEXT NOT NULL DEFAULT '',
+    start_at TEXT NOT NULL DEFAULT '',
+    end_at TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'created',
+    created_at INTEGER DEFAULT (unixepoch()),
+    updated_at INTEGER DEFAULT (unixepoch()),
+    FOREIGN KEY (user_id)
+      REFERENCES users(id)
+      ON DELETE CASCADE,
+    UNIQUE(user_id, fingerprint)
+  );
+
+  CREATE INDEX IF NOT EXISTS
+    idx_shift_imports_user_created
+    ON shift_imports(user_id, created_at DESC);
+
+  CREATE INDEX IF NOT EXISTS
+    idx_shift_import_items_import_date
+    ON shift_import_items(import_id, work_date);
+`);
+
 // Bestehendes Markdown-Memory einmalig als Legacy-Eintrag übernehmen.
 // Es wird nicht aus users.memory gelöscht.
 try {

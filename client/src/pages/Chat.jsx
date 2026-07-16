@@ -5,6 +5,7 @@ import MessageInput from '../components/MessageInput.jsx'
 import SettingsPanel from '../components/SettingsPanel.jsx'
 import MemoryPanel from '../components/MemoryPanel.jsx'
 import TaskPanel from '../components/TaskPanel.jsx'
+import ShiftImporter from '../components/ShiftImporter.jsx'
 import PushButton from '../components/PushButton.jsx'
 import api from '../lib/api.js'
 import ThemePicker, { useTheme } from '../components/ThemePicker.jsx'
@@ -135,6 +136,7 @@ export default function Chat({ user, onLogout }) {
   const [showSettings, setShowSettings] = useState(false)
   const [showMemory, setShowMemory] = useState(false)
   const [showTasks, setShowTasks] = useState(false)
+  const [showShiftImporter, setShowShiftImporter] = useState(false)
   const [jumpMessageId, setJumpMessageId] = useState(null)
 
   useEffect(() => {
@@ -1263,6 +1265,24 @@ export default function Chat({ user, onLogout }) {
           <button
             type="button"
             onClick={() => {
+              setShowShiftImporter(true)
+              setShowTasks(false)
+              setShowMemory(false)
+            }}
+            title="Schichtplan importieren"
+            aria-label="Schichtplan importieren"
+            style={{
+              ...styles.settingsBtn,
+              color: showShiftImporter
+                ? 'var(--accent)'
+                : 'var(--text2)'
+            }}
+          >
+            <CalendarImportIcon />
+          </button>
+          <button
+            type="button"
+            onClick={() => {
               setShowTasks(true)
               setShowMemory(false)
             }}
@@ -1454,6 +1474,14 @@ export default function Chat({ user, onLogout }) {
         )}
       </main>
 
+      {showShiftImporter && (
+        <ShiftImporter
+          onClose={() =>
+            setShowShiftImporter(false)
+          }
+        />
+      )}
+
       {showTasks && (
         <TaskPanel
           conversationId={activeConvo?.id || null}
@@ -1487,6 +1515,23 @@ const MenuIcon = () => (
     <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>
   </svg>
 )
+const CalendarImportIcon = () => (
+  <svg
+    width="17"
+    height="17"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+  >
+    <rect x="3" y="4" width="18" height="17" rx="2" />
+    <path d="M8 2v4M16 2v4M3 9h18" />
+    <path d="M12 13v5M9.5 15.5 12 18l2.5-2.5" />
+  </svg>
+)
+
 const ClockIcon = () => (
   <svg
     width="20"
