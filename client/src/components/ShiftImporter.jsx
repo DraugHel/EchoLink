@@ -157,6 +157,7 @@ export default function ShiftImporter({
     useState(false)
   const [error, setError] = useState('')
   const [summary, setSummary] = useState(null)
+  const [showUnchanged, setShowUnchanged] = useState(false)
 
   useEffect(() => {
     let alive = true
@@ -181,6 +182,7 @@ export default function ShiftImporter({
           setSyncRun(sync.run)
           setActions(sync.actions || [])
           setSummary(sync.run.summary || null)
+          setShowUnchanged(false)
         } catch {
           // Kein früherer Vergleich ist normal.
         }
@@ -220,6 +222,26 @@ export default function ShiftImporter({
           action.selected
       ).length,
     [actions]
+  )
+
+  const hiddenInfoCount = useMemo(
+    () =>
+      actions.filter(action =>
+        action.actionType === 'unchanged' ||
+        action.actionType === 'manual_existing'
+      ).length,
+    [actions]
+  )
+
+  const visibleActions = useMemo(
+    () =>
+      showUnchanged
+        ? actions
+        : actions.filter(action =>
+            action.actionType !== 'unchanged' &&
+            action.actionType !== 'manual_existing'
+          ),
+    [actions, showUnchanged]
   )
 
   function clearComparison() {
@@ -378,6 +400,7 @@ export default function ShiftImporter({
       setSyncRun(data.run)
       setActions(data.actions || [])
       setSummary(data.run?.summary || null)
+      setShowUnchanged(false)
     } catch (failure) {
       setError(
         failure?.message ||
@@ -1049,8 +1072,22 @@ export default function ShiftImporter({
                     </div>
                   )}
 
+                  {hiddenInfoCount > 0 && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setShowUnchanged(value => !value)
+                      }
+                      style={styles.infoToggle}
+                    >
+                      {showUnchanged
+                        ? `${hiddenInfoCount} unveränderte Einträge ausblenden`
+                        : `${hiddenInfoCount} unveränderte Einträge anzeigen`}
+                    </button>
+                  )}
+
                   <div style={styles.actionList}>
-                    {actions.map(action => {
+                    {visibleActions.map(action => {
                       const actionable =
                         ACTIONABLE.has(
                           action.actionType
@@ -1070,23 +1107,30 @@ export default function ShiftImporter({
                           <div
                             style={styles.actionTop}
                           >
-                            <label
+                            <div
                               style={styles.actionChoice}
                             >
-                              <input
-                                type="checkbox"
-                                checked={
-                                  action.selected
-                                }
-                                disabled={!canSelect}
-                                onChange={event =>
-                                  setActionSelected(
-                                    action.id,
-                                    event.target
-                                      .checked
-                                  )
-                                }
-                              />
+                              {actionable ? (
+                                <input
+                                  type="checkbox"
+                                  checked={
+                                    action.selected
+                                  }
+                                  disabled={!canSelect}
+                                  onChange={event =>
+                                    setActionSelected(
+                                      action.id,
+                                      event.target
+                                        .checked
+                                    )
+                                  }
+                                />
+                              ) : (
+                                <span
+                                  aria-hidden="true"
+                                  style={styles.infoDot}
+                                />
+                              )}
 
                               <strong
                                 style={{
@@ -1100,7 +1144,7 @@ export default function ShiftImporter({
                                   action.actionType
                                 )}
                               </strong>
-                            </label>
+                            </div>
 
                             <span style={styles.dateBadge}>
                               {action.workDate}
@@ -1532,6 +1576,18 @@ const styles = {
     fontSize: 10,
     fontFamily: 'var(--font-mono)'
   },
+  infoToggle: {
+    width: '100%',
+    marginBottom: 8,
+    padding: '9px 11px',
+    boxSizing: 'border-box',
+    border: '1px solid var(--border)',
+    borderRadius: 9,
+    background: 'var(--bg3)',
+    color: 'var(--text3)',
+    fontSize: 11,
+    textAlign: 'left'
+  },
   actionList: {
     display: 'grid',
     gap: 8
@@ -1555,6 +1611,14 @@ const styles = {
     alignItems: 'center',
     gap: 8,
     fontSize: 12
+  },
+  infoDot: {
+    width: 8,
+    height: 8,
+    flexShrink: 0,
+    borderRadius: '50%',
+    background: 'var(--text3)',
+    opacity: 0.45
   },
   dateBadge: {
     flexShrink: 0,
