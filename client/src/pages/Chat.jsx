@@ -608,14 +608,42 @@ export default function Chat({ user, onLogout }) {
             completion_tokens: json.tokens.completionTokens,
             total_tokens: json.tokens.totalTokens
           } : null
+
+          const contextUsage = json.context ? {
+            context_budget_tokens:
+              json.context.budgetTokens,
+            context_estimated_input_tokens:
+              json.context.estimatedInputTokens,
+            context_kept_messages:
+              json.context.keptMessages,
+            context_omitted_messages:
+              json.context.omittedMessages,
+            context_over_budget:
+              json.context.overBudget
+          } : null
+
           const doneUsage = json.usage || null
-          setMessages(prev => prev.map(m =>
-            m.id === assistantId ? {
+
+          setMessages(prev => prev.map(m => {
+            if (m.id !== assistantId) return m
+
+            const baseUsage =
+              normalized ||
+              doneUsage ||
+              m.usage ||
+              null
+
+            return {
               ...m,
               streaming: false,
-              usage: normalized || doneUsage || m.usage
-            } : m
-          ))
+              usage: contextUsage
+                ? {
+                    ...(baseUsage || {}),
+                    ...contextUsage
+                  }
+                : baseUsage
+            }
+          }))
         }
         if (json.error) {
           throw new Error(json.error)

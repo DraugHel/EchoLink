@@ -11,6 +11,16 @@ function getCodeStyle() {
   return LIGHT_THEMES.includes(t) ? oneLight : oneDark
 }
 
+function formatUsageNumber(value) {
+  const number = Number(value)
+
+  if (!Number.isFinite(number)) {
+    return '–'
+  }
+
+  return Math.round(number).toLocaleString('de-DE')
+}
+
 function Message({ role, content, streaming, images, think, toolStatus, actionRequests, onApprove, onDeny, onAlwaysAllow, usage, id, createdAt, prevCreatedAt, onDelete, editing, onEdit, onSaveEdit, onCancelEdit, retryFailed, onRetry }) {
   const [thinkOpen, setThinkOpen] = useState(false)
   const [termOpen, setTermOpen] = useState(false)
@@ -345,14 +355,227 @@ function Message({ role, content, streaming, images, think, toolStatus, actionRe
                   Retry
                 </button>
               )}
-              {!streaming && usage && (
-                <div onClick={() => setUsageOpen(o => !o)} title="Tap for details"
-                  style={{ fontSize: 10, color: 'var(--text3)', marginTop: 6, fontFamily: 'var(--font-mono)', cursor: 'pointer', userSelect: 'none' }}>
-                  {usageOpen
-                    ? `${usage.prompt_tokens} in→${usage.completion_tokens} out (${usage.total_tokens} total)`
-                    : `${usage.total_tokens} tok`}
-                </div>
-              )}
+              {!streaming && usage && (() => {
+                const contextEstimate = Number(
+                  usage.context_estimated_input_tokens
+                )
+
+                const contextBudget = Number(
+                  usage.context_budget_tokens
+                )
+
+                const contextKept = Number(
+                  usage.context_kept_messages
+                )
+
+                const contextOmitted = Number(
+                  usage.context_omitted_messages
+                )
+
+                const hasContext =
+                  Number.isFinite(contextEstimate) &&
+                  Number.isFinite(contextBudget) &&
+                  contextBudget > 0
+
+                const contextPercent = hasContext
+                  ? Math.min(
+                      100,
+                      Math.max(
+                        0,
+                        contextEstimate /
+                          contextBudget *
+                          100
+                      )
+                    )
+                  : 0
+
+                const contextWarning =
+                  Boolean(usage.context_over_budget) ||
+                  (
+                    Number.isFinite(contextOmitted) &&
+                    contextOmitted > 0
+                  )
+
+                return (
+                  <div
+                    onClick={() =>
+                      setUsageOpen(open => !open)
+                    }
+                    title="Token- und Kontextdetails"
+                    style={{
+                      marginTop: 7,
+                      fontSize: 10,
+                      fontFamily: 'var(--font-mono)',
+                      cursor: 'pointer',
+                      userSelect: 'none',
+                      color: contextWarning
+                        ? 'var(--danger)'
+                        : 'var(--text3)'
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        flexWrap: 'wrap',
+                        gap: '4px 8px'
+                      }}
+                    >
+                      <span>
+                        {formatUsageNumber(
+                          usage.total_tokens
+                        )} tok
+                      </span>
+
+                      {hasContext && (
+                        <span>
+                          Kontext{' '}
+                          {formatUsageNumber(
+                            contextEstimate
+                          )}
+                          /
+                          {formatUsageNumber(
+                            contextBudget
+                          )}
+                        </span>
+                      )}
+
+                      {contextWarning && (
+                        <span>
+                          ⚠{' '}
+                          {formatUsageNumber(
+                            contextOmitted
+                          )}{' '}
+                          ausgelassen
+                        </span>
+                      )}
+
+                      <span
+                        aria-hidden="true"
+                        style={{
+                          fontSize: 9,
+                          opacity: 0.75
+                        }}
+                      >
+                        {usageOpen ? '▾' : '▸'}
+                      </span>
+                    </div>
+
+                    {hasContext && (
+                      <div
+                        style={{
+                          width: '100%',
+                          maxWidth: 260,
+                          height: 3,
+                          marginTop: 5,
+                          overflow: 'hidden',
+                          borderRadius: 999,
+                          background: 'var(--border)'
+                        }}
+                      >
+                        <div
+                          style={{
+                            width:
+                              `${Math.max(
+                                contextPercent,
+                                contextPercent > 0
+                                  ? 1
+                                  : 0
+                              )}%`,
+                            height: '100%',
+                            borderRadius: 999,
+                            background: contextWarning
+                              ? 'var(--danger)'
+                              : 'var(--accent)'
+                          }}
+                        />
+                      </div>
+                    )}
+
+                    {usageOpen && (
+                      <div
+                        style={{
+                          marginTop: 6,
+                          padding: '7px 8px',
+                          maxWidth: 330,
+                          border:
+                            '1px solid var(--border)',
+                          borderRadius: 7,
+                          background: 'var(--bg3)',
+                          color: 'var(--text2)',
+                          lineHeight: 1.55
+                        }}
+                      >
+                        <div>
+                          Tokens:{' '}
+                          {formatUsageNumber(
+                            usage.prompt_tokens
+                          )}{' '}
+                          rein →{' '}
+                          {formatUsageNumber(
+                            usage.completion_tokens
+                          )}{' '}
+                          raus
+                          {' ('}
+                          {formatUsageNumber(
+                            usage.total_tokens
+                          )}{' '}
+                          gesamt)
+                        </div>
+
+                        {hasContext && (
+                          <>
+                            <div>
+                              Kontext:{' '}
+                              {formatUsageNumber(
+                                contextEstimate
+                              )}{' '}
+                              /{' '}
+                              {formatUsageNumber(
+                                contextBudget
+                              )}{' '}
+                              geschätzt
+                              {' · '}
+                              {contextPercent
+                                .toFixed(1)
+                                .replace('.', ',')}
+                              %
+                            </div>
+
+                            <div>
+                              Nachrichten:{' '}
+                              {formatUsageNumber(
+                                contextKept
+                              )}{' '}
+                              verwendet
+                              {' · '}
+                              {formatUsageNumber(
+                                contextOmitted
+                              )}{' '}
+                              ausgelassen
+                            </div>
+                          </>
+                        )}
+
+                        {contextWarning && (
+                          <div
+                            style={{
+                              marginTop: 4,
+                              color: 'var(--danger)'
+                            }}
+                          >
+                            Ältere Nachrichten waren
+                            nicht Teil dieser
+                            Modellanfrage. Im Chat und
+                            in der Datenbank bleiben
+                            sie erhalten.
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )
+              })()}
             </div>
           )
         }
