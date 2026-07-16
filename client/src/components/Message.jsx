@@ -310,12 +310,12 @@ function Message({ role, content, streaming, images, think, toolStatus, actionRe
                   ),
                   a: ({ href, children }) => <a href={href} target="_blank" rel="noreferrer">{children}</a>,
                   table: ({ children }) => (
-                    <div style={{ overflowX: 'auto', marginBottom: 8 }}>
-                      <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: 14 }}>{children}</table>
+                    <div style={{ overflowX: 'auto', maxWidth: '100%', marginBottom: 8, WebkitOverflowScrolling: 'touch', overscrollBehaviorX: 'contain' }}>
+                      <table style={{ borderCollapse: 'collapse', width: 'max-content', minWidth: '100%', tableLayout: 'auto', fontSize: 14 }}>{children}</table>
                     </div>
                   ),
-                  th: ({ children }) => <th style={{ border: '1px solid var(--border)', padding: '6px 12px', background: 'var(--bg3)', textAlign: 'left' }}>{children}</th>,
-                  td: ({ children }) => <td style={{ border: '1px solid var(--border)', padding: '6px 12px' }}>{children}</td>,
+                  th: ({ children }) => <th style={{ border: '1px solid var(--border)', padding: '6px 12px', background: 'var(--bg3)', textAlign: 'left', minWidth: 120, wordBreak: 'normal', overflowWrap: 'break-word' }}>{children}</th>,
+                  td: ({ children }) => <td style={{ border: '1px solid var(--border)', padding: '6px 12px', minWidth: 120, wordBreak: 'normal', overflowWrap: 'break-word' }}>{children}</td>,
                 }}
               >
                 {content}
