@@ -1080,6 +1080,10 @@ export default function Chat({ user, onLogout }) {
             aria-label="Werkzeuge und Einstellungen"
             style={{
               ...styles.settingsBtn,
+              ...(mobile
+                ? styles.mobileToolsButton
+                : {}),
+
               color: showTools
                 ? 'var(--accent)'
                 : 'var(--text2)'
@@ -1424,17 +1428,25 @@ const styles = {
   systemDotsRight: {
     position: 'absolute',
     zIndex: 2,
-    left: 'calc(50% + 29px)',
+    left: 'calc(50% + 20px)',
     top: '50%',
     width: 'auto',
-    minWidth: 32,
     height: 40,
-    display: 'grid',
-    placeItems: 'center',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'flex-start',
     padding: 0,
     border: 0,
     background: 'transparent',
     color: 'var(--text2)',
+    transform: 'translateY(-50%)'
+  },
+  mobileToolsButton: {
+    position: 'absolute',
+    zIndex: 3,
+    right: 8,
+    top: '50%',
+    margin: 0,
     transform: 'translateY(-50%)'
   },
   systemDesktop: {
