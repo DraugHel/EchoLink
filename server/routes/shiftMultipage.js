@@ -1,6 +1,15 @@
 import express from 'express'
 import fs from 'node:fs'
 import path from 'node:path'
+import os from 'node:os'
+import crypto from 'node:crypto'
+import multer from 'multer'
+import {
+  execFile
+} from 'node:child_process'
+import {
+  promisify
+} from 'node:util'
 import {
   fileURLToPath
 } from 'node:url'
@@ -20,6 +29,28 @@ const IMAGE_ROOT = path.join(
   'data',
   'shift-imports'
 )
+
+const PDF_TEMP_ROOT = path.join(
+  os.tmpdir(),
+  'echolink-shift-pdf'
+)
+
+const PDF_MAX_BYTES =
+  25 * 1024 * 1024
+const PDF_MAX_PAGES = 10
+const PDF_BATCH_MAX_AGE_MS =
+  60 * 60 * 1000
+
+const execFileAsync =
+  promisify(execFile)
+
+const pdfUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    files: 1,
+    fileSize: PDF_MAX_BYTES
+  }
+})
 
 router.use(requireAuth)
 
@@ -217,6 +248,460 @@ function removeFileWhenUnused(
     }
   }
 }
+
+
+function pdfBatchId(value) {
+  const clean = String(value || '')
+    .trim()
+    .toLowerCase()
+
+  if (
+    !/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/
+      .test(clean)
+  ) {
+    throw exposedError(
+      'Ungültige PDF-Sitzung'
+    )
+  }
+
+  return clean
+}
+
+function userPdfRoot(userId) {
+  return path.join(
+    PDF_TEMP_ROOT,
+    String(userId)
+  )
+}
+
+function pdfBatchDirectory(
+  userId,
+  batchId
+) {
+  return path.join(
+    userPdfRoot(userId),
+    pdfBatchId(batchId)
+  )
+}
+
+function removeDirectory(target) {
+  try {
+    fs.rmSync(
+      target,
+      {
+        recursive: true,
+        force: true
+      }
+    )
+  } catch (error) {
+    console.warn(
+      'PDF temp cleanup failed:',
+      error?.message || error
+    )
+  }
+}
+
+function cleanupOldPdfBatches() {
+  fs.mkdirSync(
+    PDF_TEMP_ROOT,
+    { recursive: true }
+  )
+
+  const now = Date.now()
+
+  for (
+    const userEntry of fs.readdirSync(
+      PDF_TEMP_ROOT,
+      { withFileTypes: true }
+    )
+  ) {
+    if (!userEntry.isDirectory()) continue
+
+    const userDirectory = path.join(
+      PDF_TEMP_ROOT,
+      userEntry.name
+    )
+
+    for (
+      const batchEntry of fs.readdirSync(
+        userDirectory,
+        { withFileTypes: true }
+      )
+    ) {
+      if (!batchEntry.isDirectory()) continue
+
+      const target = path.join(
+        userDirectory,
+        batchEntry.name
+      )
+
+      try {
+        const stat = fs.statSync(target)
+
+        if (
+          now - stat.mtimeMs >
+          PDF_BATCH_MAX_AGE_MS
+        ) {
+          removeDirectory(target)
+        }
+      } catch {
+        removeDirectory(target)
+      }
+    }
+
+    try {
+      if (
+        fs.readdirSync(userDirectory)
+          .length === 0
+      ) {
+        fs.rmdirSync(userDirectory)
+      }
+    } catch {}
+  }
+}
+
+function looksLikePdf(buffer) {
+  return (
+    Buffer.isBuffer(buffer) &&
+    buffer.length >= 5 &&
+    buffer.subarray(0, 5)
+      .toString('ascii') === '%PDF-'
+  )
+}
+
+function pdfPageCount(stdout) {
+  const match = String(stdout || '')
+    .match(/^Pages:\s+(\d+)\s*$/mi)
+
+  const pages = Number(match?.[1])
+
+  if (
+    !Number.isInteger(pages) ||
+    pages < 1
+  ) {
+    throw exposedError(
+      'Die PDF enthält keine lesbaren Seiten'
+    )
+  }
+
+  if (pages > PDF_MAX_PAGES) {
+    throw exposedError(
+      `Die PDF hat ${pages} Seiten. Maximal ${PDF_MAX_PAGES} Seiten sind erlaubt.`
+    )
+  }
+
+  return pages
+}
+
+function orderedPdfImages(directory) {
+  return fs.readdirSync(directory)
+    .filter(filename =>
+      /^page-\d+\.jpg$/i.test(filename)
+    )
+    .sort((left, right) => {
+      const leftNumber = Number(
+        left.match(/\d+/)?.[0] || 0
+      )
+      const rightNumber = Number(
+        right.match(/\d+/)?.[0] || 0
+      )
+
+      return leftNumber - rightNumber
+    })
+}
+
+async function preparePdfUpload(req, res) {
+  let batchDirectory = ''
+
+  try {
+    cleanupOldPdfBatches()
+
+    if (!req.file?.buffer) {
+      throw exposedError(
+        'Bitte eine PDF-Datei auswählen'
+      )
+    }
+
+    if (!looksLikePdf(req.file.buffer)) {
+      throw exposedError(
+        'Die ausgewählte Datei ist keine gültige PDF'
+      )
+    }
+
+    const batchId = crypto.randomUUID()
+    batchDirectory = pdfBatchDirectory(
+      req.session.userId,
+      batchId
+    )
+
+    fs.mkdirSync(
+      batchDirectory,
+      { recursive: true }
+    )
+
+    const inputPath = path.join(
+      batchDirectory,
+      'input.pdf'
+    )
+
+    fs.writeFileSync(
+      inputPath,
+      req.file.buffer,
+      { mode: 0o600 }
+    )
+
+    let info
+
+    try {
+      info = await execFileAsync(
+        'pdfinfo',
+        [inputPath],
+        {
+          timeout: 20_000,
+          maxBuffer:
+            2 * 1024 * 1024
+        }
+      )
+    } catch (error) {
+      if (error?.code === 'ENOENT') {
+        throw exposedError(
+          'pdfinfo ist auf dem Server nicht installiert',
+          503
+        )
+      }
+
+      throw exposedError(
+        'Die PDF konnte nicht gelesen werden. Passwortgeschützte oder beschädigte PDFs werden nicht unterstützt.'
+      )
+    }
+
+    const pageCount =
+      pdfPageCount(info.stdout)
+
+    const outputPrefix = path.join(
+      batchDirectory,
+      'page'
+    )
+
+    try {
+      await execFileAsync(
+        'pdftoppm',
+        [
+          '-jpeg',
+          '-scale-to',
+          '2400',
+          '-jpegopt',
+          'quality=85',
+          '-f',
+          '1',
+          '-l',
+          String(pageCount),
+          inputPath,
+          outputPrefix
+        ],
+        {
+          timeout: 120_000,
+          maxBuffer:
+            4 * 1024 * 1024
+        }
+      )
+    } catch (error) {
+      if (error?.code === 'ENOENT') {
+        throw exposedError(
+          'pdftoppm ist auf dem Server nicht installiert',
+          503
+        )
+      }
+
+      throw exposedError(
+        'Die PDF-Seiten konnten nicht in Bilder umgewandelt werden'
+      )
+    } finally {
+      try {
+        fs.unlinkSync(inputPath)
+      } catch {}
+    }
+
+    const images =
+      orderedPdfImages(batchDirectory)
+
+    if (images.length !== pageCount) {
+      throw exposedError(
+        'Nicht alle PDF-Seiten konnten vorbereitet werden'
+      )
+    }
+
+    let totalBytes = 0
+
+    images.forEach(filename => {
+      const target = path.join(
+        batchDirectory,
+        filename
+      )
+
+      const size =
+        fs.statSync(target).size
+
+      if (
+        size < 1 ||
+        size > 10 * 1024 * 1024
+      ) {
+        throw exposedError(
+          'Mindestens eine PDF-Seite ist nach der Umwandlung zu groß'
+        )
+      }
+
+      totalBytes += size
+    })
+
+    if (
+      totalBytes >
+      40 * 1024 * 1024
+    ) {
+      throw exposedError(
+        'Die umgewandelten PDF-Seiten sind zusammen zu groß'
+      )
+    }
+
+    res.json({
+      batchId,
+      originalName:
+        String(
+          req.file.originalname ||
+          'Schichtplan.pdf'
+        ).slice(0, 300),
+      pageCount,
+      pages: images.map(
+        (_, index) => ({
+          pageNumber: index + 1,
+          url:
+            `/api/shift-multipage/pdf/${batchId}/${index + 1}`
+        })
+      )
+    })
+  } catch (error) {
+    if (batchDirectory) {
+      removeDirectory(batchDirectory)
+    }
+
+    res.status(
+      error?.statusCode || 500
+    ).json({
+      error:
+        error?.message ||
+        'PDF konnte nicht vorbereitet werden'
+    })
+  }
+}
+
+
+router.post(
+  '/pdf/prepare',
+  (req, res) => {
+    pdfUpload.single('pdf')(
+      req,
+      res,
+      error => {
+        if (error) {
+          const status =
+            error?.code ===
+            'LIMIT_FILE_SIZE'
+              ? 413
+              : 400
+
+          return res.status(status).json({
+            error:
+              error?.code ===
+              'LIMIT_FILE_SIZE'
+                ? 'Die PDF darf maximal 25 MB groß sein'
+                : error?.message ||
+                  'PDF-Upload fehlgeschlagen'
+          })
+        }
+
+        preparePdfUpload(req, res)
+      }
+    )
+  }
+)
+
+router.get(
+  '/pdf/:batchId/:pageNumber',
+  (req, res) => {
+    try {
+      const batchId = pdfBatchId(
+        req.params.batchId
+      )
+
+      const pageNumber = integer(
+        req.params.pageNumber,
+        'PDF-Seite',
+        1,
+        PDF_MAX_PAGES
+      )
+
+      const target = path.join(
+        pdfBatchDirectory(
+          req.session.userId,
+          batchId
+        ),
+        `page-${pageNumber}.jpg`
+      )
+
+      if (!fs.existsSync(target)) {
+        return res.status(404).json({
+          error:
+            'Vorbereitete PDF-Seite nicht gefunden'
+        })
+      }
+
+      res.set(
+        'Cache-Control',
+        'private, no-store'
+      )
+      res.type('image/jpeg')
+      res.sendFile(target)
+    } catch (error) {
+      res.status(
+        error?.statusCode || 500
+      ).json({
+        error:
+          error?.message ||
+          'PDF-Seite konnte nicht geladen werden'
+      })
+    }
+  }
+)
+
+router.delete(
+  '/pdf/:batchId',
+  (req, res) => {
+    try {
+      const batchId = pdfBatchId(
+        req.params.batchId
+      )
+
+      removeDirectory(
+        pdfBatchDirectory(
+          req.session.userId,
+          batchId
+        )
+      )
+
+      res.json({
+        deleted: true
+      })
+    } catch (error) {
+      res.status(
+        error?.statusCode || 500
+      ).json({
+        error:
+          error?.message ||
+          'PDF-Zwischendaten konnten nicht entfernt werden'
+      })
+    }
+  }
+)
 
 router.post('/merge', (req, res) => {
   try {

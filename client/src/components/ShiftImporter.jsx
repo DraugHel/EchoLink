@@ -162,6 +162,8 @@ export default function ShiftImporter({
   const [files, setFiles] = useState([])
   const [analysisProgress, setAnalysisProgress] =
     useState(null)
+  const [preparingPdf, setPreparingPdf] =
+    useState(false)
   const [columnNumber, setColumnNumber] =
     useState(1)
   const [draft, setDraft] = useState(null)
@@ -375,6 +377,167 @@ export default function ShiftImporter({
     )
   }
 
+
+  async function selectShiftFiles(event) {
+    const selected = Array.from(
+      event.target.files || []
+    )
+
+    event.target.value = ''
+
+    if (selected.length === 0) return
+
+    const pdfs = selected.filter(file =>
+      file.type === 'application/pdf' ||
+      /\.pdf$/i.test(file.name)
+    )
+
+    if (pdfs.length > 0) {
+      if (
+        selected.length !== 1 ||
+        pdfs.length !== 1
+      ) {
+        setError(
+          'Bitte entweder eine PDF oder bis zu zehn Fotos auswählen.'
+        )
+        return
+      }
+
+      const pdf = pdfs[0]
+
+      if (
+        pdf.size >
+        25 * 1024 * 1024
+      ) {
+        setError(
+          'Die PDF darf maximal 25 MB groß sein.'
+        )
+        return
+      }
+
+      setPreparingPdf(true)
+      setError('')
+
+      let batchId = ''
+
+      try {
+        const body = new FormData()
+        body.append('pdf', pdf)
+
+        const response = await fetch(
+          '/api/shift-multipage/pdf/prepare',
+          {
+            method: 'POST',
+            body
+          }
+        )
+
+        if (!response.ok) {
+          throw await responseError(response)
+        }
+
+        const prepared =
+          await response.json()
+
+        batchId = prepared.batchId || ''
+
+        const baseName = pdf.name
+          .replace(/\.pdf$/i, '')
+          .slice(0, 180)
+
+        const converted = []
+
+        for (
+          const page of prepared.pages || []
+        ) {
+          const pageResponse = await fetch(
+            page.url,
+            {
+              cache: 'no-store'
+            }
+          )
+
+          if (!pageResponse.ok) {
+            throw await responseError(
+              pageResponse
+            )
+          }
+
+          const blob =
+            await pageResponse.blob()
+
+          converted.push(
+            new File(
+              [blob],
+              `${baseName} – Seite ${String(
+                page.pageNumber
+              ).padStart(2, '0')}.jpg`,
+              {
+                type: 'image/jpeg',
+                lastModified: Date.now()
+              }
+            )
+          )
+        }
+
+        if (converted.length === 0) {
+          throw new Error(
+            'Die PDF enthielt keine vorbereiteten Seiten.'
+          )
+        }
+
+        setFiles(converted)
+      } catch (failure) {
+        setFiles([])
+        setError(
+          failure?.message ||
+          'PDF konnte nicht vorbereitet werden'
+        )
+      } finally {
+        if (batchId) {
+          try {
+            await fetch(
+              `/api/shift-multipage/pdf/${batchId}`,
+              {
+                method: 'DELETE'
+              }
+            )
+          } catch {}
+        }
+
+        setPreparingPdf(false)
+      }
+
+      return
+    }
+
+    const unsupported = selected.filter(
+      file =>
+        ![
+          'image/jpeg',
+          'image/png',
+          'image/webp'
+        ].includes(file.type)
+    )
+
+    if (unsupported.length > 0) {
+      setError(
+        'Unterstützt werden JPG, PNG, WebP oder eine PDF.'
+      )
+      return
+    }
+
+    if (selected.length > 10) {
+      setError(
+        'Maximal zehn Fotos sind erlaubt.'
+      )
+      return
+    }
+
+    setError('')
+    setFiles(selected)
+  }
+
   function moveSelectedFile(
     index,
     direction
@@ -410,7 +573,7 @@ export default function ShiftImporter({
 
     if (files.length === 0) {
       setError(
-        'Bitte zuerst mindestens ein Foto auswählen.'
+        'Bitte zuerst Fotos oder eine PDF auswählen.'
       )
       return
     }
@@ -838,34 +1001,36 @@ export default function ShiftImporter({
               style={styles.uploadCard}
             >
               <label style={styles.label}>
-                Schichtplanfotos
+                Schichtplanfotos oder PDF
 
                 <span style={styles.filePicker}>
                   <span style={styles.fileButton}>
-                    Fotos auswählen
+                    {preparingPdf
+                      ? 'PDF wird vorbereitet …'
+                      : 'Dateien auswählen'}
                   </span>
 
                   <span style={styles.fileName}>
-                    {files.length > 0
-                      ? `${files.length} Foto${
-                          files.length === 1
-                            ? ''
-                            : 's'
-                        } ausgewählt`
-                      : 'Keine Datei ausgewählt'}
+                    {preparingPdf
+                      ? 'Seiten werden umgewandelt'
+                      : files.length > 0
+                        ? `${files.length} Seite${
+                            files.length === 1
+                              ? ''
+                              : 'n'
+                          } ausgewählt`
+                        : 'Keine Datei ausgewählt'}
                   </span>
 
                   <input
                     type="file"
                     multiple
-                    accept="image/jpeg,image/png,image/webp"
-                    onChange={event =>
-                      setFiles(
-                        Array.from(
-                          event.target.files || []
-                        ).slice(0, 10)
-                      )
+                    disabled={
+                      analyzing ||
+                      preparingPdf
                     }
+                    accept="image/jpeg,image/png,image/webp,application/pdf"
+                    onChange={selectShiftFiles}
                     style={styles.hiddenFileInput}
                   />
                 </span>
@@ -964,33 +1129,40 @@ export default function ShiftImporter({
               <div style={styles.hint}>
                 Spalte 1 ist die erste
                 Mitarbeiterspalte direkt rechts von
-                Datum und Tag. Bis zu zehn Fotos
-                werden in der angezeigten Reihenfolge
-                analysiert und anschließend zu einem
-                Plan zusammengeführt. Widersprüche
+                Datum und Tag. Du kannst bis zu zehn
+                Fotos oder eine PDF mit höchstens zehn
+                Seiten auswählen. PDF-Seiten werden
+                automatisch umgewandelt. Widersprüche
                 werden deaktiviert und markiert.
               </div>
 
               <button
                 type="submit"
-                disabled={analyzing || files.length === 0}
+                disabled={
+                  analyzing ||
+                  preparingPdf ||
+                  files.length === 0
+                }
                 style={{
                   ...styles.primary,
                   width: '100%',
                   opacity:
                     analyzing ||
+                    preparingPdf ||
                     files.length === 0
                       ? 0.55
                       : 1
                 }}
               >
-                {analyzing
-                  ? analysisProgress
-                    ? `Foto ${analysisProgress.current} von ${analysisProgress.total} wird analysiert …`
-                    : 'Fotos werden analysiert …'
-                  : files.length > 1
-                    ? `${files.length} Fotos analysieren`
-                    : 'Vorschau erstellen'}
+                {preparingPdf
+                  ? 'PDF wird vorbereitet …'
+                  : analyzing
+                    ? analysisProgress
+                      ? `Seite ${analysisProgress.current} von ${analysisProgress.total} wird analysiert …`
+                      : 'Seiten werden analysiert …'
+                    : files.length > 1
+                      ? `${files.length} Seiten analysieren`
+                      : 'Vorschau erstellen'}
               </button>
             </form>
           ) : (
