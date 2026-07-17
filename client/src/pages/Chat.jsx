@@ -1411,27 +1411,31 @@ const styles = {
     zIndex: 2,
     left: '50%',
     top: '50%',
-    width: 46,
-    height: 46,
+    width: 44,
+    height: 44,
     display: 'grid',
     placeItems: 'center',
     padding: 0,
-    border: '1px solid var(--border)',
-    borderRadius: 14,
-    background: 'var(--bg3)',
+    border: 0,
+    borderRadius: 0,
+    background: 'transparent',
     transform: 'translate(-50%, -50%)'
   },
   systemDotsRight: {
-    width: 46,
-    height: 42,
-    flexShrink: 0,
+    position: 'absolute',
+    zIndex: 2,
+    left: 'calc(50% + 29px)',
+    top: '50%',
+    width: 'auto',
+    minWidth: 32,
+    height: 40,
     display: 'grid',
     placeItems: 'center',
-    marginLeft: 'auto',
     padding: 0,
     border: 0,
     background: 'transparent',
-    color: 'var(--text2)'
+    color: 'var(--text2)',
+    transform: 'translateY(-50%)'
   },
   systemDesktop: {
     height: 42,
@@ -1448,7 +1452,7 @@ const styles = {
   systemDots: {
     display: 'flex',
     alignItems: 'center',
-    justifyContent: 'center',
+    justifyContent: 'flex-start',
     gap: 5
   },
   systemDot: {

@@ -65,7 +65,15 @@ export default function SystemStatusPanel({
     Number(status?.backups?.full?.ageSeconds) >
       1209600
 
+  const monitoredProcessWarning =
+    (status?.apps || []).some(
+      app =>
+        monitoredApps.includes(app.name) &&
+        app.status !== 'online'
+    )
+
   const systemWarning =
+    monitoredProcessWarning ||
     Number(status?.memory?.usedPercent) >= 90 ||
     Number(status?.disk) >= 90 ||
     Number(status?.cpu) >= 95 ||
@@ -102,7 +110,9 @@ export default function SystemStatusPanel({
                 : 'var(--accent)'
             }}
           >
-            {systemWarning ? 'Prüfen' : 'Alles okay'}
+            {systemWarning
+              ? 'Prüfen'
+              : 'Alles okay'}
           </span>
 
           <button
