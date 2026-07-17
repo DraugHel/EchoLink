@@ -244,7 +244,7 @@ function fingerprint(userId, item) {
 }
 
 router.get('/latest', requireAuth, (req, res) => {
-  const row = db.prepare('SELECT * FROM shift_imports WHERE user_id = ? ORDER BY id DESC LIMIT 1').get(req.session.userId)
+  const row = db.prepare('SELECT * FROM shift_imports WHERE user_id = ? AND archived_at IS NULL ORDER BY id DESC LIMIT 1').get(req.session.userId)
   res.json(row ? withItems(row) : { import: null, items: [] })
 })
 

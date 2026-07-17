@@ -6,6 +6,7 @@ import {
 
 import api from '../lib/api.js'
 import ShiftSettings from './ShiftSettings.jsx'
+import ShiftHistory from './ShiftHistory.jsx'
 
 const PRESETS = {
   '1': {
@@ -181,6 +182,7 @@ export default function ShiftImporter({
   const [showPlan, setShowPlan] = useState(true)
   const [profile, setProfile] = useState(null)
   const [showProfile, setShowProfile] = useState(false)
+  const [showHistory, setShowHistory] = useState(false)
 
   useEffect(() => {
     let alive = true
@@ -597,6 +599,70 @@ export default function ShiftImporter({
     clearComparison()
   }
 
+  async function loadHistoryPlan(importId) {
+    setLoading(true)
+    setError('')
+
+    try {
+      const data = await api.get(
+        `/api/shift-imports/${importId}`
+      )
+
+      setDraft(data.import)
+      setItems(data.items || [])
+      setColumnNumber(
+        data.import?.columnNumber || 1
+      )
+      setFile(null)
+      clearComparison()
+      setShowPlan(true)
+
+      try {
+        const sync = await api.get(
+          `/api/shift-sync/imports/${importId}/latest`
+        )
+
+        if (sync?.run) {
+          setSyncRun(sync.run)
+          setActions(sync.actions || [])
+          setSummary(sync.run.summary || null)
+          setShowUnchanged(false)
+          setShowCompleted(false)
+          setShowPlan(
+            ![
+              'applied',
+              'partial',
+              'rolled_back',
+              'rollback_partial'
+            ].includes(sync.run.status)
+          )
+        }
+      } catch {
+        // Ein Plan ohne Sync-Lauf ist ein normaler Entwurf.
+      }
+
+      setShowHistory(false)
+    } catch (failure) {
+      setError(
+        failure?.message ||
+        'Schichtplan konnte nicht geöffnet werden'
+      )
+      throw failure
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  function handleHistoryPlanUnavailable(planId) {
+    if (draft?.id === planId) {
+      setDraft(null)
+      setItems([])
+      setFile(null)
+      setShowPlan(true)
+      clearComparison()
+    }
+  }
+
   function startNew() {
     setDraft(null)
     setItems([])
@@ -633,9 +699,21 @@ export default function ShiftImporter({
           <div style={styles.headerActions}>
             <button
               type="button"
-              onClick={() =>
+              onClick={() => {
+                setShowHistory(value => !value)
+                setShowProfile(false)
+              }}
+              style={styles.profileButton}
+            >
+              Pläne
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
                 setShowProfile(value => !value)
-              }
+                setShowHistory(false)
+              }}
               style={styles.profileButton}
             >
               Profil
@@ -653,6 +731,14 @@ export default function ShiftImporter({
         </header>
 
         <div style={styles.body}>
+          {showHistory && (
+            <ShiftHistory
+              onClose={() => setShowHistory(false)}
+              onOpenPlan={loadHistoryPlan}
+              onPlanUnavailable={handleHistoryPlanUnavailable}
+            />
+          )}
+
           {showProfile && profile && (
             <ShiftSettings
               profile={profile}

@@ -481,6 +481,30 @@ for (const migration of [
   }
 }
 
+try {
+  db.exec(`
+    ALTER TABLE shift_imports
+    ADD COLUMN archived_at INTEGER DEFAULT NULL
+  `)
+} catch (error) {
+  if (!String(error.message).includes('duplicate column name')) {
+    console.error(
+      'Shift history migration error:',
+      error.message
+    )
+  }
+}
+
+db.exec(`
+  CREATE INDEX IF NOT EXISTS
+    idx_shift_imports_user_archived
+    ON shift_imports(
+      user_id,
+      archived_at,
+      id DESC
+    );
+`)
+
 // Bestehendes Markdown-Memory einmalig als Legacy-Eintrag übernehmen.
 // Es wird nicht aus users.memory gelöscht.
 try {
