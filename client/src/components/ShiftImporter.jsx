@@ -178,6 +178,7 @@ export default function ShiftImporter({
   const [summary, setSummary] = useState(null)
   const [showUnchanged, setShowUnchanged] = useState(false)
   const [showCompleted, setShowCompleted] = useState(false)
+  const [showPlan, setShowPlan] = useState(true)
   const [profile, setProfile] = useState(null)
   const [showProfile, setShowProfile] = useState(false)
 
@@ -219,8 +220,15 @@ export default function ShiftImporter({
           setActions(sync.actions || [])
           setSummary(sync.run.summary || null)
           setShowUnchanged(false)
-      setShowCompleted(false)
           setShowCompleted(false)
+          setShowPlan(
+            ![
+              'applied',
+              'partial',
+              'rolled_back',
+              'rollback_partial'
+            ].includes(sync.run.status)
+          )
         } catch {
           // Kein früherer Vergleich ist normal.
         }
@@ -406,6 +414,7 @@ export default function ShiftImporter({
           profile
         )
       )
+      setShowPlan(true)
     } catch (failure) {
       setError(
         failure?.message ||
@@ -522,6 +531,7 @@ export default function ShiftImporter({
         null
       )
       setShowCompleted(false)
+      setShowPlan(false)
 
       const refreshed = await api.get(
         `/api/shift-imports/${draft.id}`
@@ -583,6 +593,7 @@ export default function ShiftImporter({
       )
     )
     setShowProfile(false)
+    setShowPlan(true)
     clearComparison()
   }
 
@@ -590,6 +601,7 @@ export default function ShiftImporter({
     setDraft(null)
     setItems([])
     setFile(null)
+    setShowPlan(true)
     clearComparison()
     setError('')
   }
@@ -759,7 +771,35 @@ export default function ShiftImporter({
                 </button>
               </div>
 
-              {draft.warnings?.length > 0 && (
+              <div style={styles.planBar}>
+                <div style={styles.planBarText}>
+                  <strong>
+                    {items.length} Planzeilen gespeichert
+                  </strong>
+
+                  <div style={styles.muted}>
+                    {enabledCount} aktive Schichten
+                    {' · '}
+                    {uncertainCount} unsicher
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    setShowPlan(value => !value)
+                  }
+                  style={styles.secondary}
+                >
+                  {showPlan
+                    ? 'Plan einklappen'
+                    : 'Plan anzeigen/bearbeiten'}
+                </button>
+              </div>
+
+              {showPlan && (
+                <>
+                  {draft.warnings?.length > 0 && (
                 <div style={styles.warning}>
                   {draft.warnings.map(
                     (text, index) => (
@@ -1027,21 +1067,26 @@ export default function ShiftImporter({
                 </table>
               </div>
 
+                </>
+              )}
+
               <div style={styles.footer}>
-                <button
-                  type="button"
-                  onClick={saveItems}
-                  disabled={
-                    saving ||
-                    comparing ||
-                    syncing
-                  }
-                  style={styles.secondary}
-                >
-                  {saving
-                    ? 'Speichert …'
-                    : 'Vorschau speichern'}
-                </button>
+                {showPlan && (
+                  <button
+                    type="button"
+                    onClick={saveItems}
+                    disabled={
+                      saving ||
+                      comparing ||
+                      syncing
+                    }
+                    style={styles.secondary}
+                  >
+                    {saving
+                      ? 'Speichert …'
+                      : 'Vorschau speichern'}
+                  </button>
+                )}
 
                 <button
                   type="button"
@@ -1577,6 +1622,24 @@ const styles = {
     marginTop: 4,
     color: 'var(--text3)',
     fontSize: 11
+  },
+  planBar: {
+    minWidth: 0,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    flexWrap: 'wrap',
+    gap: 10,
+    marginTop: 10,
+    padding: 11,
+    border: '1px solid var(--border)',
+    borderRadius: 10,
+    background: 'var(--bg3)'
+  },
+  planBarText: {
+    minWidth: 0,
+    color: 'var(--text)',
+    fontSize: 12
   },
   stats: {
     display: 'flex',
