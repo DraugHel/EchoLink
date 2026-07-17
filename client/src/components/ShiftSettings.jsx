@@ -28,6 +28,10 @@ export default function ShiftSettings({
   const [loadingCalendars, setLoadingCalendars] =
     useState(true)
   const [saving, setSaving] = useState(false)
+  const [removingReminders, setRemovingReminders] =
+    useState(false)
+  const [reminderResult, setReminderResult] =
+    useState(null)
   const [error, setError] = useState('')
 
   useEffect(() => {
@@ -115,6 +119,37 @@ export default function ShiftSettings({
       )
     } finally {
       setSaving(false)
+    }
+  }
+
+
+  async function removeExistingReminders() {
+    const accepted = window.confirm(
+      'Erinnerungen bei allen von EchoLink verwalteten Schichten entfernen? Titel, Zeiten und sonstige Kalenderdaten bleiben unverändert.'
+    )
+
+    if (!accepted) return
+
+    setRemovingReminders(true)
+    setReminderResult(null)
+    setError('')
+
+    try {
+      const result = await api.post(
+        '/api/shift-settings/remove-reminders',
+        {}
+      )
+
+      setReminderResult(
+        result.summary || null
+      )
+    } catch (failure) {
+      setError(
+        failure?.message ||
+        'Erinnerungen konnten nicht entfernt werden'
+      )
+    } finally {
+      setRemovingReminders(false)
     }
   }
 
@@ -283,6 +318,57 @@ export default function ShiftSettings({
         ))}
       </div>
 
+
+      {form.reminderMinutes === -1 && (
+        <div style={styles.reminderCleanup}>
+          <div style={styles.reminderCleanupText}>
+            <strong>
+              Bereits importierte Schichten
+            </strong>
+
+            <div style={styles.subtitle}>
+              Die Profileinstellung gilt automatisch für neue
+              oder erneut synchronisierte Termine. Mit diesem
+              Button wird die Erinnerung zusätzlich bei allen
+              schon vorhandenen EchoLink-Schichten entfernt.
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={removeExistingReminders}
+            disabled={
+              removingReminders ||
+              saving
+            }
+            style={{
+              ...styles.cleanupButton,
+              opacity:
+                removingReminders ||
+                saving
+                  ? 0.55
+                  : 1
+            }}
+          >
+            {removingReminders
+              ? 'Erinnerungen werden entfernt …'
+              : 'Bestehende Erinnerungen entfernen'}
+          </button>
+        </div>
+      )}
+
+      {reminderResult && (
+        <div style={styles.success}>
+          {reminderResult.updated} Erinnerungen entfernt
+          {' · '}
+          {reminderResult.alreadyRemoved} waren bereits aus
+          {' · '}
+          {reminderResult.missing} Termine nicht mehr vorhanden
+          {' · '}
+          {reminderResult.errors} Fehler
+        </div>
+      )}
+
       {error && (
         <div style={styles.error}>{error}</div>
       )}
@@ -412,6 +498,48 @@ const styles = {
     background: 'rgba(255,80,80,0.08)',
     color: 'var(--danger)',
     fontSize: 11
+  },
+  reminderCleanup: {
+    minWidth: 0,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    flexWrap: 'wrap',
+    gap: 10,
+    marginTop: 14,
+    padding: 11,
+    border: '1px solid var(--border)',
+    borderRadius: 9,
+    background: 'var(--bg2)'
+  },
+  reminderCleanupText: {
+    minWidth: 0,
+    flex: '1 1 260px',
+    color: 'var(--text2)',
+    fontSize: 11,
+    lineHeight: 1.45
+  },
+  cleanupButton: {
+    flex: '0 1 auto',
+    maxWidth: '100%',
+    padding: '9px 11px',
+    boxSizing: 'border-box',
+    border: '1px solid rgba(255,180,80,0.35)',
+    borderRadius: 8,
+    background: 'rgba(255,180,80,0.08)',
+    color: 'var(--text)',
+    fontSize: 11,
+    fontWeight: 600
+  },
+  success: {
+    marginTop: 10,
+    padding: 10,
+    border: '1px solid var(--green-dim)',
+    borderRadius: 9,
+    background: 'var(--green-bg)',
+    color: 'var(--green)',
+    fontSize: 11,
+    lineHeight: 1.45
   },
   footer: {
     display: 'flex',

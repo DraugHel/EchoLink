@@ -5,6 +5,10 @@ import { requireAuth } from '../middleware/auth.js'
 import {
   listGoogleCalendars
 } from '../connectors/google/calendar.js'
+import {
+  getCalendarEvent,
+  updateCalendarEvent
+} from '../connectors/google/calendarExtra.js'
 
 const router = Router()
 
@@ -147,6 +151,71 @@ export function getShiftSettings(userId) {
   }
 }
 
+
+async function mapLimit(items, limit, worker) {
+  const results = new Array(items.length)
+  let cursor = 0
+
+  async function next() {
+    while (cursor < items.length) {
+      const index = cursor
+      cursor += 1
+
+      try {
+        results[index] = await worker(
+          items[index],
+          index
+        )
+      } catch (error) {
+        results[index] = {
+          status: 'error',
+          error:
+            error?.message ||
+            String(error)
+        }
+      }
+    }
+  }
+
+  await Promise.all(
+    Array.from(
+      {
+        length: Math.min(
+          Math.max(1, limit),
+          Math.max(1, items.length)
+        )
+      },
+      () => next()
+    )
+  )
+
+  return results
+}
+
+function calendarEventUpdatePayload(
+  event,
+  calendarId
+) {
+  return {
+    eventId: event.id,
+    calendarId,
+    etag: event.etag || '',
+    title: event.title,
+    allDay: Boolean(event.allDay),
+    start: event.start,
+    end: event.end,
+    startDate: event.startDate || '',
+    endDate: event.endDate || '',
+    timeZone:
+      event.timeZone ||
+      'Europe/Vienna',
+    location: event.location || '',
+    description:
+      event.description || '',
+    reminderMinutes: -1
+  }
+}
+
 router.use(requireAuth)
 
 router.get('/', (req, res) => {
@@ -166,6 +235,200 @@ router.get('/calendars', async (req, res, next) => {
     next(error)
   }
 })
+
+
+router.post(
+  '/remove-reminders',
+  async (req, res) => {
+    try {
+      const rows = db.prepare(`
+        SELECT
+          event_id,
+          COALESCE(
+            NULLIF(calendar_id, ''),
+            'primary'
+          ) AS calendar_id,
+          title,
+          start_at
+        FROM shift_calendar_events
+        WHERE user_id = ?
+          AND status = 'created'
+          AND trim(event_id) <> ''
+        ORDER BY start_at, id
+      `).all(req.session.userId)
+
+      const results = await mapLimit(
+        rows,
+        4,
+        async row => {
+          try {
+            const event =
+              await getCalendarEvent(
+                req.session.userId,
+                row.event_id,
+                row.calendar_id
+              )
+
+            if (
+              Number(
+                event.reminderMinutes
+              ) === -1
+            ) {
+              return {
+                eventId: row.event_id,
+                title:
+                  event.title ||
+                  row.title ||
+                  '',
+                start:
+                  event.start ||
+                  row.start_at ||
+                  '',
+                status:
+                  'already_removed'
+              }
+            }
+
+            const updated =
+              await updateCalendarEvent(
+                req.session.userId,
+                calendarEventUpdatePayload(
+                  event,
+                  row.calendar_id
+                )
+              )
+
+            db.prepare(`
+              UPDATE shift_calendar_events
+              SET
+                title = ?,
+                start_at = ?,
+                end_at = ?,
+                updated_at = unixepoch()
+              WHERE user_id = ?
+                AND event_id = ?
+                AND calendar_id = ?
+            `).run(
+              updated.title ||
+                event.title ||
+                row.title ||
+                '',
+              updated.start ||
+                event.start ||
+                row.start_at ||
+                '',
+              updated.end ||
+                event.end ||
+                '',
+              req.session.userId,
+              row.event_id,
+              row.calendar_id
+            )
+
+            return {
+              eventId: row.event_id,
+              title:
+                updated.title ||
+                event.title ||
+                row.title ||
+                '',
+              start:
+                updated.start ||
+                event.start ||
+                row.start_at ||
+                '',
+              status: 'updated'
+            }
+          } catch (error) {
+            if (
+              error?.statusCode === 404 ||
+              error?.statusCode === 410
+            ) {
+              db.prepare(`
+                UPDATE shift_calendar_events
+                SET
+                  status = 'missing',
+                  updated_at = unixepoch()
+                WHERE user_id = ?
+                  AND event_id = ?
+                  AND calendar_id = ?
+              `).run(
+                req.session.userId,
+                row.event_id,
+                row.calendar_id
+              )
+
+              return {
+                eventId: row.event_id,
+                title: row.title || '',
+                start: row.start_at || '',
+                status: 'missing'
+              }
+            }
+
+            return {
+              eventId: row.event_id,
+              title: row.title || '',
+              start: row.start_at || '',
+              status: 'error',
+              error:
+                error?.message ||
+                String(error)
+            }
+          }
+        }
+      )
+
+      const summary = {
+        total: rows.length,
+        updated:
+          results.filter(
+            item =>
+              item.status === 'updated'
+          ).length,
+        alreadyRemoved:
+          results.filter(
+            item =>
+              item.status ===
+              'already_removed'
+          ).length,
+        missing:
+          results.filter(
+            item =>
+              item.status === 'missing'
+          ).length,
+        errors:
+          results.filter(
+            item =>
+              item.status === 'error'
+          ).length
+      }
+
+      res.json({
+        summary,
+        errors: results
+          .filter(
+            item =>
+              item.status === 'error'
+          )
+          .slice(0, 20)
+      })
+    } catch (error) {
+      console.error(
+        'Removing shift reminders failed:',
+        error?.message || error
+      )
+
+      res.status(
+        error?.statusCode || 500
+      ).json({
+        error:
+          error?.message ||
+          'Erinnerungen konnten nicht entfernt werden'
+      })
+    }
+  }
+)
 
 router.put('/', (req, res) => {
   try {
