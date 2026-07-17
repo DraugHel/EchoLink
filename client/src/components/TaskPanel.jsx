@@ -1018,6 +1018,7 @@ export default function TaskPanel({
         </header>
 
         <div
+          className="echolink-task-toolbar"
           style={{
             display: 'flex',
             flexWrap: 'wrap',
@@ -1072,6 +1073,7 @@ export default function TaskPanel({
         </div>
 
         <div
+          className="echolink-task-panel-body"
           style={{
             flex: 1,
             minHeight: 260,
@@ -1135,7 +1137,10 @@ export default function TaskPanel({
               Keine passenden Tasks vorhanden.
             </div>
           ) : (
-            <div style={{ display: 'grid', gap: 10 }}>
+            <div
+              className="echolink-task-list"
+              style={{ display: 'grid', gap: 10 }}
+            >
               {visibleTasks.map(task => {
                 const busy = actionId === task.id
                 const completedOnce =
@@ -1146,8 +1151,9 @@ export default function TaskPanel({
                 return (
                   <article
                     key={task.id}
+                    className="echolink-task-card"
                     style={{
-                      padding: 13,
+                      padding: 11,
                       border: '1px solid var(--border)',
                       borderRadius: 10,
                       background: 'var(--bg1)',
@@ -1172,7 +1178,7 @@ export default function TaskPanel({
                           style={{
                             display: 'flex',
                             alignItems: 'flex-start',
-                            gap: 10
+                            gap: 8
                           }}
                         >
                           <div style={{ flex: 1, minWidth: 0 }}>
@@ -1181,13 +1187,14 @@ export default function TaskPanel({
                                 display: 'flex',
                                 alignItems: 'center',
                                 flexWrap: 'wrap',
-                                gap: 6
+                                gap: 5
                               }}
                             >
                               <strong
                                 style={{
                                   color: 'var(--text1)',
-                                  fontSize: 13
+                                  fontSize: 13,
+                                  lineHeight: 1.35
                                 }}
                               >
                                 {task.title}
@@ -1227,11 +1234,11 @@ export default function TaskPanel({
 
                             <div
                               style={{
-                                marginTop: 7,
+                                marginTop: 6,
                                 color: 'var(--text2)',
                                 fontFamily: 'var(--font-mono)',
                                 fontSize: 11,
-                                lineHeight: 1.5,
+                                lineHeight: 1.4,
                                 overflowWrap: 'anywhere'
                               }}
                             >
@@ -1240,9 +1247,10 @@ export default function TaskPanel({
 
                             <div
                               style={{
-                                marginTop: 4,
+                                marginTop: 3,
                                 color: 'var(--text3)',
-                                fontSize: 11
+                                fontSize: 11,
+                                lineHeight: 1.4
                               }}
                             >
                               Ziel: {task.conversationTitle ||
@@ -1254,10 +1262,10 @@ export default function TaskPanel({
 
                             <div
                               style={{
-                                marginTop: 4,
+                                marginTop: 3,
                                 color: 'var(--text3)',
                                 fontSize: 11,
-                                lineHeight: 1.5
+                                lineHeight: 1.4
                               }}
                             >
                               {task.nextRunAt
@@ -1271,11 +1279,12 @@ export default function TaskPanel({
                             {task.lastRunStatus && (
                               <div
                                 style={{
-                                  marginTop: 4,
+                                  marginTop: 3,
                                   color: task.lastRunStatus === 'failed'
                                     ? 'var(--danger)'
                                     : 'var(--text3)',
-                                  fontSize: 11
+                                  fontSize: 11,
+                                  lineHeight: 1.4
                                 }}
                               >
                                 Letzter Status: {statusLabel(task.lastRunStatus)}
@@ -1287,28 +1296,46 @@ export default function TaskPanel({
                           </div>
                         </div>
 
-                        <div
+                        <details
                           style={{
-                            marginTop: 10,
-                            padding: '9px 10px',
+                            marginTop: 7,
                             borderRadius: 8,
-                            background: 'var(--bg3)',
-                            color: 'var(--text2)',
-                            fontSize: 12,
-                            lineHeight: 1.5,
-                            whiteSpace: 'pre-wrap',
-                            overflowWrap: 'anywhere'
+                            background: 'var(--bg3)'
                           }}
                         >
-                          {task.prompt}
-                        </div>
+                          <summary
+                            style={{
+                              padding: '7px 9px',
+                              color: 'var(--text3)',
+                              fontSize: 11,
+                              cursor: 'pointer',
+                              userSelect: 'none'
+                            }}
+                          >
+                            Aufgabentext anzeigen
+                          </summary>
+
+                          <div
+                            style={{
+                              padding: '0 9px 8px',
+                              color: 'var(--text2)',
+                              fontSize: 12,
+                              lineHeight: 1.45,
+                              whiteSpace: 'pre-wrap',
+                              overflowWrap: 'anywhere'
+                            }}
+                          >
+                            {task.prompt}
+                          </div>
+                        </details>
 
                         <div
+                          className="echolink-task-actions"
                           style={{
                             display: 'flex',
                             flexWrap: 'wrap',
-                            gap: 7,
-                            marginTop: 10
+                            gap: 6,
+                            marginTop: 8
                           }}
                         >
                           <button
@@ -1362,6 +1389,7 @@ export default function TaskPanel({
 
                           <button
                             type="button"
+                            className="echolink-task-delete"
                             onClick={() => deleteTask(task)}
                             disabled={busy}
                             style={{
@@ -1379,8 +1407,8 @@ export default function TaskPanel({
                         {expandedRuns === task.id && (
                           <div
                             style={{
-                              marginTop: 11,
-                              paddingTop: 10,
+                              marginTop: 9,
+                              paddingTop: 9,
                               borderTop: '1px solid var(--border)'
                             }}
                           >
@@ -1393,17 +1421,17 @@ export default function TaskPanel({
                                 Noch keine Läufe vorhanden.
                               </div>
                             ) : (
-                              <div style={{ display: 'grid', gap: 7 }}>
+                              <div style={{ display: 'grid', gap: 6 }}>
                                 {runs.slice(0, 10).map(run => (
                                   <div
                                     key={run.id}
                                     style={{
-                                      padding: '8px 9px',
+                                      padding: '7px 8px',
                                       borderRadius: 8,
                                       background: 'var(--bg3)',
                                       color: 'var(--text2)',
                                       fontSize: 11,
-                                      lineHeight: 1.45
+                                      lineHeight: 1.4
                                     }}
                                   >
                                     <strong
