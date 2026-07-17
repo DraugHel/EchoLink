@@ -291,6 +291,36 @@ router.post('/analyze', requireAuth, upload.single('image'), async (req, res) =>
   }
 })
 
+router.get('/:id', requireAuth, (req, res) => {
+  try {
+    const importId = integer(
+      req.params.id,
+      'Import-ID',
+      1,
+      Number.MAX_SAFE_INTEGER
+    )
+
+    const importRow = ownedImport(
+      importId,
+      req.session.userId
+    )
+
+    if (!importRow) {
+      return res.status(404).json({
+        error: 'Schichtimport nicht gefunden'
+      })
+    }
+
+    res.json(withItems(importRow))
+  } catch (error) {
+    res.status(error?.statusCode || 500).json({
+      error:
+        error?.message ||
+        'Schichtimport konnte nicht geladen werden'
+    })
+  }
+})
+
 router.put('/:id/items', requireAuth, (req, res) => {
   try {
     const importId = integer(req.params.id, 'Import-ID', 1, Number.MAX_SAFE_INTEGER)
