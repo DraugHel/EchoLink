@@ -19,6 +19,7 @@ import systemRoutes from './routes/system.js'
 import googleRoutes from './routes/google.js'
 import shiftImportRoutes from './routes/shiftImports.js'
 import shiftSyncRoutes from './routes/shiftSync.js'
+import shiftSettingsRoutes from './routes/shiftSettings.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const SQLiteStore = connectSqlite3(session)
@@ -108,6 +109,7 @@ app.use('/api/system', systemRoutes)
 app.use('/api/google', googleRoutes)
 app.use('/api/shift-imports', shiftImportRoutes)
 app.use('/api/shift-sync', shiftSyncRoutes)
+app.use('/api/shift-settings', shiftSettingsRoutes)
 
 // Unbekannte API-Routen immer als JSON beantworten.
 app.use('/api', (req, res) => {

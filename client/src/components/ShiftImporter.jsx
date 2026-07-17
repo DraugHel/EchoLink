@@ -5,6 +5,7 @@ import {
 } from 'react'
 
 import api from '../lib/api.js'
+import ShiftSettings from './ShiftSettings.jsx'
 
 const PRESETS = {
   '1': {
@@ -42,6 +43,24 @@ const ACTIONABLE = new Set([
   'update',
   'delete'
 ])
+
+
+function applyProfileToItems(items, profile) {
+  if (!profile?.codes) return items
+
+  return items.map(item => {
+    const preset = profile.codes[item.code]
+
+    if (!preset) return item
+
+    return {
+      ...item,
+      title: preset.title,
+      startTime: preset.startTime,
+      endTime: preset.endTime
+    }
+  })
+}
 
 async function responseError(response) {
   const data = await response
@@ -158,6 +177,22 @@ export default function ShiftImporter({
   const [error, setError] = useState('')
   const [summary, setSummary] = useState(null)
   const [showUnchanged, setShowUnchanged] = useState(false)
+  const [profile, setProfile] = useState(null)
+  const [showProfile, setShowProfile] = useState(false)
+
+  useEffect(() => {
+    let alive = true
+
+    api.get('/api/shift-settings')
+      .then(data => {
+        if (alive) setProfile(data)
+      })
+      .catch(() => {})
+
+    return () => {
+      alive = false
+    }
+  }, [])
 
   useEffect(() => {
     let alive = true
@@ -266,7 +301,9 @@ export default function ShiftImporter({
   }
 
   function changeCode(item, code) {
-    const preset = PRESETS[code]
+    const preset =
+      profile?.codes?.[code] ||
+      PRESETS[code]
 
     updateItem(
       item.id,
@@ -334,7 +371,12 @@ export default function ShiftImporter({
       const data = await response.json()
 
       setDraft(data.import)
-      setItems(data.items || [])
+      setItems(
+        applyProfileToItems(
+          data.items || [],
+          profile
+        )
+      )
     } catch (failure) {
       setError(
         failure?.message ||
@@ -502,6 +544,18 @@ export default function ShiftImporter({
     }
   }
 
+  function handleProfileSaved(nextProfile) {
+    setProfile(nextProfile)
+    setItems(previous =>
+      applyProfileToItems(
+        previous,
+        nextProfile
+      )
+    )
+    setShowProfile(false)
+    clearComparison()
+  }
+
   function startNew() {
     setDraft(null)
     setItems([])
@@ -534,17 +588,37 @@ export default function ShiftImporter({
             </p>
           </div>
 
-          <button
-            type="button"
-            onClick={onClose}
-            style={styles.close}
-            aria-label="Schließen"
-          >
-            ×
-          </button>
+          <div style={styles.headerActions}>
+            <button
+              type="button"
+              onClick={() =>
+                setShowProfile(value => !value)
+              }
+              style={styles.profileButton}
+            >
+              Profil
+            </button>
+
+            <button
+              type="button"
+              onClick={onClose}
+              style={styles.close}
+              aria-label="Schließen"
+            >
+              ×
+            </button>
+          </div>
         </header>
 
         <div style={styles.body}>
+          {showProfile && profile && (
+            <ShiftSettings
+              profile={profile}
+              onSaved={handleProfileSaved}
+              onClose={() => setShowProfile(false)}
+            />
+          )}
+
           {loading ? (
             <div style={styles.loading}>
               Letzten Entwurf laden …
@@ -1296,6 +1370,20 @@ const styles = {
   },
   headerText: {
     minWidth: 0
+  },
+  headerActions: {
+    flexShrink: 0,
+    display: 'flex',
+    alignItems: 'center',
+    gap: 7
+  },
+  profileButton: {
+    padding: '7px 9px',
+    border: '1px solid var(--border)',
+    borderRadius: 7,
+    background: 'var(--bg3)',
+    color: 'var(--text2)',
+    fontSize: 11
   },
   title: {
     margin: 0,

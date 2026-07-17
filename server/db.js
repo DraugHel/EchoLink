@@ -443,6 +443,44 @@ db.exec(`
     );
 `);
 
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS shift_settings (
+    user_id INTEGER PRIMARY KEY,
+    calendar_id TEXT NOT NULL DEFAULT 'primary',
+    calendar_name TEXT NOT NULL DEFAULT 'Primärkalender',
+    reminder_minutes INTEGER DEFAULT NULL,
+    location TEXT NOT NULL DEFAULT '',
+    description TEXT NOT NULL DEFAULT '',
+    codes_json TEXT NOT NULL DEFAULT '{}',
+    created_at INTEGER DEFAULT (unixepoch()),
+    updated_at INTEGER DEFAULT (unixepoch()),
+    FOREIGN KEY (user_id)
+      REFERENCES users(id)
+      ON DELETE CASCADE
+  );
+`);
+
+for (const migration of [
+  `ALTER TABLE shift_sync_runs
+     ADD COLUMN calendar_id TEXT NOT NULL DEFAULT 'primary'`,
+  `ALTER TABLE shift_sync_runs
+     ADD COLUMN reminder_minutes INTEGER DEFAULT NULL`,
+  `ALTER TABLE shift_calendar_events
+     ADD COLUMN calendar_id TEXT NOT NULL DEFAULT 'primary'`
+]) {
+  try {
+    db.exec(migration)
+  } catch (error) {
+    if (!String(error.message).includes('duplicate column name')) {
+      console.error(
+        'Shift settings migration error:',
+        error.message
+      )
+    }
+  }
+}
+
 // Bestehendes Markdown-Memory einmalig als Legacy-Eintrag übernehmen.
 // Es wird nicht aus users.memory gelöscht.
 try {

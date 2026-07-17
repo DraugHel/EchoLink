@@ -98,6 +98,79 @@ function validateTimeZone(value) {
   return timeZone
 }
 
+
+function calendarIdPath(value = 'primary') {
+  const calendarId = String(value || 'primary').trim()
+
+  if (
+    !calendarId ||
+    calendarId.length > 1024 ||
+    /[\u0000-\u001f\u007f]/.test(calendarId)
+  ) {
+    throw exposedError('Ungültige Kalender-ID', 400)
+  }
+
+  return encodeURIComponent(calendarId)
+}
+
+function calendarReminderFields(value) {
+  if (value == null || value === '') return {}
+
+  const minutes = Number(value)
+
+  if (
+    !Number.isInteger(minutes) ||
+    minutes < -1 ||
+    minutes > 10080
+  ) {
+    throw exposedError(
+      'Ungültige Kalendererinnerung',
+      400
+    )
+  }
+
+  if (minutes === -1) {
+    return {
+      reminders: {
+        useDefault: false,
+        overrides: []
+      }
+    }
+  }
+
+  return {
+    reminders: {
+      useDefault: false,
+      overrides: [
+        {
+          method: 'popup',
+          minutes
+        }
+      ]
+    }
+  }
+}
+
+function reminderMinutesFromEvent(event) {
+  if (event?.reminders?.useDefault) return null
+
+  const overrides = Array.isArray(
+    event?.reminders?.overrides
+  )
+    ? event.reminders.overrides
+    : []
+
+  if (overrides.length === 0) return -1
+
+  const popup = overrides.find(
+    item => item?.method === 'popup'
+  )
+
+  return Number.isInteger(Number(popup?.minutes))
+    ? Number(popup.minutes)
+    : null
+}
+
 async function calendarRequest(
   userId,
   url,
@@ -210,6 +283,8 @@ function eventToJson(event) {
       'Europe/Vienna',
     location: event.location || '',
     description: event.description || '',
+    reminderMinutes:
+      reminderMinutesFromEvent(event),
     recurringEventId:
       event.recurringEventId || null,
     link: event.htmlLink || ''
@@ -218,13 +293,14 @@ function eventToJson(event) {
 
 export async function getCalendarEvent(
   userId,
-  eventId
+  eventId,
+  calendarId = 'primary'
 ) {
   const id = requireEventId(eventId)
 
   const event = await calendarRequest(
     userId,
-    `${API_ROOT}/calendars/primary/events/` +
+    `${API_ROOT}/calendars/${calendarIdPath(calendarId)}/events/` +
       encodeURIComponent(id)
   )
 
@@ -235,6 +311,7 @@ export async function updateCalendarEvent(
   userId,
   {
     eventId,
+    calendarId = 'primary',
     etag = '',
     title,
     allDay = false,
@@ -243,6 +320,7 @@ export async function updateCalendarEvent(
     startDate = '',
     endDate = '',
     timeZone = 'Europe/Vienna',
+    reminderMinutes = null,
     location = '',
     description = ''
   }
@@ -315,7 +393,7 @@ export async function updateCalendarEvent(
 
   const event = await calendarRequest(
     userId,
-    `${API_ROOT}/calendars/primary/events/` +
+    `${API_ROOT}/calendars/${calendarIdPath(calendarId)}/events/` +
       `${encodeURIComponent(id)}?sendUpdates=none`,
     {
       method: 'PATCH',
@@ -324,7 +402,8 @@ export async function updateCalendarEvent(
         location: String(location || '').trim(),
         description:
           String(description || '').trim(),
-        ...timePayload
+        ...timePayload,
+        ...calendarReminderFields(reminderMinutes)
       },
       extraHeaders: etag
         ? { 'If-Match': etag }
@@ -339,6 +418,7 @@ export async function deleteCalendarEvent(
   userId,
   {
     eventId,
+    calendarId = 'primary',
     etag = ''
   }
 ) {
@@ -346,7 +426,7 @@ export async function deleteCalendarEvent(
 
   await calendarRequest(
     userId,
-    `${API_ROOT}/calendars/primary/events/` +
+    `${API_ROOT}/calendars/${calendarIdPath(calendarId)}/events/` +
       `${encodeURIComponent(id)}?sendUpdates=none`,
     {
       method: 'DELETE',

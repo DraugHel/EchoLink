@@ -11,6 +11,9 @@ import {
   getCalendarEvent,
   updateCalendarEvent
 } from '../connectors/google/calendarExtra.js'
+import {
+  getShiftSettings
+} from './shiftSettings.js'
 
 const router = Router()
 
@@ -183,7 +186,7 @@ function sameInstant(left, right) {
   )
 }
 
-function eventEquals(left, right) {
+function eventTimeTitleEquals(left, right) {
   return (
     normalizeTitle(left?.title) ===
       normalizeTitle(right?.title) &&
@@ -191,6 +194,30 @@ function eventEquals(left, right) {
       Boolean(right?.allDay) &&
     sameInstant(left?.start, right?.start) &&
     sameInstant(left?.end, right?.end)
+  )
+}
+
+function normalizedDescription(value) {
+  return String(value || '')
+    .split(/\r?\n/)
+    .filter(line =>
+      !/^EchoLink-Schichtimport:/i.test(
+        line.trim()
+      )
+    )
+    .join('\n')
+    .trim()
+}
+
+function eventManagedEquals(left, right) {
+  return (
+    eventTimeTitleEquals(left, right) &&
+    String(left?.location || '').trim() ===
+      String(right?.location || '').trim() &&
+    normalizedDescription(left?.description) ===
+      normalizedDescription(right?.description) &&
+    Number(left?.reminderMinutes ?? -999) ===
+      Number(right?.reminderMinutes ?? -999)
   )
 }
 
@@ -227,7 +254,7 @@ function isShiftLike(event) {
   )
 }
 
-function desiredFromItem(item, timeZone) {
+function desiredFromItem(item, timeZone, settings) {
   const endDate =
     item.end_time <= item.start_time
       ? addDays(item.work_date, 1)
@@ -247,19 +274,27 @@ function desiredFromItem(item, timeZone) {
       timeZone
     ),
     timeZone,
-    location: '',
+    location: settings.location || '',
+    reminderMinutes: settings.reminderMinutes,
     description: [
+      settings.description || '',
       `Schichtcode: ${item.code}`,
       `Plan-Datum: ${item.work_date}`,
       `EchoLink-Schichtdatum:${item.work_date}`
-    ].join('\n'),
+    ].filter(Boolean).join('\n'),
     workDate: item.work_date,
     code: item.code
   }
 }
 
-function calendarPayload(snapshot, timeZone) {
+function calendarPayload(
+  snapshot,
+  timeZone,
+  calendarId,
+  reminderMinutes
+) {
   return {
+    calendarId,
     title: snapshot.title,
     allDay: false,
     start: snapshot.start,
@@ -270,7 +305,10 @@ function calendarPayload(snapshot, timeZone) {
     location:
       snapshot.location || '',
     description:
-      snapshot.description || ''
+      snapshot.description || '',
+    reminderMinutes:
+      snapshot.reminderMinutes ??
+      reminderMinutes
   }
 }
 
@@ -296,6 +334,8 @@ function serializeRun(row) {
     importId: row.import_id,
     status: row.status,
     timeZone: row.time_zone,
+    calendarId: row.calendar_id || 'primary',
+    reminderMinutes: row.reminder_minutes,
     summary:
       parseJson(row.summary_json, {}),
     createdAt: row.created_at,
@@ -341,7 +381,8 @@ async function listEventsInRange(
   userId,
   startDate,
   endDate,
-  timeZone
+  timeZone,
+  calendarId
 ) {
   const byId = new Map()
   const warnings = []
@@ -370,7 +411,8 @@ async function listEventsInRange(
           timeZone
         ),
         maxResults: 50,
-        timeZone
+        timeZone,
+        calendarId
       }
     )
 
@@ -395,14 +437,15 @@ async function listEventsInRange(
   }
 }
 
-function managedEventIds(userId) {
+function managedEventIds(userId, calendarId) {
   const rows = db.prepare(`
     SELECT event_id
     FROM shift_calendar_events
     WHERE user_id = ?
+      AND calendar_id = ?
       AND status = 'created'
       AND trim(event_id) <> ''
-  `).all(userId)
+  `).all(userId, calendarId)
 
   return new Set(
     rows.map(row => row.event_id)
@@ -469,20 +512,24 @@ function insertAction(
 function upsertManagedEvent(
   userId,
   fingerprint,
-  event
+  event,
+  calendarId
 ) {
   db.prepare(`
     DELETE FROM shift_calendar_events
     WHERE user_id = ?
+      AND calendar_id = ?
       AND event_id = ?
   `).run(
     userId,
+    calendarId,
     event.id
   )
 
   db.prepare(`
     INSERT INTO shift_calendar_events (
       user_id,
+      calendar_id,
       fingerprint,
       event_id,
       title,
@@ -493,6 +540,7 @@ function upsertManagedEvent(
       updated_at
     )
     VALUES (
+      ?,
       ?,
       ?,
       ?,
@@ -513,6 +561,7 @@ function upsertManagedEvent(
       updated_at = unixepoch()
   `).run(
     userId,
+    calendarId,
     fingerprint,
     event.id || '',
     event.title || '',
@@ -522,7 +571,8 @@ function upsertManagedEvent(
 }
 function markManagedDeleted(
   userId,
-  eventId
+  eventId,
+  calendarId
 ) {
   db.prepare(`
     UPDATE shift_calendar_events
@@ -530,8 +580,9 @@ function markManagedDeleted(
       status = 'deleted',
       updated_at = unixepoch()
     WHERE user_id = ?
+      AND calendar_id = ?
       AND event_id = ?
-  `).run(userId, eventId)
+  `).run(userId, calendarId, eventId)
 }
 
 function updateImportItem(
@@ -701,16 +752,25 @@ router.post(
           ? importRow.plan_end
           : items.at(-1).work_date
 
+      const settings =
+        getShiftSettings(
+          req.session.userId
+        )
+
       const calendar =
         await listEventsInRange(
           req.session.userId,
           rangeStart,
           rangeEnd,
-          timeZone
+          timeZone,
+          settings.calendarId
         )
 
       const knownManaged =
-        managedEventIds(req.session.userId)
+        managedEventIds(
+          req.session.userId,
+          settings.calendarId
+        )
 
       const events = calendar.events.map(
         event => {
@@ -763,11 +823,15 @@ router.post(
           user_id,
           import_id,
           time_zone,
+          calendar_id,
+          reminder_minutes,
           status,
           summary_json,
           created_at
         )
         VALUES (
+          ?,
+          ?,
           ?,
           ?,
           ?,
@@ -778,7 +842,9 @@ router.post(
       `).run(
         req.session.userId,
         importId,
-        timeZone
+        timeZone,
+        settings.calendarId,
+        settings.reminderMinutes
       )
 
       const runId =
@@ -798,7 +864,8 @@ router.post(
       for (const item of items) {
         const desired = desiredFromItem(
           item,
-          timeZone
+          timeZone,
+          settings
         )
 
         const managedCandidates =
@@ -816,7 +883,7 @@ router.post(
           usedIds.add(managed.id)
 
           const exact =
-            eventEquals(managed, desired)
+            eventManagedEquals(managed, desired)
 
           const actionType =
             exact
@@ -854,7 +921,7 @@ router.post(
           manualCandidates.find(
             event =>
               !usedIds.has(event.id) &&
-              eventEquals(event, desired)
+              eventTimeTitleEquals(event, desired)
           )
 
         if (exactManual) {
@@ -1125,14 +1192,17 @@ router.post(
                 req.session.userId,
                 calendarPayload(
                   desired,
-                  run.time_zone
+                  run.time_zone,
+                  run.calendar_id,
+                  run.reminder_minutes
                 )
               )
 
             upsertManagedEvent(
               req.session.userId,
               fingerprint,
-              created
+              created,
+              run.calendar_id
             )
 
             db.prepare(`
@@ -1171,12 +1241,13 @@ router.post(
           const current =
             await getCalendarEvent(
               req.session.userId,
-              action.event_id
+              action.event_id,
+              run.calendar_id
             )
 
           if (
             oldPreview &&
-            !eventEquals(current, oldPreview)
+            !eventManagedEquals(current, oldPreview)
           ) {
             throw exposedError(
               'Der Termin wurde seit dem Vergleich verändert. Bitte neu vergleichen.',
@@ -1217,10 +1288,13 @@ router.post(
                 req.session.userId,
                 {
                   eventId: action.event_id,
+                  calendarId: run.calendar_id,
                   etag: current.etag || '',
                   ...calendarPayload(
                     desired,
-                    run.time_zone
+                    run.time_zone,
+                    run.calendar_id,
+                    run.reminder_minutes
                   )
                 }
               )
@@ -1228,7 +1302,8 @@ router.post(
             upsertManagedEvent(
               req.session.userId,
               fingerprint,
-              updated
+              updated,
+              run.calendar_id
             )
 
             db.prepare(`
@@ -1269,13 +1344,15 @@ router.post(
             req.session.userId,
             {
               eventId: action.event_id,
+              calendarId: run.calendar_id,
               etag: current.etag || ''
             }
           )
 
           markManagedDeleted(
             req.session.userId,
-            action.event_id
+            action.event_id,
+            run.calendar_id
           )
 
           db.prepare(`
@@ -1487,7 +1564,8 @@ router.post(
               current =
                 await getCalendarEvent(
                   req.session.userId,
-                  action.event_id
+                  action.event_id,
+                  run.calendar_id
                 )
             } catch (error) {
               if (
@@ -1502,7 +1580,7 @@ router.post(
             if (
               current &&
               newEvent &&
-              !eventEquals(
+              !eventManagedEquals(
                 current,
                 newEvent
               )
@@ -1518,6 +1596,7 @@ router.post(
                 req.session.userId,
                 {
                   eventId: action.event_id,
+                  calendarId: run.calendar_id,
                   etag: current.etag || ''
                 }
               )
@@ -1525,7 +1604,8 @@ router.post(
 
             markManagedDeleted(
               req.session.userId,
-              action.event_id
+              action.event_id,
+              run.calendar_id
             )
           } else if (
             action.action_type === 'update'
@@ -1533,12 +1613,13 @@ router.post(
             const current =
               await getCalendarEvent(
                 req.session.userId,
-                action.event_id
+                action.event_id,
+                run.calendar_id
               )
 
             if (
               newEvent &&
-              !eventEquals(
+              !eventManagedEquals(
                 current,
                 newEvent
               )
@@ -1554,10 +1635,14 @@ router.post(
                 req.session.userId,
                 {
                   eventId: action.event_id,
+                  calendarId: run.calendar_id,
                   etag: current.etag || '',
                   ...calendarPayload(
                     oldEvent,
-                    run.time_zone
+                    run.time_zone,
+                    run.calendar_id,
+                    oldEvent?.reminderMinutes ??
+                      run.reminder_minutes
                   )
                 }
               )
@@ -1578,7 +1663,8 @@ router.post(
             upsertManagedEvent(
               req.session.userId,
               fingerprint,
-              restored
+              restored,
+              run.calendar_id
             )
           } else if (
             action.action_type === 'delete'
@@ -1588,7 +1674,10 @@ router.post(
                 req.session.userId,
                 calendarPayload(
                   oldEvent,
-                  run.time_zone
+                  run.time_zone,
+                  run.calendar_id,
+                  oldEvent?.reminderMinutes ??
+                    run.reminder_minutes
                 )
               )
 
@@ -1608,7 +1697,8 @@ router.post(
             upsertManagedEvent(
               req.session.userId,
               fingerprint,
-              recreated
+              recreated,
+              run.calendar_id
             )
 
             db.prepare(`

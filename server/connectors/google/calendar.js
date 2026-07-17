@@ -28,6 +28,79 @@ function parseDate(value, fallback) {
   return date
 }
 
+
+function calendarIdPath(value = 'primary') {
+  const calendarId = String(value || 'primary').trim()
+
+  if (
+    !calendarId ||
+    calendarId.length > 1024 ||
+    /[\u0000-\u001f\u007f]/.test(calendarId)
+  ) {
+    throw exposedError('Ungültige Kalender-ID', 400)
+  }
+
+  return encodeURIComponent(calendarId)
+}
+
+function calendarReminderFields(value) {
+  if (value == null || value === '') return {}
+
+  const minutes = Number(value)
+
+  if (
+    !Number.isInteger(minutes) ||
+    minutes < -1 ||
+    minutes > 10080
+  ) {
+    throw exposedError(
+      'Ungültige Kalendererinnerung',
+      400
+    )
+  }
+
+  if (minutes === -1) {
+    return {
+      reminders: {
+        useDefault: false,
+        overrides: []
+      }
+    }
+  }
+
+  return {
+    reminders: {
+      useDefault: false,
+      overrides: [
+        {
+          method: 'popup',
+          minutes
+        }
+      ]
+    }
+  }
+}
+
+function reminderMinutesFromEvent(event) {
+  if (event?.reminders?.useDefault) return null
+
+  const overrides = Array.isArray(
+    event?.reminders?.overrides
+  )
+    ? event.reminders.overrides
+    : []
+
+  if (overrides.length === 0) return -1
+
+  const popup = overrides.find(
+    item => item?.method === 'popup'
+  )
+
+  return Number.isInteger(Number(popup?.minutes))
+    ? Number(popup.minutes)
+    : null
+}
+
 async function googleCalendarRequest(
   userId,
   url,
@@ -92,13 +165,68 @@ async function googleCalendarRequest(
   )
 }
 
+
+export async function listGoogleCalendars(userId) {
+  const calendars = []
+  let pageToken = ''
+
+  do {
+    const params = new URLSearchParams({
+      maxResults: '250',
+      minAccessRole: 'writer',
+      showDeleted: 'false',
+      showHidden: 'false'
+    })
+
+    if (pageToken) {
+      params.set('pageToken', pageToken)
+    }
+
+    const result = await googleCalendarRequest(
+      userId,
+      'https://www.googleapis.com/calendar/v3/' +
+        `users/me/calendarList?${params}`
+    )
+
+    for (const calendar of result.items || []) {
+      calendars.push({
+        id: calendar.primary
+          ? 'primary'
+          : calendar.id,
+        name:
+          calendar.summaryOverride ||
+          calendar.summary ||
+          '(Ohne Namen)',
+        primary: Boolean(calendar.primary),
+        accessRole: calendar.accessRole || '',
+        backgroundColor:
+          calendar.backgroundColor || ''
+      })
+    }
+
+    pageToken = result.nextPageToken || ''
+  } while (pageToken)
+
+  return calendars.sort((left, right) => {
+    if (left.primary !== right.primary) {
+      return left.primary ? -1 : 1
+    }
+
+    return left.name.localeCompare(
+      right.name,
+      'de-AT'
+    )
+  })
+}
+
 export async function listCalendarEvents(
   userId,
   {
     timeMin,
     timeMax,
     maxResults = 20,
-    timeZone = 'Europe/Vienna'
+    timeZone = 'Europe/Vienna',
+    calendarId = 'primary'
   } = {}
 ) {
   const start = parseDate(
@@ -135,7 +263,7 @@ export async function listCalendarEvents(
 
   const url =
     'https://www.googleapis.com/calendar/v3/' +
-    `calendars/primary/events?${params}`
+    `calendars/${calendarIdPath(calendarId)}/events?${params}`
 
   const result = await googleCalendarRequest(
     userId,
@@ -143,6 +271,7 @@ export async function listCalendarEvents(
   )
 
   return {
+    calendarId,
     timeMin: start.toISOString(),
     timeMax: end.toISOString(),
     timeZone,
@@ -162,6 +291,8 @@ export async function listCalendarEvents(
       location: event.location || '',
       description:
         String(event.description || '').slice(0, 2000),
+      reminderMinutes:
+        reminderMinutesFromEvent(event),
       attendeeCount:
         Array.isArray(event.attendees)
           ? event.attendees.length
@@ -283,6 +414,8 @@ export async function createCalendarEvent(
     startDate = '',
     endDate = '',
     timeZone = 'Europe/Vienna',
+    calendarId = 'primary',
+    reminderMinutes = null,
     location = '',
     description = ''
   }
@@ -364,9 +497,14 @@ export async function createCalendarEvent(
     payload.description = cleanDescription
   }
 
+  Object.assign(
+    payload,
+    calendarReminderFields(reminderMinutes)
+  )
+
   const url =
     'https://www.googleapis.com/calendar/v3/' +
-    'calendars/primary/events?sendUpdates=none'
+    `calendars/${calendarIdPath(calendarId)}/events?sendUpdates=none`
 
   const event = await googleCalendarRequest(
     userId,
@@ -402,6 +540,8 @@ export async function createCalendarEvent(
         : null,
     location: event.location || '',
     description: event.description || '',
+    reminderMinutes:
+      reminderMinutesFromEvent(event),
     status: event.status || '',
     link: event.htmlLink || ''
   }
