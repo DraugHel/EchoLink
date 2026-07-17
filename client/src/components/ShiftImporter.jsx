@@ -177,6 +177,7 @@ export default function ShiftImporter({
   const [error, setError] = useState('')
   const [summary, setSummary] = useState(null)
   const [showUnchanged, setShowUnchanged] = useState(false)
+  const [showCompleted, setShowCompleted] = useState(false)
   const [profile, setProfile] = useState(null)
   const [showProfile, setShowProfile] = useState(false)
 
@@ -218,6 +219,8 @@ export default function ShiftImporter({
           setActions(sync.actions || [])
           setSummary(sync.run.summary || null)
           setShowUnchanged(false)
+      setShowCompleted(false)
+          setShowCompleted(false)
         } catch {
           // Kein früherer Vergleich ist normal.
         }
@@ -268,15 +271,41 @@ export default function ShiftImporter({
     [actions]
   )
 
+  const completedCount = useMemo(
+    () =>
+      actions.filter(action =>
+        action.status === 'applied' ||
+        action.status === 'rolled_back'
+      ).length,
+    [actions]
+  )
+
   const visibleActions = useMemo(
     () =>
-      showUnchanged
-        ? actions
-        : actions.filter(action =>
-            action.actionType !== 'unchanged' &&
-            action.actionType !== 'manual_existing'
-          ),
-    [actions, showUnchanged]
+      actions.filter(action => {
+        const informational =
+          action.actionType === 'unchanged' ||
+          action.actionType === 'manual_existing'
+
+        const completed =
+          action.status === 'applied' ||
+          action.status === 'rolled_back'
+
+        if (!showUnchanged && informational) {
+          return false
+        }
+
+        if (!showCompleted && completed) {
+          return false
+        }
+
+        return true
+      }),
+    [
+      actions,
+      showUnchanged,
+      showCompleted
+    ]
   )
 
   function clearComparison() {
@@ -492,6 +521,7 @@ export default function ShiftImporter({
         data.run?.summary ||
         null
       )
+      setShowCompleted(false)
 
       const refreshed = await api.get(
         `/api/shift-imports/${draft.id}`
@@ -1146,18 +1176,43 @@ export default function ShiftImporter({
                     </div>
                   )}
 
-                  {hiddenInfoCount > 0 && (
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setShowUnchanged(value => !value)
-                      }
-                      style={styles.infoToggle}
-                    >
-                      {showUnchanged
-                        ? `${hiddenInfoCount} unveränderte Einträge ausblenden`
-                        : `${hiddenInfoCount} unveränderte Einträge anzeigen`}
-                    </button>
+                  {(hiddenInfoCount > 0 ||
+                    completedCount > 0) && (
+                    <div style={styles.filterRow}>
+                      {completedCount > 0 && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setShowCompleted(value => !value)
+                          }
+                          style={styles.infoToggle}
+                        >
+                          {showCompleted
+                            ? `${completedCount} erledigte Änderungen ausblenden`
+                            : `${completedCount} erledigte Änderungen anzeigen`}
+                        </button>
+                      )}
+
+                      {hiddenInfoCount > 0 && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setShowUnchanged(value => !value)
+                          }
+                          style={styles.infoToggle}
+                        >
+                          {showUnchanged
+                            ? `${hiddenInfoCount} unveränderte Einträge ausblenden`
+                            : `${hiddenInfoCount} unveränderte Einträge anzeigen`}
+                        </button>
+                      )}
+                    </div>
+                  )}
+
+                  {visibleActions.length === 0 && (
+                    <div style={styles.allDone}>
+                      Alle Kalenderänderungen dieses Laufs sind erledigt.
+                    </div>
                   )}
 
                   <div style={styles.actionList}>
@@ -1184,7 +1239,7 @@ export default function ShiftImporter({
                             <div
                               style={styles.actionChoice}
                             >
-                              {actionable ? (
+                              {canSelect ? (
                                 <input
                                   type="checkbox"
                                   checked={
@@ -1664,6 +1719,11 @@ const styles = {
     fontSize: 10,
     fontFamily: 'var(--font-mono)'
   },
+  filterRow: {
+    display: 'grid',
+    gap: 8,
+    marginBottom: 8
+  },
   infoToggle: {
     width: '100%',
     marginBottom: 8,
@@ -1675,6 +1735,16 @@ const styles = {
     color: 'var(--text3)',
     fontSize: 11,
     textAlign: 'left'
+  },
+  allDone: {
+    marginBottom: 8,
+    padding: '12px 11px',
+    border: '1px solid var(--green-dim)',
+    borderRadius: 9,
+    background: 'var(--green-bg)',
+    color: 'var(--green)',
+    fontSize: 11,
+    lineHeight: 1.45
   },
   actionList: {
     display: 'grid',
