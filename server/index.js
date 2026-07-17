@@ -18,6 +18,7 @@ import externalRoutes from './routes/external.js'
 import systemRoutes from './routes/system.js'
 import googleRoutes from './routes/google.js'
 import shiftImportRoutes from './routes/shiftImports.js'
+import shiftMultipageRoutes from './routes/shiftMultipage.js'
 import shiftSyncRoutes from './routes/shiftSync.js'
 import shiftSettingsRoutes from './routes/shiftSettings.js'
 import shiftHistoryRoutes from './routes/shiftHistory.js'
@@ -109,6 +110,7 @@ app.use('/api/external', externalRoutes)
 app.use('/api/system', systemRoutes)
 app.use('/api/google', googleRoutes)
 app.use('/api/shift-imports', shiftImportRoutes)
+app.use('/api/shift-multipage', shiftMultipageRoutes)
 app.use('/api/shift-sync', shiftSyncRoutes)
 app.use('/api/shift-settings', shiftSettingsRoutes)
 app.use('/api/shift-history', shiftHistoryRoutes)

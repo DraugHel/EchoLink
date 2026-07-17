@@ -159,7 +159,9 @@ function formatEvent(event) {
 export default function ShiftImporter({
   onClose
 }) {
-  const [file, setFile] = useState(null)
+  const [files, setFiles] = useState([])
+  const [analysisProgress, setAnalysisProgress] =
+    useState(null)
   const [columnNumber, setColumnNumber] =
     useState(1)
   const [draft, setDraft] = useState(null)
@@ -373,41 +375,107 @@ export default function ShiftImporter({
     )
   }
 
+  function moveSelectedFile(
+    index,
+    direction
+  ) {
+    setFiles(previous => {
+      const next = [...previous]
+      const target = index + direction
+
+      if (
+        target < 0 ||
+        target >= next.length
+      ) {
+        return previous
+      }
+
+      const [item] = next.splice(index, 1)
+      next.splice(target, 0, item)
+      return next
+    })
+  }
+
+  function removeSelectedFile(index) {
+    setFiles(previous =>
+      previous.filter(
+        (_, itemIndex) =>
+          itemIndex !== index
+      )
+    )
+  }
+
   async function analyze(event) {
     event.preventDefault()
 
-    if (!file) {
+    if (files.length === 0) {
       setError(
-        'Bitte zuerst ein Foto auswählen.'
+        'Bitte zuerst mindestens ein Foto auswählen.'
       )
       return
     }
 
     setAnalyzing(true)
+    setAnalysisProgress({
+      current: 0,
+      total: files.length
+    })
     setError('')
     clearComparison()
 
+    const createdImportIds = []
+
     try {
-      const body = new FormData()
-      body.append('image', file)
-      body.append(
-        'columnNumber',
-        String(columnNumber)
-      )
+      let lastResult = null
 
-      const response = await fetch(
-        '/api/shift-imports/analyze',
-        {
-          method: 'POST',
-          body
+      for (
+        let index = 0;
+        index < files.length;
+        index += 1
+      ) {
+        setAnalysisProgress({
+          current: index + 1,
+          total: files.length
+        })
+
+        const body = new FormData()
+        body.append('image', files[index])
+        body.append(
+          'columnNumber',
+          String(columnNumber)
+        )
+
+        const response = await fetch(
+          '/api/shift-imports/analyze',
+          {
+            method: 'POST',
+            body
+          }
+        )
+
+        if (!response.ok) {
+          throw await responseError(response)
         }
-      )
 
-      if (!response.ok) {
-        throw await responseError(response)
+        lastResult = await response.json()
+
+        if (lastResult?.import?.id) {
+          createdImportIds.push(
+            lastResult.import.id
+          )
+        }
       }
 
-      const data = await response.json()
+      let data = lastResult
+
+      if (createdImportIds.length > 1) {
+        data = await api.post(
+          '/api/shift-multipage/merge',
+          {
+            importIds: createdImportIds
+          }
+        )
+      }
 
       setDraft(data.import)
       setItems(
@@ -417,13 +485,26 @@ export default function ShiftImporter({
         )
       )
       setShowPlan(true)
+      setFiles([])
     } catch (failure) {
+      if (createdImportIds.length > 0) {
+        try {
+          await api.post(
+            '/api/shift-multipage/discard',
+            {
+              importIds: createdImportIds
+            }
+          )
+        } catch {}
+      }
+
       setError(
         failure?.message ||
         'Analyse fehlgeschlagen'
       )
     } finally {
       setAnalyzing(false)
+      setAnalysisProgress(null)
     }
   }
 
@@ -613,7 +694,7 @@ export default function ShiftImporter({
       setColumnNumber(
         data.import?.columnNumber || 1
       )
-      setFile(null)
+      setFiles([])
       clearComparison()
       setShowPlan(true)
 
@@ -757,31 +838,106 @@ export default function ShiftImporter({
               style={styles.uploadCard}
             >
               <label style={styles.label}>
-                Schichtplanfoto
+                Schichtplanfotos
 
                 <span style={styles.filePicker}>
                   <span style={styles.fileButton}>
-                    Foto auswählen
+                    Fotos auswählen
                   </span>
 
                   <span style={styles.fileName}>
-                    {file?.name ||
-                      'Keine Datei ausgewählt'}
+                    {files.length > 0
+                      ? `${files.length} Foto${
+                          files.length === 1
+                            ? ''
+                            : 's'
+                        } ausgewählt`
+                      : 'Keine Datei ausgewählt'}
                   </span>
 
                   <input
                     type="file"
+                    multiple
                     accept="image/jpeg,image/png,image/webp"
                     onChange={event =>
-                      setFile(
-                        event.target.files?.[0] ||
-                        null
+                      setFiles(
+                        Array.from(
+                          event.target.files || []
+                        ).slice(0, 10)
                       )
                     }
                     style={styles.hiddenFileInput}
                   />
                 </span>
               </label>
+
+              {files.length > 0 && (
+                <div style={styles.selectedFiles}>
+                  {files.map((item, index) => (
+                    <div
+                      key={`${item.name}-${item.size}-${index}`}
+                      style={styles.selectedFile}
+                    >
+                      <div style={styles.selectedFileText}>
+                        <strong>
+                          Seite {index + 1}
+                        </strong>
+
+                        <span style={styles.selectedFileName}>
+                          {item.name}
+                        </span>
+                      </div>
+
+                      <div style={styles.fileActions}>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            moveSelectedFile(
+                              index,
+                              -1
+                            )
+                          }
+                          disabled={index === 0}
+                          style={styles.fileAction}
+                          aria-label="Foto nach oben"
+                        >
+                          ↑
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() =>
+                            moveSelectedFile(
+                              index,
+                              1
+                            )
+                          }
+                          disabled={
+                            index ===
+                            files.length - 1
+                          }
+                          style={styles.fileAction}
+                          aria-label="Foto nach unten"
+                        >
+                          ↓
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() =>
+                            removeSelectedFile(
+                              index
+                            )
+                          }
+                          style={styles.fileAction}
+                        >
+                          Entfernen
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
 
               <label style={styles.label}>
                 Meine Mitarbeiterspalte
@@ -808,25 +964,33 @@ export default function ShiftImporter({
               <div style={styles.hint}>
                 Spalte 1 ist die erste
                 Mitarbeiterspalte direkt rechts von
-                Datum und Tag. Die Analyse schreibt
-                noch nichts in den Kalender.
+                Datum und Tag. Bis zu zehn Fotos
+                werden in der angezeigten Reihenfolge
+                analysiert und anschließend zu einem
+                Plan zusammengeführt. Widersprüche
+                werden deaktiviert und markiert.
               </div>
 
               <button
                 type="submit"
-                disabled={analyzing || !file}
+                disabled={analyzing || files.length === 0}
                 style={{
                   ...styles.primary,
                   width: '100%',
                   opacity:
-                    analyzing || !file
+                    analyzing ||
+                    files.length === 0
                       ? 0.55
                       : 1
                 }}
               >
                 {analyzing
-                  ? 'Bild wird analysiert …'
-                  : 'Vorschau erstellen'}
+                  ? analysisProgress
+                    ? `Foto ${analysisProgress.current} von ${analysisProgress.total} wird analysiert …`
+                    : 'Fotos werden analysiert …'
+                  : files.length > 1
+                    ? `${files.length} Fotos analysieren`
+                    : 'Vorschau erstellen'}
               </button>
             </form>
           ) : (
@@ -853,7 +1017,7 @@ export default function ShiftImporter({
                   onClick={startNew}
                   style={styles.secondary}
                 >
-                  Neues Foto
+                  Neuer Plan
                 </button>
               </div>
 
@@ -1627,6 +1791,53 @@ const styles = {
     color: 'var(--text2)',
     fontSize: 12,
     fontWeight: 600
+  },
+  selectedFiles: {
+    display: 'grid',
+    gap: 7,
+    minWidth: 0
+  },
+  selectedFile: {
+    minWidth: 0,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    flexWrap: 'wrap',
+    gap: 8,
+    padding: 8,
+    border: '1px solid var(--border)',
+    borderRadius: 8,
+    background: 'var(--bg2)'
+  },
+  selectedFileText: {
+    minWidth: 0,
+    flex: '1 1 180px',
+    display: 'flex',
+    alignItems: 'center',
+    gap: 8,
+    color: 'var(--text2)',
+    fontSize: 11
+  },
+  selectedFileName: {
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    color: 'var(--text3)'
+  },
+  fileActions: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 5
+  },
+  fileAction: {
+    minHeight: 30,
+    padding: '5px 8px',
+    border: '1px solid var(--border)',
+    borderRadius: 7,
+    background: 'var(--bg3)',
+    color: 'var(--text2)',
+    fontSize: 11
   },
   filePicker: {
     position: 'relative',

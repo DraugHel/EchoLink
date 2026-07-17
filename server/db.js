@@ -461,6 +461,28 @@ db.exec(`
   );
 `);
 
+db.exec(`
+  CREATE TABLE IF NOT EXISTS shift_import_pages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    import_id INTEGER NOT NULL,
+    page_number INTEGER NOT NULL,
+    filename TEXT NOT NULL,
+    original_name TEXT NOT NULL DEFAULT '',
+    created_at INTEGER DEFAULT (unixepoch()),
+    FOREIGN KEY (import_id)
+      REFERENCES shift_imports(id)
+      ON DELETE CASCADE,
+    UNIQUE(import_id, page_number)
+  );
+
+  CREATE INDEX IF NOT EXISTS
+    idx_shift_import_pages_import
+    ON shift_import_pages(
+      import_id,
+      page_number
+    );
+`);
+
 for (const migration of [
   `ALTER TABLE shift_sync_runs
      ADD COLUMN calendar_id TEXT NOT NULL DEFAULT 'primary'`,

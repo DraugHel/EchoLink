@@ -102,7 +102,11 @@ function serializePlan(row) {
     archivedAt: row.archived_at || null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
-    hasImage: Boolean(row.filename)
+    hasImage: Boolean(row.filename),
+    pageCount: Math.max(
+      1,
+      Number(row.page_count || 0)
+    )
   }
 }
 
@@ -198,6 +202,11 @@ router.get('/', (req, res) => {
     const rows = db.prepare(`
       SELECT
         i.*,
+        (
+          SELECT COUNT(*)
+          FROM shift_import_pages page
+          WHERE page.import_id = i.id
+        ) AS page_count,
         (
           SELECT COUNT(*)
           FROM shift_import_items item
