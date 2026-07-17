@@ -994,9 +994,16 @@ export default function Chat({ user, onLogout }) {
                     : 'var(--text2)'
               }}
             >
-              <CorsnFace mood={systemMood} />
+
+              <span style={styles.systemStatusFace}>
+
+                <CorsnFace mood={systemMood} />
+
+              </span>
+
 
               <span style={styles.systemDots}>
+
                 {sysStatus.apps
                   .filter(app =>
                     monitoredApps.includes(app.name)
@@ -1350,22 +1357,35 @@ const styles = {
   root: { display: 'flex', flex: 1, overflow: 'hidden', minHeight: 0 },
   main: { flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 0 },
   systemCompact: {
-    minWidth: 44,
-    height: 42,
+    position: 'relative',
+    width: 96,
+    minWidth: 96,
+    height: 46,
     flexShrink: 0,
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 5,
-    padding: '0 7px',
+    padding: '0 10px',
     border: '1px solid var(--border)',
-    borderRadius: 11,
+    borderRadius: 14,
     background: 'var(--bg3)'
   },
+  systemStatusFace: {
+    position: 'absolute',
+    left: '50%',
+    top: '50%',
+    display: 'grid',
+    placeItems: 'center',
+    transform: 'translate(-50%, -50%)'
+  },
   systemDots: {
+    position: 'absolute',
+    right: 10,
+    top: '50%',
     display: 'flex',
     alignItems: 'center',
-    gap: 3
+    gap: 4,
+    transform: 'translateY(-50%)'
   },
   systemDot: {
     width: 6,
