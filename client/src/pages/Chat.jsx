@@ -974,56 +974,106 @@ export default function Chat({ user, onLogout }) {
               ? {
                   flex: '1 1 auto',
                   minWidth: 0,
-                  maxWidth: 180
+                  maxWidth: 110
                 }
               : {})
           }}>
             {activeConvo ? activeConvo.title : 'EchoLink'}
           </span>
           {sysStatus && (
-            <button
-              type="button"
-              onClick={() => setShowSysPanel(true)}
-              title="Systemstatus"
-              aria-label="Systemstatus"
-              style={{
-                ...styles.systemCompact,
-                color:
-                  systemMood === 'panic'
-                    ? 'var(--danger)'
-                    : 'var(--text2)'
-              }}
-            >
+            mobile ? (
+              <>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setShowSysPanel(true)
+                  }
+                  title="Systemstatus"
+                  aria-label="Systemstatus"
+                  style={{
+                    ...styles.systemFaceCenter,
+                    color:
+                      systemMood === 'panic'
+                        ? 'var(--danger)'
+                        : 'var(--text2)'
+                  }}
+                >
+                  <CorsnFace mood={systemMood} />
+                </button>
 
-              <span style={styles.systemStatusFace}>
-
+                <button
+                  type="button"
+                  onClick={() =>
+                    setShowSysPanel(true)
+                  }
+                  title="Systemstatus"
+                  aria-label="Systemstatus"
+                  style={styles.systemDotsRight}
+                >
+                  <span style={styles.systemDots}>
+                    {sysStatus.apps
+                      .filter(app =>
+                        monitoredApps.includes(
+                          app.name
+                        )
+                      )
+                      .map(app => (
+                        <span
+                          key={app.name}
+                          style={{
+                            ...styles.systemDot,
+                            background:
+                              app.status === 'online'
+                                ? 'var(--accent)'
+                                : 'var(--danger)'
+                          }}
+                        />
+                      ))}
+                  </span>
+                </button>
+              </>
+            ) : (
+              <button
+                type="button"
+                onClick={() =>
+                  setShowSysPanel(true)
+                }
+                title="Systemstatus"
+                aria-label="Systemstatus"
+                style={{
+                  ...styles.systemDesktop,
+                  color:
+                    systemMood === 'panic'
+                      ? 'var(--danger)'
+                      : 'var(--text2)'
+                }}
+              >
                 <CorsnFace mood={systemMood} />
 
-              </span>
-
-
-              <span style={styles.systemDots}>
-
-                {sysStatus.apps
-                  .filter(app =>
-                    monitoredApps.includes(app.name)
-                  )
-                  .map(app => (
-                    <span
-                      key={app.name}
-                      style={{
-                        ...styles.systemDot,
-                        background:
-                          app.status === 'online'
-                            ? 'var(--accent)'
-                            : 'var(--danger)'
-                      }}
-                    />
-                  ))}
-              </span>
-            </button>
+                <span style={styles.systemDots}>
+                  {sysStatus.apps
+                    .filter(app =>
+                      monitoredApps.includes(
+                        app.name
+                      )
+                    )
+                    .map(app => (
+                      <span
+                        key={app.name}
+                        style={{
+                          ...styles.systemDot,
+                          background:
+                            app.status === 'online'
+                              ? 'var(--accent)'
+                              : 'var(--danger)'
+                        }}
+                      />
+                    ))}
+                </span>
+              </button>
+            )
           )}
-          <button
+<button
             type="button"
             onClick={() => setShowTools(true)}
             title="Werkzeuge und Einstellungen"
@@ -1356,43 +1406,58 @@ const GearIcon = () => (
 const styles = {
   root: { display: 'flex', flex: 1, overflow: 'hidden', minHeight: 0 },
   main: { flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 0 },
-  systemCompact: {
-    position: 'relative',
-    width: 96,
-    minWidth: 96,
+  systemFaceCenter: {
+    position: 'absolute',
+    zIndex: 2,
+    left: '50%',
+    top: '50%',
+    width: 46,
     height: 46,
+    display: 'grid',
+    placeItems: 'center',
+    padding: 0,
+    border: '1px solid var(--border)',
+    borderRadius: 14,
+    background: 'var(--bg3)',
+    transform: 'translate(-50%, -50%)'
+  },
+  systemDotsRight: {
+    width: 46,
+    height: 42,
+    flexShrink: 0,
+    display: 'grid',
+    placeItems: 'center',
+    marginLeft: 'auto',
+    padding: 0,
+    border: 0,
+    background: 'transparent',
+    color: 'var(--text2)'
+  },
+  systemDesktop: {
+    height: 42,
     flexShrink: 0,
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    padding: '0 10px',
+    gap: 6,
+    padding: '0 9px',
     border: '1px solid var(--border)',
-    borderRadius: 14,
+    borderRadius: 11,
     background: 'var(--bg3)'
   },
-  systemStatusFace: {
-    position: 'absolute',
-    left: '50%',
-    top: '50%',
-    display: 'grid',
-    placeItems: 'center',
-    transform: 'translate(-50%, -50%)'
-  },
   systemDots: {
-    position: 'absolute',
-    right: 10,
-    top: '50%',
     display: 'flex',
     alignItems: 'center',
-    gap: 4,
-    transform: 'translateY(-50%)'
+    justifyContent: 'center',
+    gap: 5
   },
   systemDot: {
-    width: 6,
-    height: 6,
+    width: 7,
+    height: 7,
     borderRadius: '50%'
   },
   topbar: {
+    position: 'relative',
     display: 'flex', alignItems: 'center', gap: 12,
     padding: '0 16px', height: 54, flexShrink: 0,
     borderBottom: '1px solid var(--border)', background: 'var(--bg2)'
