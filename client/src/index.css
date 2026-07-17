@@ -194,3 +194,60 @@ a { color: var(--accent); text-decoration: none; }
 @keyframes corsnBlink { 0%, 94%, 100% { transform: scaleY(1); } 96%, 98% { transform: scaleY(0.12); } }
 .corsn-panic { animation: corsnShake 0.5s ease-in-out infinite; }
 @keyframes corsnShake { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-1px); } 75% { transform: translateX(1px); } }
+
+
+/* EchoLink UI Phase 1 */
+@media (max-width: 767px) {
+  .echolink-tools-overlay,
+  .echolink-fullscreen-overlay {
+    box-sizing: border-box !important;
+    padding:
+      env(safe-area-inset-top)
+      0
+      env(safe-area-inset-bottom) !important;
+    align-items: stretch !important;
+    justify-content: stretch !important;
+    background: var(--bg2) !important;
+    backdrop-filter: none !important;
+  }
+
+  .echolink-tools-panel,
+  .echolink-fullscreen-panel {
+    width: 100% !important;
+    max-width: none !important;
+    height: 100% !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    box-sizing: border-box !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+  }
+
+  .echolink-shift-panel {
+    position: fixed !important;
+    inset:
+      env(safe-area-inset-top)
+      0
+      env(safe-area-inset-bottom)
+      0 !important;
+  }
+}
+
+@media (min-width: 768px) {
+  .echolink-tools-panel {
+    animation: echolink-slide-in 160ms ease-out;
+  }
+}
+
+@keyframes echolink-slide-in {
+  from {
+    opacity: 0;
+    transform: translateX(18px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}

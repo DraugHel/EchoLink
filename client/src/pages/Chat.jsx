@@ -6,9 +6,10 @@ import SettingsPanel from '../components/SettingsPanel.jsx'
 import MemoryPanel from '../components/MemoryPanel.jsx'
 import TaskPanel from '../components/TaskPanel.jsx'
 import ShiftImporter from '../components/ShiftImporter.jsx'
-import PushButton from '../components/PushButton.jsx'
+import AppToolsMenu from '../components/AppToolsMenu.jsx'
+import SystemStatusPanel from '../components/SystemStatusPanel.jsx'
 import api from '../lib/api.js'
-import ThemePicker, { useTheme } from '../components/ThemePicker.jsx'
+import { useTheme } from '../components/ThemePicker.jsx'
 import CorsnFace from '../components/CorsnFace.jsx'
 import TerminalTimeline from '../components/TerminalTimeline.jsx'
 
@@ -137,6 +138,7 @@ export default function Chat({ user, onLogout }) {
   const [showMemory, setShowMemory] = useState(false)
   const [showTasks, setShowTasks] = useState(false)
   const [showShiftImporter, setShowShiftImporter] = useState(false)
+  const [showTools, setShowTools] = useState(false)
   const [jumpMessageId, setJumpMessageId] = useState(null)
 
   useEffect(() => {
@@ -954,375 +956,80 @@ export default function Chat({ user, onLogout }) {
       )}
 
       <main style={styles.main}>
-        <div style={{ ...styles.topbar, ...(mobile ? { gap: 0, padding: '0 12px', justifyContent: 'space-between' } : {}) }}>
+        <div style={{
+          ...styles.topbar,
+          ...(mobile
+            ? {
+                gap: 8,
+                padding: '0 10px'
+              }
+            : {})
+        }}>
           <button style={styles.menuBtn} onClick={() => setMobileSidebar(v => !v)}>
             <MenuIcon />
           </button>
-          <span style={{ ...styles.convoTitle, ...(mobile ? { flex: '0 1 auto', maxWidth: 72 } : {}) }}>
+          <span style={{
+            ...styles.convoTitle,
+            ...(mobile
+              ? {
+                  flex: '1 1 auto',
+                  minWidth: 0,
+                  maxWidth: 180
+                }
+              : {})
+          }}>
             {activeConvo ? activeConvo.title : 'EchoLink'}
           </span>
           {sysStatus && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginRight: 4, cursor: 'pointer' }}
-              onClick={() => setShowSysPanel(v => !v)}>
-              <CorsnFace mood={systemMood} />
-              <div style={{ display: 'flex', gap: 3 }}>
-                {sysStatus.apps.filter(a => monitoredApps.includes(a.name)).map(a => (
-                  <span key={a.name} style={{ width: 6, height: 6, borderRadius: '50%',
-                    background: a.status === 'online' ? 'var(--accent)' : 'var(--danger)' }} />
-                ))}
-              </div>
-              <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text3)' }}>
-                {sysStatus.disk}%
-              </span>
-            </div>
-          )}
-          {showSysPanel && sysStatus && (
-            <>
-              <div
-                style={{
-                  position: 'fixed',
-                  inset: 0,
-                  zIndex: 40
-                }}
-                onClick={() =>
-                  setShowSysPanel(false)
-                }
-              />
-
-              <div
-                style={{
-                  position: 'fixed',
-                  top:
-                    'calc(58px + env(safe-area-inset-top))',
-                  right: 8,
-                  zIndex: 41,
-                  width: 310,
-                  maxWidth: 'calc(100vw - 16px)',
-                  maxHeight:
-                    'calc(100vh - 74px - env(safe-area-inset-top))',
-                  overflowY: 'auto',
-                  background: 'var(--bg2)',
-                  border:
-                    '1px solid var(--border)',
-                  borderRadius: 10,
-                  padding: '12px 14px',
-                  fontFamily: 'var(--font-mono)',
-                  fontSize: 12,
-                  boxShadow:
-                    '0 8px 24px rgba(0,0,0,0.45)'
-                }}
-              >
-                <div
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent:
-                      'space-between',
-                    gap: 12,
-                    paddingBottom: 8
-                  }}
-                >
-                  <strong
-                    style={{
-                      color: 'var(--text)'
-                    }}
-                  >
-                    Serverstatus
-                  </strong>
-
-                  <span
-                    style={{
-                      color:
-                        systemMood === 'panic'
-                          ? 'var(--danger)'
-                          : 'var(--green)'
-                    }}
-                  >
-                    {systemMood === 'panic'
-                      ? 'Warnung'
-                      : 'Alles okay'}
-                  </span>
-                </div>
-
-                <div
-                  style={{
-                    color: 'var(--text3)',
-                    paddingBottom: 6,
-                    fontSize: 10
-                  }}
-                >
-                  Prozess antippen = Smiley-Überwachung
-                </div>
-
-                {sysStatus.apps.map(app => (
-                  <div
-                    key={app.name}
-                    onClick={() =>
-                      toggleMonitoredApp(app.name)
-                    }
-                    style={{
-                      display: 'flex',
-                      justifyContent:
-                        'space-between',
-                      alignItems: 'center',
-                      gap: 12,
-                      padding: '6px 0',
-                      cursor: 'pointer',
-                      opacity:
-                        monitoredApps.includes(
-                          app.name
-                        )
-                          ? 1
-                          : 0.45
-                    }}
-                  >
-                    <span
-                      style={{
-                        color:
-                          app.status === 'online'
-                            ? 'var(--text)'
-                            : 'var(--danger)',
-                        minWidth: 0,
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis'
-                      }}
-                    >
-                      {monitoredApps.includes(
-                        app.name
-                      )
-                        ? '☑ '
-                        : '☐ '}
-                      {app.name}
-                    </span>
-
-                    <span
-                      style={{
-                        color: 'var(--text3)',
-                        whiteSpace: 'nowrap',
-                        fontSize: 10
-                      }}
-                    >
-                      {app.status}
-                      {' · '}
-                      {app.restarts}x
-                      {' · '}
-                      {app.cpu ?? '–'}%
-                      {' · '}
-                      {app.memoryMb ?? '–'} MB
-                    </span>
-                  </div>
-                ))}
-
-                <div
-                  style={{
-                    borderTop:
-                      '1px solid var(--border)',
-                    marginTop: 6,
-                    paddingTop: 8,
-                    display: 'grid',
-                    gridTemplateColumns:
-                      '1fr auto',
-                    rowGap: 7,
-                    columnGap: 14
-                  }}
-                >
-                  <span style={{ color: 'var(--text3)' }}>
-                    CPU
-                  </span>
-                  <span
-                    style={{
-                      color: metricColor(
-                        sysStatus.cpu,
-                        80,
-                        95
-                      )
-                    }}
-                  >
-                    {sysStatus.cpu ?? '–'}%
-                    {' · load '}
-                    {sysStatus.load ?? '–'}
-                  </span>
-
-                  <span style={{ color: 'var(--text3)' }}>
-                    RAM
-                  </span>
-                  <span
-                    style={{
-                      color: metricColor(
-                        sysStatus.memory
-                          ?.usedPercent,
-                        80,
-                        90
-                      )
-                    }}
-                  >
-                    {sysStatus.memory
-                      ?.usedPercent ?? '–'}%
-                    {' · '}
-                    {sysStatus.memory
-                      ?.usedMb ?? '–'}
-                    /
-                    {sysStatus.memory
-                      ?.totalMb ?? '–'} MB
-                  </span>
-
-                  <span style={{ color: 'var(--text3)' }}>
-                    Speicher
-                  </span>
-                  <span
-                    style={{
-                      color: metricColor(
-                        sysStatus.disk,
-                        80,
-                        90
-                      )
-                    }}
-                  >
-                    {sysStatus.disk ?? '–'}%
-                    {' · '}
-                    {sysStatus.diskFreeGb ?? '–'}
-                    {' GB frei'}
-                  </span>
-
-                  <span style={{ color: 'var(--text3)' }}>
-                    Uptime
-                  </span>
-                  <span style={{ color: 'var(--text2)' }}>
-                    {formatDuration(
-                      sysStatus.uptimeSeconds
-                    )}
-                  </span>
-                </div>
-
-                <div
-                  style={{
-                    borderTop:
-                      '1px solid var(--border)',
-                    marginTop: 9,
-                    paddingTop: 8,
-                    display: 'grid',
-                    gridTemplateColumns:
-                      '1fr auto',
-                    rowGap: 7,
-                    columnGap: 14
-                  }}
-                >
-                  <span style={{ color: 'var(--text3)' }}>
-                    DB-Backup
-                  </span>
-                  <span
-                    title={
-                      sysStatus.backups
-                        ?.database?.name || ''
-                    }
-                    style={{
-                      color:
-                        !sysStatus.backups
-                          ?.database?.found ||
-                        Number(
-                          sysStatus.backups
-                            ?.database
-                            ?.ageSeconds
-                        ) > 172800
-                          ? 'var(--danger)'
-                          : 'var(--text2)'
-                    }}
-                  >
-                    {formatBackupAge(
-                      sysStatus.backups
-                        ?.database
-                    )}
-                  </span>
-
-                  <span style={{ color: 'var(--text3)' }}>
-                    Komplett-Backup
-                  </span>
-                  <span
-                    title={
-                      sysStatus.backups
-                        ?.full?.name || ''
-                    }
-                    style={{
-                      color:
-                        !sysStatus.backups
-                          ?.full?.found ||
-                        Number(
-                          sysStatus.backups
-                            ?.full?.ageSeconds
-                        ) > 1209600
-                          ? 'var(--danger)'
-                          : 'var(--text2)'
-                    }}
-                  >
-                    {formatBackupAge(
-                      sysStatus.backups?.full
-                    )}
-                  </span>
-                </div>
-              </div>
-            </>
-          )}
-          <button
-            type="button"
-            onClick={() => {
-              setShowShiftImporter(true)
-              setShowTasks(false)
-              setShowMemory(false)
-            }}
-            title="Schichtplan importieren"
-            aria-label="Schichtplan importieren"
-            style={{
-              ...styles.settingsBtn,
-              color: showShiftImporter
-                ? 'var(--accent)'
-                : 'var(--text2)'
-            }}
-          >
-            <CalendarImportIcon />
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setShowTasks(true)
-              setShowMemory(false)
-            }}
-            title="Geplante Aufgaben anzeigen"
-            aria-label="Geplante Aufgaben anzeigen"
-            style={{
-              ...styles.settingsBtn,
-              color: showTasks
-                ? 'var(--accent)'
-                : 'var(--text2)'
-            }}
-          >
-            <ClockIcon />
-          </button>
-          {activeConvo && (
             <button
               type="button"
-              onClick={() => {
-                setShowMemory(true)
-                setShowTasks(false)
-              }}
-              title="Memory anzeigen"
-              aria-label="Memory anzeigen"
+              onClick={() => setShowSysPanel(true)}
+              title="Systemstatus"
+              aria-label="Systemstatus"
               style={{
-                ...styles.settingsBtn,
-                color: showMemory
-                  ? 'var(--accent)'
-                  : 'var(--text2)'
+                ...styles.systemCompact,
+                color:
+                  systemMood === 'panic'
+                    ? 'var(--danger)'
+                    : 'var(--text2)'
               }}
             >
-              <BrainIcon />
+              <CorsnFace mood={systemMood} />
+
+              <span style={styles.systemDots}>
+                {sysStatus.apps
+                  .filter(app =>
+                    monitoredApps.includes(app.name)
+                  )
+                  .map(app => (
+                    <span
+                      key={app.name}
+                      style={{
+                        ...styles.systemDot,
+                        background:
+                          app.status === 'online'
+                            ? 'var(--accent)'
+                            : 'var(--danger)'
+                      }}
+                    />
+                  ))}
+              </span>
             </button>
           )}
-          <PushButton style={styles.settingsBtn} />
-          <ThemePicker />
-          {activeConvo && (
-            <button style={styles.settingsBtn} onClick={() => setShowSettings(true)} title="Settings">
-              <GearIcon />
-            </button>
-          )}
+          <button
+            type="button"
+            onClick={() => setShowTools(true)}
+            title="Werkzeuge und Einstellungen"
+            aria-label="Werkzeuge und Einstellungen"
+            style={{
+              ...styles.settingsBtn,
+              color: showTools
+                ? 'var(--accent)'
+                : 'var(--text2)'
+            }}
+          >
+            <MoreIcon />
+          </button>
         </div>
 
         <div style={styles.messages} ref={messagesContainerRef}>
@@ -1474,6 +1181,58 @@ export default function Chat({ user, onLogout }) {
         )}
       </main>
 
+      {showTools && (
+        <AppToolsMenu
+          activeConversation={activeConvo}
+          systemProblem={
+            monitoredProcessProblem ||
+            systemResourceProblem
+          }
+          onOpenShift={() => {
+            setShowTools(false)
+            setShowShiftImporter(true)
+            setShowTasks(false)
+            setShowMemory(false)
+            setShowSettings(false)
+          }}
+          onOpenTasks={() => {
+            setShowTools(false)
+            setShowTasks(true)
+            setShowShiftImporter(false)
+            setShowMemory(false)
+            setShowSettings(false)
+          }}
+          onOpenMemory={() => {
+            setShowTools(false)
+            setShowMemory(true)
+            setShowTasks(false)
+            setShowShiftImporter(false)
+            setShowSettings(false)
+          }}
+          onOpenSystem={() => {
+            setShowTools(false)
+            setShowSysPanel(true)
+          }}
+          onOpenSettings={() => {
+            setShowTools(false)
+            setShowSettings(true)
+            setShowTasks(false)
+            setShowMemory(false)
+            setShowShiftImporter(false)
+          }}
+          onClose={() => setShowTools(false)}
+        />
+      )}
+
+      {showSysPanel && sysStatus && (
+        <SystemStatusPanel
+          status={sysStatus}
+          monitoredApps={monitoredApps}
+          onToggleApp={toggleMonitoredApp}
+          onClose={() => setShowSysPanel(false)}
+        />
+      )}
+
       {showShiftImporter && (
         <ShiftImporter
           onClose={() =>
@@ -1515,6 +1274,20 @@ const MenuIcon = () => (
     <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>
   </svg>
 )
+const MoreIcon = () => (
+  <svg
+    width="21"
+    height="21"
+    viewBox="0 0 24 24"
+    fill="currentColor"
+    aria-hidden="true"
+  >
+    <circle cx="5" cy="12" r="1.8" />
+    <circle cx="12" cy="12" r="1.8" />
+    <circle cx="19" cy="12" r="1.8" />
+  </svg>
+)
+
 const CalendarImportIcon = () => (
   <svg
     width="17"
@@ -1576,6 +1349,29 @@ const GearIcon = () => (
 const styles = {
   root: { display: 'flex', flex: 1, overflow: 'hidden', minHeight: 0 },
   main: { flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 0 },
+  systemCompact: {
+    minWidth: 44,
+    height: 42,
+    flexShrink: 0,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 5,
+    padding: '0 7px',
+    border: '1px solid var(--border)',
+    borderRadius: 11,
+    background: 'var(--bg3)'
+  },
+  systemDots: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 3
+  },
+  systemDot: {
+    width: 6,
+    height: 6,
+    borderRadius: '50%'
+  },
   topbar: {
     display: 'flex', alignItems: 'center', gap: 12,
     padding: '0 16px', height: 54, flexShrink: 0,

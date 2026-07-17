@@ -923,11 +923,15 @@ export default function ShiftImporter({
   return (
     <>
       <div
+        className="echolink-fullscreen-overlay"
         style={styles.backdrop}
         onClick={onClose}
       />
 
-      <section style={styles.panel}>
+      <section
+        className="echolink-fullscreen-panel echolink-shift-panel"
+        style={styles.panel}
+      >
         <header style={styles.header}>
           <div style={styles.headerText}>
             <h2 style={styles.title}>

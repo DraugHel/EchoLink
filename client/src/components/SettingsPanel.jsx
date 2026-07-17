@@ -81,27 +81,35 @@ export default function SettingsPanel({ conversation, onUpdate, onClose }) {
   }
 
   return (
-    <div style={styles.overlay} onClick={onClose}>
-      <div style={styles.panel} onClick={e => e.stopPropagation()} className="fade-in">
+    <div
+      className="echolink-fullscreen-overlay"
+      style={styles.overlay}
+      onClick={onClose}
+    >
+      <div
+        className="fade-in echolink-fullscreen-panel"
+        style={styles.panel}
+        onClick={e => e.stopPropagation()}
+      >
         <div style={styles.header}>
-          <h2 style={styles.title}>Settings</h2>
+          <h2 style={styles.title}>Einstellungen</h2>
           <button style={styles.closeBtn} onClick={onClose}>✕</button>
         </div>
 
         <div style={styles.body}>
           {/* Conversation settings */}
-          <p style={styles.sectionLabel}>This Conversation</p>
+          <p style={styles.sectionLabel}>Diese Unterhaltung</p>
 
-          <Field label="Provider">
+          <Field label="Anbieter">
             <select style={styles.select} value={currentProvider} onChange={e => switchProvider(e.target.value)}>
               {availableProviders.length === 0 && <option value={currentProvider}>{PROVIDER_LABELS[currentProvider] || currentProvider}</option>}
               {availableProviders.map(p => <option key={p} value={p}>{PROVIDER_LABELS[p] || p}</option>)}
             </select>
           </Field>
 
-          <Field label="Model">
+          <Field label="Modell">
             {modelsError
-              ? <p style={styles.err}>Could not fetch models.</p>
+              ? <p style={styles.err}>Modelle konnten nicht geladen werden.</p>
               : (
                 <select style={styles.select} value={form.model} onChange={e => set('model', e.target.value)}>
                   {filteredModels.length === 0 && <option value={form.model}>{form.model}</option>}
@@ -111,7 +119,7 @@ export default function SettingsPanel({ conversation, onUpdate, onClose }) {
             }
           </Field>
 
-          <Field label={`Temperature: ${form.temperature.toFixed(2)}`}>
+          <Field label={`Temperatur: ${form.temperature.toFixed(2)}`}>
             <input type="range" min="0" max="2" step="0.05" value={form.temperature}
               onChange={e => set('temperature', parseFloat(e.target.value))} style={styles.range} />
           </Field>
@@ -126,15 +134,15 @@ export default function SettingsPanel({ conversation, onUpdate, onClose }) {
               onChange={e => set('top_p', parseFloat(e.target.value))} style={styles.range} />
           </Field>
 
-          <Field label="Reasoning">
+          <Field label="Denkmodus">
             <select value={form.reasoning_effort} onChange={e => set('reasoning_effort', e.target.value)}
               style={{ width: '100%', padding: '8px 10px', background: 'var(--bg3)', color: 'var(--text1)',
                 border: '1px solid var(--border)', borderRadius: 8, fontFamily: 'var(--font-mono)', fontSize: 13 }}>
-              <option value="">Provider default</option>
-              <option value="off">Off</option>
-              <option value="low">Low</option>
-              <option value="medium">Medium</option>
-              <option value="high">High</option>
+              <option value="">Anbieter-Standard</option>
+              <option value="off">Aus</option>
+              <option value="low">Niedrig</option>
+              <option value="medium">Mittel</option>
+              <option value="high">Hoch</option>
             </select>
           </Field>
 
@@ -199,7 +207,7 @@ export default function SettingsPanel({ conversation, onUpdate, onClose }) {
               style={styles.textarea}
               value={defaultPrompt}
               onChange={e => setDefaultPrompt(e.target.value)}
-              placeholder="You are a helpful assistant…"
+              placeholder="Du bist ein hilfreicher Assistent …"
               rows={5}
             />
           </Field>
@@ -208,14 +216,14 @@ export default function SettingsPanel({ conversation, onUpdate, onClose }) {
             onClick={saveDefault}
             disabled={savingDefault}
           >
-            {defaultSaved ? '✓ Saved' : savingDefault ? 'Saving…' : 'Save as Default'}
+            {defaultSaved ? '✓ Gespeichert' : savingDefault ? 'Speichert …' : 'Als Standard speichern'}
           </button>
         </div>
 
         <div style={styles.footer}>
-          <button style={styles.cancelBtn} onClick={onClose}>Cancel</button>
+          <button style={styles.cancelBtn} onClick={onClose}>Abbrechen</button>
           <button style={{ ...styles.saveBtn, opacity: saving ? 0.6 : 1 }} onClick={save} disabled={saving}>
-            {saving ? 'Saving…' : 'Save Conversation'}
+            {saving ? 'Speichert …' : 'Unterhaltung speichern'}
           </button>
         </div>
       </div>

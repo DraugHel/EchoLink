@@ -942,6 +942,7 @@ export default function TaskPanel({
 
   return (
     <div
+      className="echolink-fullscreen-overlay"
       onClick={onClose}
       style={{
         position: 'fixed',
@@ -956,6 +957,7 @@ export default function TaskPanel({
       }}
     >
       <section
+        className="echolink-fullscreen-panel"
         onClick={event => event.stopPropagation()}
         style={{
           width: 'min(900px, 100%)',

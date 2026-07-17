@@ -16,7 +16,11 @@ function formatSearchResultDate(timestamp) {
 }
 
 export default function Sidebar({ conversations, activeId, onSelect, onCreate, onDelete, onRename, onArchive, onRestore, onSearchResult, user, onLogout, mobileOpen, onMobileClose, mobile }) {
-  const [editingId, setEditingId] = useState(null)
+  
+  const [actionMenuId, setActionMenuId] =
+    useState(null)
+
+const [editingId, setEditingId] = useState(null)
   const [editTitle, setEditTitle] = useState('')
   const [hoverId, setHoverId] = useState(null)
   const [creating, setCreating] = useState(false)
@@ -308,13 +312,18 @@ export default function Sidebar({ conversations, activeId, onSelect, onCreate, o
           )}
 
           {visibleConversations.length === 0 && (
-            <p style={styles.empty}>No conversations yet.<br/>Click + to start one.</p>
+            <p style={styles.empty}>
+              Noch keine Unterhaltungen.
+              <br />
+              Mit + eine neue Unterhaltung starten.
+            </p>
           )}
           {visibleConversations.map(c => (
             <div
               key={c.id}
               style={{
                 ...styles.item,
+                position: 'relative',
                 ...(c.id === activeId ? styles.itemActive : {}),
                 ...(hoverId === c.id && c.id !== activeId ? styles.itemHover : {})
               }}
@@ -335,26 +344,124 @@ export default function Sidebar({ conversations, activeId, onSelect, onCreate, o
               ) : (
                 <>
                   <span style={styles.itemTitle}>{c.title}</span>
-                  <div style={{ ...styles.itemActions, opacity: mobile || hoverId === c.id || c.id === activeId ? 1 : 0 }}>
-                    {!c.archived_at && (
-                      <button style={styles.iconBtn} onClick={e => startEdit(e, c)} title="Umbenennen">
-                        <PencilIcon />
-                      </button>
-                    )}
-                    {c.archived_at ? (
-                      <button style={{ ...styles.iconBtn, color: 'var(--green)' }} onClick={e => { e.stopPropagation(); onRestore(c.id) }} title="Wiederherstellen">
-                        <RestoreIcon />
-                      </button>
-                    ) : (
-                      <button style={styles.iconBtn} onClick={e => { e.stopPropagation(); onArchive(c.id) }} title="Archivieren">
-                        <ArchiveIcon />
-                      </button>
-                    )}
-                    <button style={{ ...styles.iconBtn, color: 'var(--danger)' }} onClick={e => { e.stopPropagation(); onDelete(c.id) }} title="Endgültig löschen">
-                      <TrashIcon />
-                    </button>
-                  </div>
-                </>
+                   <div
+                     style={{
+                       ...styles.itemActions,
+                       opacity:
+                         mobile ||
+                         hoverId === c.id ||
+                         c.id === activeId
+                           ? 1
+                           : 0
+                     }}
+                   >
+                     <button
+                       type="button"
+                       style={{
+                         ...styles.iconBtn,
+                         width: 30,
+                         fontSize: 18,
+                         fontWeight: 700
+                       }}
+                       onClick={event => {
+                         event.stopPropagation()
+                         setActionMenuId(
+                           current =>
+                             current === c.id
+                               ? null
+                               : c.id
+                         )
+                       }}
+                       title="Weitere Aktionen"
+                       aria-label="Weitere Aktionen"
+                     >
+                       ⋯
+                     </button>
+
+                     {actionMenuId === c.id && (
+                       <div
+                         onClick={event =>
+                           event.stopPropagation()
+                         }
+                         style={{
+                           position: 'absolute',
+                           zIndex: 12,
+                           top: 'calc(100% - 4px)',
+                           right: 8,
+                           width: 174,
+                           display: 'grid',
+                           gap: 3,
+                           padding: 6,
+                           border:
+                             '1px solid var(--border)',
+                           borderRadius: 10,
+                           background: 'var(--bg2)',
+                           boxShadow:
+                             '0 14px 36px rgba(0,0,0,0.5)'
+                         }}
+                       >
+                         {!c.archived_at && (
+                           <button
+                             type="button"
+                             onClick={event => {
+                               setActionMenuId(null)
+                               startEdit(event, c)
+                             }}
+                             style={styles.actionMenuButton}
+                           >
+                             <PencilIcon />
+                             Umbenennen
+                           </button>
+                         )}
+
+                         {c.archived_at ? (
+                           <button
+                             type="button"
+                             onClick={event => {
+                               event.stopPropagation()
+                               setActionMenuId(null)
+                               onRestore(c.id)
+                             }}
+                             style={styles.actionMenuButton}
+                           >
+                             <RestoreIcon />
+                             Wiederherstellen
+                           </button>
+                         ) : (
+                           <button
+                             type="button"
+                             onClick={event => {
+                               event.stopPropagation()
+                               setActionMenuId(null)
+                               onArchive(c.id)
+                             }}
+                             style={styles.actionMenuButton}
+                           >
+                             <ArchiveIcon />
+                             Archivieren
+                           </button>
+                         )}
+
+                         <button
+                           type="button"
+                           onClick={event => {
+                             event.stopPropagation()
+                             setActionMenuId(null)
+                             onDelete(c.id)
+                           }}
+                           style={{
+                             ...styles.actionMenuButton,
+                             color: 'var(--danger)'
+                           }}
+                         >
+                           <TrashIcon />
+                           Endgültig löschen
+                         </button>
+                       </div>
+                     )}
+                   </div>
+                 </>
+
               )}
             </div>
           ))}
@@ -420,6 +527,20 @@ const LogoutIcon = () => (
 )
 
 const styles = {
+  actionMenuButton: {
+    width: '100%',
+    minHeight: 38,
+    display: 'flex',
+    alignItems: 'center',
+    gap: 9,
+    padding: '7px 9px',
+    border: 0,
+    borderRadius: 7,
+    background: 'transparent',
+    color: 'var(--text2)',
+    fontSize: 12,
+    textAlign: 'left'
+  },
   header: {
     display: 'flex', alignItems: 'center', justifyContent: 'space-between',
     padding: '16px 14px', paddingTop: 'calc(16px + env(safe-area-inset-top))',

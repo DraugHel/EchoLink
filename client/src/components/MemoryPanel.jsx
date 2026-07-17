@@ -698,6 +698,7 @@ export default function MemoryPanel({
 
   return (
     <div
+      className="echolink-fullscreen-overlay"
       onClick={onClose}
       style={{
         position: 'fixed',
@@ -712,6 +713,7 @@ export default function MemoryPanel({
       }}
     >
       <section
+        className="echolink-fullscreen-panel"
         onClick={event =>
           event.stopPropagation()
         }
