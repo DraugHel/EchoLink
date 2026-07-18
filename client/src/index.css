@@ -398,3 +398,59 @@ a { color: var(--accent); text-decoration: none; }
   }
   .echolink-memory-actions > button:last-child { margin-left: 0; }
 }
+
+/* EchoLink UI Phase 2: Settings Basis und Erweitert */
+.echolink-settings-tabs {
+  flex-shrink: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  padding: 9px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg2);
+}
+
+.echolink-settings-two-column {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 10px;
+}
+
+.echolink-settings-parameter-grid {
+  display: grid;
+  gap: 8px;
+}
+
+.echolink-settings-section
+  > .echolink-settings-field:last-child {
+  margin-bottom: 0 !important;
+}
+
+@media (max-width: 767px) {
+  .echolink-settings-panel {
+    width: 100% !important;
+  }
+
+  .echolink-settings-body {
+    padding: 10px !important;
+  }
+
+  .echolink-settings-section {
+    margin-bottom: 9px !important;
+    padding: 12px !important;
+    border-radius: 10px !important;
+  }
+
+  .echolink-settings-two-column {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+
+  .echolink-settings-parameter-grid {
+    gap: 7px;
+  }
+
+  .echolink-settings-tabs {
+    padding: 8px 10px;
+  }
+}
