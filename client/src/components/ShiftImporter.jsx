@@ -920,6 +920,32 @@ export default function ShiftImporter({
     !syncRun ||
     syncRun.status === 'draft'
 
+  const workflowComplete =
+    Boolean(syncRun) &&
+    ['applied', 'partial'].includes(
+      syncRun.status
+    )
+
+  const workflowStep =
+    !draft
+      ? 1
+      : comparing
+        ? 3
+        : syncRun
+          ? 4
+          : 2
+
+  const workflowHint =
+    workflowComplete
+      ? 'Die ausgewählten Kalenderänderungen wurden verarbeitet.'
+      : workflowStep === 1
+        ? 'Foto oder PDF auswählen und den Plan erkennen lassen.'
+        : workflowStep === 2
+          ? 'Erkannte Schichten kontrollieren und unsichere Zeilen korrigieren.'
+          : workflowStep === 3
+            ? 'Die aktiven Zeilen werden mit dem Kalender verglichen.'
+            : 'Änderungen auswählen und gesammelt auf den Kalender anwenden.'
+
   return (
     <>
       <div
@@ -944,7 +970,10 @@ export default function ShiftImporter({
             </p>
           </div>
 
-          <div style={styles.headerActions}>
+          <div
+            className="echolink-shift-header-actions"
+            style={styles.headerActions}
+          >
             <button
               type="button"
               onClick={() => {
@@ -977,6 +1006,64 @@ export default function ShiftImporter({
             </button>
           </div>
         </header>
+
+        <div
+          className="echolink-shift-workflow-wrap"
+        >
+          <div
+            className="echolink-shift-workflow"
+            aria-label="Schritte der Schichtplan-Synchronisierung"
+          >
+            {[
+              [1, 'Import'],
+              [2, 'Prüfen'],
+              [3, 'Kalendervergleich'],
+              [4, 'Anwenden']
+            ].map(([step, label]) => {
+              const done =
+                workflowComplete ||
+                step < workflowStep
+
+              const active =
+                !workflowComplete &&
+                step === workflowStep
+
+              return (
+                <div
+                  key={step}
+                  className={[
+                    'echolink-shift-workflow-step',
+                    done
+                      ? 'is-done'
+                      : '',
+                    active
+                      ? 'is-active'
+                      : ''
+                  ].filter(Boolean).join(' ')}
+                >
+                  <span
+                    className="echolink-shift-workflow-number"
+                    aria-hidden="true"
+                  >
+                    {done ? '✓' : step}
+                  </span>
+
+                  <span
+                    className="echolink-shift-workflow-label"
+                  >
+                    {label}
+                  </span>
+                </div>
+              )
+            })}
+          </div>
+
+          <div
+            className="echolink-shift-workflow-hint"
+          >
+            {workflowHint}
+          </div>
+        </div>
 
         <div style={styles.body}>
           {showHistory && (
