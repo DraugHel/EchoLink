@@ -330,6 +330,167 @@ a { color: var(--accent); text-decoration: none; }
 }
 
 
+/* EchoLink Phase 5.2: Luna Reactions */
+.corsn-face {
+  position: relative;
+}
+
+.corsn-wink {
+  animation: lunaWinkPop 720ms ease-out;
+}
+
+.corsn-wink .corsn-eye {
+  animation: none;
+}
+
+.corsn-sleepy {
+  opacity: 0.78;
+  animation: lunaSleepFloat 3.6s ease-in-out infinite;
+}
+
+.corsn-sleepy::after {
+  content: 'z';
+  position: absolute;
+  top: -5px;
+  right: -4px;
+  color: var(--text3);
+  font-family: var(--font-mono);
+  font-size: 8px;
+  font-weight: 700;
+  line-height: 1;
+  animation: lunaSleepZ 2.2s ease-in-out infinite;
+}
+
+.luna-activity-badge {
+  position: absolute;
+  top: -5px;
+  right: -7px;
+  min-width: 13px;
+  height: 13px;
+  display: grid;
+  place-items: center;
+  box-sizing: border-box;
+  padding: 0 2px;
+  border: 1px solid var(--border2);
+  border-radius: 999px;
+  background: var(--bg2);
+  color: var(--accent);
+  box-shadow: 0 2px 7px rgba(0, 0, 0, 0.28);
+  font-family: var(--font-mono);
+  font-size: 8px;
+  font-weight: 700;
+  line-height: 1;
+  animation: lunaBadgePop 180ms ease-out;
+}
+
+.luna-presence-glyph {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  box-sizing: border-box;
+  font-size: 8px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.luna-presence-active .luna-presence-glyph {
+  animation: lunaPresencePulse 900ms ease-in-out infinite;
+}
+
+.luna-chat-surface {
+  background-repeat: no-repeat;
+  background-position: top center;
+  background-size: 100% 100%;
+  transition:
+    background-image 240ms ease,
+    box-shadow 240ms ease;
+}
+
+.luna-chat-active {
+  background-image:
+    radial-gradient(
+      circle at 50% 0,
+      color-mix(in srgb, var(--accent) 11%, transparent) 0,
+      transparent 43%
+    );
+  box-shadow:
+    inset 0 24px 48px -46px
+    color-mix(in srgb, var(--accent) 55%, transparent);
+  animation: lunaGlowBreathe 2.8s ease-in-out infinite;
+}
+
+.luna-chat-success {
+  background-image:
+    radial-gradient(
+      circle at 50% 0,
+      color-mix(in srgb, var(--accent) 8%, transparent) 0,
+      transparent 38%
+    );
+}
+
+.luna-chat-waiting {
+  background-image:
+    radial-gradient(
+      circle at 50% 0,
+      rgba(231, 185, 85, 0.09) 0,
+      transparent 40%
+    );
+}
+
+.luna-chat-danger {
+  background-image:
+    radial-gradient(
+      circle at 50% 0,
+      color-mix(in srgb, var(--danger) 10%, transparent) 0,
+      transparent 42%
+    );
+}
+
+.luna-chat-idle {
+  background-image:
+    radial-gradient(
+      circle at 50% 0,
+      color-mix(in srgb, var(--text2) 3%, transparent) 0,
+      transparent 34%
+    );
+}
+
+@keyframes lunaWinkPop {
+  0% { transform: scale(0.94) rotate(-2deg); }
+  48% { transform: scale(1.08) rotate(2deg); }
+  100% { transform: scale(1) rotate(0); }
+}
+
+@keyframes lunaSleepFloat {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(0.8px); }
+}
+
+@keyframes lunaSleepZ {
+  0%, 100% {
+    opacity: 0.2;
+    transform: translate(0, 1px) scale(0.86);
+  }
+  50% {
+    opacity: 0.8;
+    transform: translate(1px, -2px) scale(1);
+  }
+}
+
+@keyframes lunaBadgePop {
+  from { opacity: 0; transform: scale(0.55); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes lunaGlowBreathe {
+  0%, 100% { background-size: 100% 100%; }
+  50% { background-size: 108% 108%; }
+}
+
 /* EchoLink UI Phase 1 */
 @media (max-width: 767px) {
   .echolink-tools-overlay,

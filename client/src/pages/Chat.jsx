@@ -376,6 +376,44 @@ function getLunaToolText(value) {
     : `Luna arbeitet: ${compact}`
 }
 
+
+// EchoLink Phase 5.2: Luna Reactions
+function getLunaToolKind(value) {
+  const raw = normalizeLunaToolStatus(value)
+
+  if (!raw) return ''
+
+  if (/gmail|e-?mail|mailbox/i.test(raw)) return 'gmail'
+  if (/calendar|kalender|termin/i.test(raw)) return 'calendar'
+  if (/terminal|shell|command|befehl|exec/i.test(raw)) return 'terminal'
+  if (/upload|attachment|anhang|datei|file/i.test(raw)) return 'file'
+  if (/memory|gedächtnis|gedaechtnis|erinner/i.test(raw)) return 'memory'
+  if (/task|aufgabe|scheduler/i.test(raw)) return 'task'
+  if (/web|search|suche|searx|browse/i.test(raw)) return 'web'
+
+  return 'tool'
+}
+
+function getLunaPresenceSymbol(kind) {
+  const symbols = {
+    alert: '!',
+    approval: '?',
+    thought: '◇',
+    speech: '◌',
+    success: '✓',
+    gmail: '✉',
+    calendar: '▣',
+    web: '⌕',
+    terminal: '›',
+    file: '▤',
+    memory: '◆',
+    task: '✓',
+    tool: '✦'
+  }
+
+  return symbols[kind] || '•'
+}
+
 function useIsMobile() {
   const [mobile, setMobile] = useState(typeof window !== 'undefined' && window.innerWidth < 768)
   useEffect(() => {
@@ -401,6 +439,7 @@ export default function Chat({ user, onLogout }) {
   const [showTools, setShowTools] = useState(false)
   const [jumpMessageId, setJumpMessageId] = useState(null)
   const [showLunaDone, setShowLunaDone] = useState(false)
+  const [lunaIdle, setLunaIdle] = useState(false)
   const wasStreamingRef = useRef(false)
 
   useEffect(() => {
@@ -424,6 +463,55 @@ export default function Chat({ user, onLogout }) {
       }
     }
   }, [streaming])
+
+  useEffect(() => {
+    let idleTimer
+
+    const scheduleLunaSleep = () => {
+      setLunaIdle(false)
+
+      if (idleTimer) {
+        window.clearTimeout(idleTimer)
+      }
+
+      if (!streaming) {
+        idleTimer = window.setTimeout(() => {
+          setLunaIdle(true)
+        }, 90000)
+      }
+    }
+
+    scheduleLunaSleep()
+
+    window.addEventListener(
+      'pointerdown',
+      scheduleLunaSleep,
+      { passive: true }
+    )
+    window.addEventListener(
+      'keydown',
+      scheduleLunaSleep
+    )
+
+    return () => {
+      if (idleTimer) {
+        window.clearTimeout(idleTimer)
+      }
+
+      window.removeEventListener(
+        'pointerdown',
+        scheduleLunaSleep
+      )
+      window.removeEventListener(
+        'keydown',
+        scheduleLunaSleep
+      )
+    }
+  }, [
+    streaming,
+    activeConvo?.id,
+    messages.length
+  ])
 
   useEffect(() => {
     if (!('serviceWorker' in navigator)) return
@@ -1225,6 +1313,9 @@ export default function Chat({ user, onLogout }) {
   const latestToolText =
     getLunaToolText(latestAssistant?.toolStatus)
 
+  const latestToolKind =
+    getLunaToolKind(latestAssistant?.toolStatus)
+
   const waitingForApproval =
     Array.isArray(latestAssistant?.actionRequests) &&
     latestAssistant.actionRequests.length > 0
@@ -1233,21 +1324,29 @@ export default function Chat({ user, onLogout }) {
     systemMood === 'panic'
       ? {
           tone: 'danger',
+          kind: 'alert',
           text: 'Luna meldet: System braucht Aufmerksamkeit'
         }
       : waitingForApproval
         ? {
             tone: 'waiting',
+            kind: 'approval',
             text: 'Luna wartet auf deine Freigabe'
           }
         : streaming && latestToolText
           ? {
               tone: 'active',
+              kind: latestToolKind || 'tool',
               text: latestToolText
             }
           : streaming
             ? {
                 tone: 'active',
+                kind:
+                  latestAssistant?.think &&
+                  !latestAssistant?.content
+                    ? 'thought'
+                    : 'speech',
                 text:
                   latestAssistant?.think &&
                   !latestAssistant?.content
@@ -1257,14 +1356,49 @@ export default function Chat({ user, onLogout }) {
             : latestAssistant?.retryFailed
               ? {
                   tone: 'danger',
+                  kind: 'alert',
                   text: 'Luna ist über einen Fehler gestolpert'
                 }
               : showLunaDone
                 ? {
                     tone: 'success',
+                    kind: 'success',
                     text: 'Alles erledigt'
                   }
                 : null
+
+  const lunaFinishedCleanly =
+    showLunaDone &&
+    !latestAssistant?.retryFailed
+
+  const lunaFaceMood =
+    systemMood === 'panic'
+      ? 'panic'
+      : streaming
+        ? 'focus'
+        : lunaFinishedCleanly
+          ? 'wink'
+          : lunaIdle
+            ? 'sleepy'
+            : 'ok'
+
+  const lunaActivity =
+    streaming && latestToolKind
+      ? latestToolKind
+      : ''
+
+  const lunaPresenceSymbol =
+    getLunaPresenceSymbol(lunaPresence?.kind)
+
+  const lunaSurfaceClass = [
+    'luna-chat-surface',
+    lunaPresence
+      ? `luna-chat-${lunaPresence.tone}`
+      : '',
+    !lunaPresence && lunaIdle
+      ? 'luna-chat-idle'
+      : ''
+  ].filter(Boolean).join(' ')
 
   return (
     <div style={styles.root}>
@@ -1330,7 +1464,10 @@ export default function Chat({ user, onLogout }) {
                         : 'var(--text2)'
                   }}
                 >
-                  <CorsnFace mood={systemMood} />
+                  <CorsnFace
+                    mood={lunaFaceMood}
+                    activity={lunaActivity}
+                  />
                 </button>
 
                 <button
@@ -1380,7 +1517,10 @@ export default function Chat({ user, onLogout }) {
                       : 'var(--text2)'
                 }}
               >
-                <CorsnFace mood={systemMood} />
+                <CorsnFace
+                    mood={lunaFaceMood}
+                    activity={lunaActivity}
+                  />
 
                 <span style={styles.systemDots}>
                   {sysStatus.apps
@@ -1435,16 +1575,22 @@ export default function Chat({ user, onLogout }) {
             aria-atomic="true"
           >
             <span
-              className="luna-presence-dot"
+              className="luna-presence-glyph"
               aria-hidden="true"
-            />
+            >
+              {lunaPresenceSymbol}
+            </span>
             <span className="luna-presence-text">
               {lunaPresence.text}
             </span>
           </div>
         )}
 
-        <div style={styles.messages} ref={messagesContainerRef}>
+        <div
+          className={lunaSurfaceClass}
+          style={styles.messages}
+          ref={messagesContainerRef}
+        >
           {!activeConvo && (
             <div style={styles.empty} className="fade-in">
               <div style={styles.emptyLogo}>
