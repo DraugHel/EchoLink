@@ -314,3 +314,87 @@ a { color: var(--accent); text-decoration: none; }
     margin-left: 0 !important;
   }
 }
+
+/* EchoLink UI Phase 2: compact Memory cards */
+.echolink-memory-panel { min-height: 0; }
+.echolink-memory-tabs { flex-shrink: 0; }
+.echolink-memory-body { box-sizing: border-box; }
+.echolink-memory-toolbar {
+  position: sticky;
+  z-index: 2;
+  top: -15px;
+  padding: 0 0 10px;
+  background: var(--bg2);
+}
+.echolink-memory-list { gap: 8px !important; }
+.echolink-memory-editor-card { padding: 11px !important; }
+.echolink-memory-card {
+  position: relative;
+  padding: 11px 12px !important;
+  border-left: 3px solid var(--border) !important;
+  transition: border-color 120ms ease, opacity 120ms ease;
+}
+.echolink-memory-card-active { border-left-color: var(--accent) !important; }
+.echolink-memory-card-archived { opacity: 0.78; }
+.echolink-memory-card-superseded { opacity: 0.66; }
+.echolink-memory-card-header { gap: 5px !important; margin-bottom: 6px !important; }
+.echolink-memory-type,
+.echolink-memory-status { white-space: nowrap; }
+.echolink-memory-status {
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: var(--bg3);
+}
+.echolink-memory-status-active { color: var(--accent) !important; }
+.echolink-memory-status-archived,
+.echolink-memory-status-superseded { color: var(--text3) !important; }
+.echolink-memory-content { line-height: 1.45 !important; }
+.echolink-memory-meta { gap: 4px 12px !important; margin-top: 8px !important; }
+.echolink-memory-actions {
+  justify-content: flex-start !important;
+  gap: 6px !important;
+  margin-top: 8px !important;
+}
+.echolink-memory-actions > button:last-child { margin-left: auto; }
+
+@media (max-width: 767px) {
+  .echolink-memory-body { padding: 10px !important; }
+  .echolink-memory-toolbar {
+    top: -10px;
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 6px !important;
+    margin-bottom: 10px !important;
+    padding: 0 0 8px;
+  }
+  .echolink-memory-toolbar > select { width: 100% !important; min-width: 0; }
+  .echolink-memory-toolbar > button:last-child {
+    grid-column: 1 / -1;
+    margin-left: 0 !important;
+  }
+  .echolink-memory-card { padding: 10px !important; }
+  .echolink-memory-card-header { align-items: center !important; }
+  .echolink-memory-scope {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .echolink-memory-content { font-size: 12.5px !important; }
+  .echolink-memory-meta {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    font-size: 8.5px !important;
+  }
+  .echolink-memory-meta > span { min-width: 0; overflow-wrap: anywhere; }
+  .echolink-memory-actions {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .echolink-memory-actions > button {
+    width: 100%;
+    min-width: 0;
+    padding: 7px 8px !important;
+  }
+  .echolink-memory-actions > button:last-child { margin-left: 0; }
+}

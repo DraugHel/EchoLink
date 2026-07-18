@@ -713,7 +713,7 @@ export default function MemoryPanel({
       }}
     >
       <section
-        className="echolink-fullscreen-panel"
+        className="echolink-fullscreen-panel echolink-memory-panel"
         onClick={event =>
           event.stopPropagation()
         }
@@ -780,6 +780,7 @@ export default function MemoryPanel({
         </header>
 
         <div
+          className="echolink-memory-tabs"
           style={{
             display: 'flex',
             gap: 6,
@@ -809,6 +810,7 @@ export default function MemoryPanel({
         </div>
 
         <div
+          className="echolink-memory-body"
           style={{
             flex: 1,
             minHeight: 250,
@@ -819,6 +821,7 @@ export default function MemoryPanel({
           {tab === 'items' ? (
             <>
               <div
+                className="echolink-memory-toolbar"
                 style={{
                   display: 'flex',
                   flexWrap: 'wrap',
@@ -878,6 +881,7 @@ export default function MemoryPanel({
 
               {creating && (
                 <div
+                  className="echolink-memory-editor-card"
                   style={{
                     marginBottom: 14,
                     padding: 13,
@@ -913,6 +917,7 @@ export default function MemoryPanel({
                 </div>
               ) : visibleItems.length ? (
                 <div
+                  className="echolink-memory-list"
                   style={{
                     display: 'grid',
                     gap: 10
@@ -920,6 +925,7 @@ export default function MemoryPanel({
                 >
                   {visibleItems.map(item => (
                     <article
+                      className={`echolink-memory-card echolink-memory-card-${item.status}`}
                       key={item.id}
                       style={{
                         padding: 13,
@@ -947,6 +953,7 @@ export default function MemoryPanel({
                       ) : (
                         <>
                           <div
+                            className="echolink-memory-card-header"
                             style={{
                               display: 'flex',
                               flexWrap: 'wrap',
@@ -956,6 +963,7 @@ export default function MemoryPanel({
                             }}
                           >
                             <span
+                              className="echolink-memory-type"
                               style={{
                                 padding: '3px 7px',
                                 borderRadius: 999,
@@ -976,6 +984,7 @@ export default function MemoryPanel({
                             </span>
 
                             <span
+                              className="echolink-memory-scope"
                               style={{
                                 color:
                                   'var(--text3)',
@@ -988,6 +997,7 @@ export default function MemoryPanel({
                             </span>
 
                             <span
+                              className={`echolink-memory-status echolink-memory-status-${item.status}`}
                               style={{
                                 marginLeft: 'auto',
                                 color:
@@ -1009,6 +1019,7 @@ export default function MemoryPanel({
                           </div>
 
                           <div
+                            className="echolink-memory-content"
                             style={{
                               whiteSpace:
                                 'pre-wrap',
@@ -1024,6 +1035,7 @@ export default function MemoryPanel({
                           </div>
 
                           <div
+                            className="echolink-memory-meta"
                             style={{
                               display: 'flex',
                               flexWrap: 'wrap',
@@ -1080,6 +1092,7 @@ export default function MemoryPanel({
                           </div>
 
                           <div
+                            className="echolink-memory-actions"
                             style={{
                               display: 'flex',
                               flexWrap: 'wrap',
