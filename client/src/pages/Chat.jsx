@@ -1,17 +1,80 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { lazy, Suspense, useState, useEffect, useRef, useCallback } from 'react'
 import Sidebar from '../components/Sidebar.jsx'
 import Message from '../components/Message.jsx'
 import MessageInput from '../components/MessageInput.jsx'
-import SettingsPanel from '../components/SettingsPanel.jsx'
-import MemoryPanel from '../components/MemoryPanel.jsx'
-import TaskPanel from '../components/TaskPanel.jsx'
-import ShiftImporter from '../components/ShiftImporter.jsx'
 import AppToolsMenu from '../components/AppToolsMenu.jsx'
-import SystemStatusPanel from '../components/SystemStatusPanel.jsx'
 import api from '../lib/api.js'
 import { useTheme } from '../components/ThemePicker.jsx'
 import CorsnFace from '../components/CorsnFace.jsx'
 import TerminalTimeline from '../components/TerminalTimeline.jsx'
+
+// EchoLink UI Phase 3.1: lazy tool panels
+const SettingsPanel = lazy(
+  () => import('../components/SettingsPanel.jsx')
+)
+const MemoryPanel = lazy(
+  () => import('../components/MemoryPanel.jsx')
+)
+const TaskPanel = lazy(
+  () => import('../components/TaskPanel.jsx')
+)
+const ShiftImporter = lazy(
+  () => import('../components/ShiftImporter.jsx')
+)
+const SystemStatusPanel = lazy(
+  () => import('../components/SystemStatusPanel.jsx')
+)
+
+function ToolPanelFallback({ label }) {
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      style={{
+        position: 'fixed',
+        inset: 0,
+        zIndex: 1400,
+        boxSizing: 'border-box',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding:
+          'env(safe-area-inset-top) 16px env(safe-area-inset-bottom)',
+        background: 'var(--bg2)'
+      }}
+    >
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 10,
+          padding: '12px 14px',
+          border: '1px solid var(--border)',
+          borderRadius: 10,
+          background: 'var(--bg3)',
+          color: 'var(--text2)',
+          fontFamily: 'var(--font-mono)',
+          fontSize: 12
+        }}
+      >
+        <span
+          aria-hidden="true"
+          style={{
+            width: 18,
+            height: 18,
+            flex: '0 0 auto',
+            boxSizing: 'border-box',
+            border: '2px solid var(--border2)',
+            borderTopColor: 'var(--accent)',
+            borderRadius: '50%',
+            animation: 'spin 0.7s linear infinite'
+          }}
+        />
+        <span>{label} wird geladen …</span>
+      </div>
+    </div>
+  )
+}
 
 async function readResponseError(response) {
   const contentType = response.headers.get('content-type') || ''
@@ -1295,45 +1358,75 @@ export default function Chat({ user, onLogout }) {
       )}
 
       {showSysPanel && sysStatus && (
-        <SystemStatusPanel
-          status={sysStatus}
-          monitoredApps={monitoredApps}
-          onToggleApp={toggleMonitoredApp}
-          onClose={() => setShowSysPanel(false)}
-        />
+        <Suspense
+          fallback={
+            <ToolPanelFallback label="Systemstatus" />
+          }
+        >
+          <SystemStatusPanel
+            status={sysStatus}
+            monitoredApps={monitoredApps}
+            onToggleApp={toggleMonitoredApp}
+            onClose={() => setShowSysPanel(false)}
+          />
+        </Suspense>
       )}
 
       {showShiftImporter && (
-        <ShiftImporter
-          onClose={() =>
-            setShowShiftImporter(false)
+        <Suspense
+          fallback={
+            <ToolPanelFallback label="Schichtplan" />
           }
-        />
+        >
+          <ShiftImporter
+            onClose={() =>
+              setShowShiftImporter(false)
+            }
+          />
+        </Suspense>
       )}
 
       {showTasks && (
-        <TaskPanel
-          conversationId={activeConvo?.id || null}
-          conversations={conversations}
-          onConversationsChanged={loadConversations}
-          onClose={() => setShowTasks(false)}
-        />
+        <Suspense
+          fallback={
+            <ToolPanelFallback label="Aufgaben" />
+          }
+        >
+          <TaskPanel
+            conversationId={activeConvo?.id || null}
+            conversations={conversations}
+            onConversationsChanged={loadConversations}
+            onClose={() => setShowTasks(false)}
+          />
+        </Suspense>
       )}
 
       {showMemory && activeConvo && (
-        <MemoryPanel
-          conversationId={activeConvo.id}
-          streaming={streaming}
-          onClose={() => setShowMemory(false)}
-        />
+        <Suspense
+          fallback={
+            <ToolPanelFallback label="Memory" />
+          }
+        >
+          <MemoryPanel
+            conversationId={activeConvo.id}
+            streaming={streaming}
+            onClose={() => setShowMemory(false)}
+          />
+        </Suspense>
       )}
 
       {showSettings && activeConvo && (
-        <SettingsPanel
-          conversation={activeConvo}
-          onUpdate={updateConvo}
-          onClose={() => setShowSettings(false)}
-        />
+        <Suspense
+          fallback={
+            <ToolPanelFallback label="Einstellungen" />
+          }
+        >
+          <SettingsPanel
+            conversation={activeConvo}
+            onUpdate={updateConvo}
+            onClose={() => setShowSettings(false)}
+          />
+        </Suspense>
       )}
     </div>
   )
