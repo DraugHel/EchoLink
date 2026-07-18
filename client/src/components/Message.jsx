@@ -1,8 +1,69 @@
 import { useState, useRef, memo } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
+import { PrismLight as SyntaxHighlighter } from 'react-syntax-highlighter'
+import bash from 'react-syntax-highlighter/dist/esm/languages/prism/bash'
+import css from 'react-syntax-highlighter/dist/esm/languages/prism/css'
+import javascript from 'react-syntax-highlighter/dist/esm/languages/prism/javascript'
+import jsx from 'react-syntax-highlighter/dist/esm/languages/prism/jsx'
+import json from 'react-syntax-highlighter/dist/esm/languages/prism/json'
+import markdown from 'react-syntax-highlighter/dist/esm/languages/prism/markdown'
+import markup from 'react-syntax-highlighter/dist/esm/languages/prism/markup'
+import python from 'react-syntax-highlighter/dist/esm/languages/prism/python'
+import sql from 'react-syntax-highlighter/dist/esm/languages/prism/sql'
+import tsx from 'react-syntax-highlighter/dist/esm/languages/prism/tsx'
+import typescript from 'react-syntax-highlighter/dist/esm/languages/prism/typescript'
+import yaml from 'react-syntax-highlighter/dist/esm/languages/prism/yaml'
 import { oneDark, oneLight } from 'react-syntax-highlighter/dist/esm/styles/prism'
+
+// EchoLink UI Phase 3.3: light syntax highlighter
+SyntaxHighlighter.registerLanguage('bash', bash)
+SyntaxHighlighter.registerLanguage('css', css)
+SyntaxHighlighter.registerLanguage('javascript', javascript)
+SyntaxHighlighter.registerLanguage('jsx', jsx)
+SyntaxHighlighter.registerLanguage('json', json)
+SyntaxHighlighter.registerLanguage('markdown', markdown)
+SyntaxHighlighter.registerLanguage('markup', markup)
+SyntaxHighlighter.registerLanguage('python', python)
+SyntaxHighlighter.registerLanguage('sql', sql)
+SyntaxHighlighter.registerLanguage('tsx', tsx)
+SyntaxHighlighter.registerLanguage('typescript', typescript)
+SyntaxHighlighter.registerLanguage('yaml', yaml)
+
+const CODE_LANGUAGE_ALIASES = {
+  bash: 'bash',
+  sh: 'bash',
+  shell: 'bash',
+  zsh: 'bash',
+  css: 'css',
+  js: 'javascript',
+  javascript: 'javascript',
+  jsx: 'jsx',
+  json: 'json',
+  jsonc: 'json',
+  md: 'markdown',
+  markdown: 'markdown',
+  html: 'markup',
+  htm: 'markup',
+  markup: 'markup',
+  xml: 'markup',
+  py: 'python',
+  python: 'python',
+  sql: 'sql',
+  ts: 'typescript',
+  typescript: 'typescript',
+  tsx: 'tsx',
+  yml: 'yaml',
+  yaml: 'yaml'
+}
+
+function normalizeCodeLanguage(language) {
+  const key = String(language || '')
+    .trim()
+    .toLowerCase()
+
+  return CODE_LANGUAGE_ALIASES[key] || null
+}
 
 const LIGHT_THEMES = ['blossom']
 
@@ -685,8 +746,20 @@ function CodeBlock({ lang, code }) {
           )}
         </button>
       </div>
-      <SyntaxHighlighter style={getCodeStyle()} language={lang} PreTag="div"
-        customStyle={{ borderRadius: '0 0 8px 8px', margin: 0, fontSize: 13, maxWidth: '100%', overflowX: 'auto', WebkitOverflowScrolling: 'touch', tabSize: 2 }}>
+      <SyntaxHighlighter
+        style={getCodeStyle()}
+        language={normalizeCodeLanguage(lang)}
+        PreTag="div"
+        customStyle={{
+          borderRadius: '0 0 8px 8px',
+          margin: 0,
+          fontSize: 13,
+          maxWidth: '100%',
+          overflowX: 'auto',
+          WebkitOverflowScrolling: 'touch',
+          tabSize: 2
+        }}
+      >
         {code}
       </SyntaxHighlighter>
     </div>
