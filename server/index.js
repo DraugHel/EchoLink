@@ -155,8 +155,51 @@ app.use((err, req, res, next) => {
 // Serve built frontend
 const distPath = path.join(__dirname, '..', 'dist')
 if (fs.existsSync(distPath)) {
-  app.use(express.static(distPath))
+  // EchoLink Phase 4.1: frontend cache policy
+  //
+  // Vite versieht Produktions-Assets mit einem Inhalts-Hash.
+  // Diese Dateien duerfen deshalb dauerhaft gecacht werden.
+  app.use(
+    '/assets',
+    express.static(
+      path.join(distPath, 'assets'),
+      {
+        maxAge: '1y',
+        immutable: true
+      }
+    )
+  )
+
+  // App-Shell, Service Worker und Manifest muessen nach einem
+  // Deployment stets neu validiert werden. Sonstige statische
+  // Dateien behalten die vorsichtige Express-Standardregel.
+  app.use(
+    express.static(
+      distPath,
+      {
+        setHeaders(res, filePath) {
+          const filename = path.basename(filePath)
+
+          if (
+            filename === 'index.html' ||
+            filename === 'sw.js' ||
+            filename === 'manifest.json'
+          ) {
+            res.setHeader(
+              'Cache-Control',
+              'no-cache, max-age=0, must-revalidate'
+            )
+          }
+        }
+      }
+    )
+  )
+
   app.get('*', (req, res) => {
+    res.setHeader(
+      'Cache-Control',
+      'no-cache, max-age=0, must-revalidate'
+    )
     res.sendFile(path.join(distPath, 'index.html'))
   })
 } else {
