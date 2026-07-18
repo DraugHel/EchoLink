@@ -1290,13 +1290,16 @@ export default function Chat({ user, onLogout }) {
     sysStatus?.backups?.full?.ageSeconds
 
   const systemResourceProblem =
-    Number(sysStatus?.memory?.usedPercent) >= 90 ||
-    Number(sysStatus?.disk) >= 90 ||
-    Number(sysStatus?.cpu) >= 95 ||
-    !sysStatus?.backups?.database?.found ||
-    Number(databaseBackupAge) > 172800 ||
-    !sysStatus?.backups?.full?.found ||
-    Number(fullBackupAge) > 1209600
+    Boolean(sysStatus) &&
+    (
+      Number(sysStatus?.memory?.usedPercent) >= 90 ||
+      Number(sysStatus?.disk) >= 90 ||
+      Number(sysStatus?.cpu) >= 95 ||
+      !sysStatus?.backups?.database?.found ||
+      Number(databaseBackupAge) > 172800 ||
+      !sysStatus?.backups?.full?.found ||
+      Number(fullBackupAge) > 1209600
+    )
 
   const systemMood =
     monitoredProcessProblem ||
