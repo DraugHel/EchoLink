@@ -188,12 +188,146 @@ a { color: var(--accent); text-decoration: none; }
 }
 
 
-/* ── Corsn face ── */
-.corsn-face { display: inline-flex; line-height: 0; }
-.corsn-face .corsn-eye { transform-origin: center; animation: corsnBlink 5s infinite; }
-@keyframes corsnBlink { 0%, 94%, 100% { transform: scaleY(1); } 96%, 98% { transform: scaleY(0.12); } }
-.corsn-panic { animation: corsnShake 0.5s ease-in-out infinite; }
-@keyframes corsnShake { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-1px); } 75% { transform: translateX(1px); } }
+/* ── Luna Presence Mode ── */
+.corsn-face {
+  display: inline-flex;
+  line-height: 0;
+  transform-origin: center;
+}
+
+.corsn-face .corsn-eye {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: corsnBlink 5s infinite;
+}
+
+.corsn-focus {
+  animation: lunaFocusFloat 1.8s ease-in-out infinite;
+}
+
+.corsn-focus .corsn-mouth {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: lunaTalk 420ms ease-in-out infinite alternate;
+}
+
+.corsn-panic {
+  animation: corsnShake 0.5s ease-in-out infinite;
+}
+
+.luna-presence {
+  min-height: 27px;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  box-sizing: border-box;
+  padding: 4px 44px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg3);
+  color: var(--text2);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.25;
+  letter-spacing: 0.01em;
+  animation: lunaPresenceIn 160ms ease-out;
+}
+
+.luna-presence-dot {
+  width: 6px;
+  height: 6px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.luna-presence-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.luna-presence-active {
+  color: var(--accent);
+}
+
+.luna-presence-active .luna-presence-dot {
+  animation: lunaPresencePulse 900ms ease-in-out infinite;
+}
+
+.luna-presence-waiting {
+  color: #e7b955;
+}
+
+.luna-presence-success {
+  color: var(--accent);
+}
+
+.luna-presence-danger {
+  color: var(--danger);
+}
+
+@keyframes corsnBlink {
+  0%, 94%, 100% { transform: scaleY(1); }
+  96%, 98% { transform: scaleY(0.12); }
+}
+
+@keyframes lunaFocusFloat {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-0.7px); }
+}
+
+@keyframes lunaTalk {
+  0% {
+    transform: scaleX(0.92) scaleY(0.5);
+    opacity: 0.75;
+  }
+
+  100% {
+    transform: scaleX(1.08) scaleY(1.55);
+    opacity: 1;
+  }
+}
+
+@keyframes corsnShake {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-1px); }
+  75% { transform: translateX(1px); }
+}
+
+@keyframes lunaPresenceIn {
+  from {
+    opacity: 0;
+    transform: translateY(-3px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes lunaPresencePulse {
+  0%, 100% {
+    opacity: 0.45;
+    transform: scale(0.82);
+  }
+
+  50% {
+    opacity: 1;
+    transform: scale(1.12);
+  }
+}
+
+@media (max-width: 767px) {
+  .luna-presence {
+    min-height: 25px;
+    padding: 3px 48px;
+    font-size: 10px;
+  }
+}
 
 
 /* EchoLink UI Phase 1 */

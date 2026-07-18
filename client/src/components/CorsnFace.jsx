@@ -1,12 +1,37 @@
-// Corsn: das kleine Wesen, das im Server wohnt.
-// mood: 'ok' (alles gruen) | 'focus' (streamt gerade) | 'panic' (ein Prozess ist nicht online)
+// Luna: das kleine Wesen, das in EchoLink wohnt.
+// mood: 'ok' (ruhig) | 'focus' (denkt oder spricht) | 'panic' (Systemproblem)
 export default function CorsnFace({ mood = 'ok' }) {
   const panic = mood === 'panic'
   const focus = mood === 'focus'
   const eyeColor = panic ? 'var(--danger)' : 'var(--accent)'
   return (
-    <span className={'corsn-face' + (panic ? ' corsn-panic' : '')} title="Corsn">
-      <svg width="24" height="24" viewBox="0 0 24 24">
+    <span
+      className={
+        'corsn-face' +
+        (panic ? ' corsn-panic' : '') +
+        (focus ? ' corsn-focus' : '')
+      }
+      title={
+        panic
+          ? 'Luna meldet ein Systemproblem'
+          : focus
+            ? 'Luna ist beschäftigt'
+            : 'Luna'
+      }
+      aria-label={
+        panic
+          ? 'Luna meldet ein Systemproblem'
+          : focus
+            ? 'Luna ist beschäftigt'
+            : 'Luna ist bereit'
+      }
+    >
+      <svg
+        width="24"
+        height="24"
+        viewBox="0 0 24 24"
+        aria-hidden="true"
+      >
         <rect x="1" y="3" width="22" height="18" rx="5"
           fill="var(--bg3)" stroke={panic ? 'var(--danger)' : 'var(--border)'} strokeWidth="1.5" />
         {panic ? (
@@ -25,7 +50,18 @@ export default function CorsnFace({ mood = 'ok' }) {
         {panic
           ? <ellipse cx="12" cy="16.6" rx="1.8" ry="2" fill="none" stroke={eyeColor} strokeWidth="1.3" />
           : focus
-            ? <line x1="9.5" y1="16.5" x2="14.5" y2="16.5" stroke={eyeColor} strokeWidth="1.3" strokeLinecap="round" />
+            ? (
+                <ellipse
+                  className="corsn-mouth"
+                  cx="12"
+                  cy="16.5"
+                  rx="2.55"
+                  ry="0.75"
+                  fill="none"
+                  stroke={eyeColor}
+                  strokeWidth="1.3"
+                />
+              )
             : <path d="M 9 15.8 Q 12 18 15 15.8" fill="none" stroke={eyeColor} strokeWidth="1.3" strokeLinecap="round" />}
       </svg>
     </span>

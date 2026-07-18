@@ -299,6 +299,83 @@ function metricColor(value, warning, critical) {
   return 'var(--text2)'
 }
 
+
+// EchoLink Phase 5.1: Luna Presence Mode
+function normalizeLunaToolStatus(value) {
+  if (!value) return ''
+
+  if (typeof value === 'string') {
+    return value.trim()
+  }
+
+  if (Array.isArray(value)) {
+    return value
+      .map(normalizeLunaToolStatus)
+      .filter(Boolean)
+      .join(', ')
+  }
+
+  if (typeof value === 'object') {
+    const preferred =
+      value.message ||
+      value.label ||
+      value.description ||
+      value.status ||
+      value.tool ||
+      value.name
+
+    return normalizeLunaToolStatus(preferred)
+  }
+
+  return String(value).trim()
+}
+
+function getLunaToolText(value) {
+  const raw = normalizeLunaToolStatus(value)
+
+  if (!raw) return ''
+
+  const compact = raw
+    .replace(/\s+/g, ' ')
+    .trim()
+
+  if (/gmail|e-?mail|mailbox/i.test(compact)) {
+    return 'Luna durchsucht Gmail …'
+  }
+
+  if (/calendar|kalender|termin/i.test(compact)) {
+    return 'Luna schaut in den Kalender …'
+  }
+
+  if (/web|search|suche|searx|browse/i.test(compact)) {
+    return 'Luna durchsucht das Web …'
+  }
+
+  if (/terminal|shell|command|befehl|exec/i.test(compact)) {
+    return 'Luna führt einen Befehl aus …'
+  }
+
+  if (/upload|attachment|anhang|datei|file/i.test(compact)) {
+    return 'Luna liest eine Datei …'
+  }
+
+  if (/memory|gedächtnis|gedaechtnis|erinner/i.test(compact)) {
+    return 'Luna schaut ins Gedächtnis …'
+  }
+
+  if (/task|aufgabe|scheduler/i.test(compact)) {
+    return 'Luna arbeitet an einer Aufgabe …'
+  }
+
+  if (/tool|werkzeug/i.test(compact)) {
+    return 'Luna benutzt ein Werkzeug …'
+  }
+
+  return compact.toLowerCase().startsWith('luna')
+    ? compact
+    : `Luna arbeitet: ${compact}`
+}
+
 function useIsMobile() {
   const [mobile, setMobile] = useState(typeof window !== 'undefined' && window.innerWidth < 768)
   useEffect(() => {
@@ -323,6 +400,30 @@ export default function Chat({ user, onLogout }) {
   const [showShiftImporter, setShowShiftImporter] = useState(false)
   const [showTools, setShowTools] = useState(false)
   const [jumpMessageId, setJumpMessageId] = useState(null)
+  const [showLunaDone, setShowLunaDone] = useState(false)
+  const wasStreamingRef = useRef(false)
+
+  useEffect(() => {
+    let doneTimer
+
+    if (streaming) {
+      setShowLunaDone(false)
+    } else if (wasStreamingRef.current) {
+      setShowLunaDone(true)
+
+      doneTimer = window.setTimeout(() => {
+        setShowLunaDone(false)
+      }, 2200)
+    }
+
+    wasStreamingRef.current = streaming
+
+    return () => {
+      if (doneTimer) {
+        window.clearTimeout(doneTimer)
+      }
+    }
+  }, [streaming])
 
   useEffect(() => {
     if (!('serviceWorker' in navigator)) return
@@ -1117,6 +1218,54 @@ export default function Chat({ user, onLogout }) {
         ? 'focus'
         : 'ok'
 
+  const latestAssistant = [...messages]
+    .reverse()
+    .find(message => message.role === 'assistant')
+
+  const latestToolText =
+    getLunaToolText(latestAssistant?.toolStatus)
+
+  const waitingForApproval =
+    Array.isArray(latestAssistant?.actionRequests) &&
+    latestAssistant.actionRequests.length > 0
+
+  const lunaPresence =
+    systemMood === 'panic'
+      ? {
+          tone: 'danger',
+          text: 'Luna meldet: System braucht Aufmerksamkeit'
+        }
+      : waitingForApproval
+        ? {
+            tone: 'waiting',
+            text: 'Luna wartet auf deine Freigabe'
+          }
+        : streaming && latestToolText
+          ? {
+              tone: 'active',
+              text: latestToolText
+            }
+          : streaming
+            ? {
+                tone: 'active',
+                text:
+                  latestAssistant?.think &&
+                  !latestAssistant?.content
+                    ? 'Luna denkt …'
+                    : 'Luna spricht …'
+              }
+            : latestAssistant?.retryFailed
+              ? {
+                  tone: 'danger',
+                  text: 'Luna ist über einen Fehler gestolpert'
+                }
+              : showLunaDone
+                ? {
+                    tone: 'success',
+                    text: 'Alles erledigt'
+                  }
+                : null
+
   return (
     <div style={styles.root}>
       {(!mobile || mobileSidebar) && (
@@ -1275,6 +1424,25 @@ export default function Chat({ user, onLogout }) {
             <MoreIcon />
           </button>
         </div>
+
+        {lunaPresence && (
+          <div
+            className={
+              `luna-presence luna-presence-${lunaPresence.tone}`
+            }
+            role="status"
+            aria-live="polite"
+            aria-atomic="true"
+          >
+            <span
+              className="luna-presence-dot"
+              aria-hidden="true"
+            />
+            <span className="luna-presence-text">
+              {lunaPresence.text}
+            </span>
+          </div>
+        )}
 
         <div style={styles.messages} ref={messagesContainerRef}>
           {!activeConvo && (
