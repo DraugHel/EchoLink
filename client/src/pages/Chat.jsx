@@ -1214,14 +1214,23 @@ export default function Chat({ user, onLogout }) {
         </div>
 
         {activeConvo && !streaming && messages.length > 0 && (
-          <div style={{ display: 'flex', gap: 6, padding: '0 12px 6px', overflowX: 'auto', maxWidth: 820, margin: '0 auto', width: '100%', boxSizing: 'border-box' }}>
-            {['pm2 status', 'df -h', 'zeig die letzten error-logs'].map(q => (
-              <button key={q}
-                style={{ flexShrink: 0, fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text2)',
-                  background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 999,
-                  padding: '4px 10px', cursor: 'pointer' }}
-                onClick={() => sendMessage(q)}>
-                {q}
+          <div
+            className="echolink-quick-chips"
+            aria-label="Schnellbefehle"
+          >
+            {[
+              ['PM2', 'pm2 status'],
+              ['Speicher', 'df -h'],
+              ['Error-Logs', 'zeig die letzten error-logs']
+            ].map(([label, prompt]) => (
+              <button
+                key={prompt}
+                type="button"
+                className="echolink-quick-chip"
+                onClick={() => sendMessage(prompt)}
+                title={prompt}
+              >
+                {label}
               </button>
             ))}
           </div>
