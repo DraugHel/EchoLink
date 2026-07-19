@@ -1568,27 +1568,6 @@ export default function Chat({ user, onLogout }) {
           </button>
         </div>
 
-        {lunaPresence && (
-          <div
-            className={
-              `luna-presence luna-presence-${lunaPresence.tone}`
-            }
-            role="status"
-            aria-live="polite"
-            aria-atomic="true"
-          >
-            <span
-              className="luna-presence-glyph"
-              aria-hidden="true"
-            >
-              {lunaPresenceSymbol}
-            </span>
-            <span className="luna-presence-text">
-              {lunaPresence.text}
-            </span>
-          </div>
-        )}
-
         <div
           className={lunaSurfaceClass}
           style={styles.messages}
@@ -1735,6 +1714,27 @@ export default function Chat({ user, onLogout }) {
             ))}
           </div>
         )}
+        {lunaPresence && (
+          <div
+            className={
+              `luna-presence luna-presence-${lunaPresence.tone}`
+            }
+            role="status"
+            aria-live="polite"
+            aria-atomic="true"
+          >
+            <span
+              className="luna-presence-glyph"
+              aria-hidden="true"
+            >
+              {lunaPresenceSymbol}
+            </span>
+            <span className="luna-presence-text">
+              {lunaPresence.text}
+            </span>
+          </div>
+        )}
+
         {activeConvo && (
           <MessageInput
             streaming={streaming}
