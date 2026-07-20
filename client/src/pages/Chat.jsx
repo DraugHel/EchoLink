@@ -6,6 +6,7 @@ import AppToolsMenu from '../components/AppToolsMenu.jsx'
 import api from '../lib/api.js'
 import { useTheme } from '../components/ThemePicker.jsx'
 import CorsnFace from '../components/CorsnFace.jsx'
+import LunaMiniHud from '../components/LunaMiniHud.jsx'
 import TerminalTimeline from '../components/TerminalTimeline.jsx'
 
 // EchoLink UI Phase 3.1: lazy tool panels
@@ -431,6 +432,7 @@ export default function Chat({ user, onLogout }) {
   const [streaming, setStreaming] = useState(false)
   const [sysStatus, setSysStatus] = useState(null)
   const [showSysPanel, setShowSysPanel] = useState(false)
+  const [showLunaHud, setShowLunaHud] = useState(false)
   const [monitoredApps, setMonitoredApps] = useState(() => { try { const saved = localStorage.getItem('echolink.monitoredApps'); return saved ? JSON.parse(saved) : ['echolink', 'echolink-worker'] } catch { return ['echolink', 'echolink-worker'] } })
   const [showSettings, setShowSettings] = useState(false)
   const [showMemory, setShowMemory] = useState(false)
@@ -440,6 +442,8 @@ export default function Chat({ user, onLogout }) {
   const [jumpMessageId, setJumpMessageId] = useState(null)
   const [showLunaDone, setShowLunaDone] = useState(false)
   const [lunaIdle, setLunaIdle] = useState(false)
+  const lunaHudRef = useRef(null)
+  const lunaButtonRef = useRef(null)
   const wasStreamingRef = useRef(false)
 
   useEffect(() => {
@@ -512,6 +516,52 @@ export default function Chat({ user, onLogout }) {
     activeConvo?.id,
     messages.length
   ])
+
+  useEffect(() => {
+    if (!showLunaHud) return
+
+    const handleOutsidePointer = event => {
+      if (
+        lunaHudRef.current?.contains(event.target) ||
+        lunaButtonRef.current?.contains(event.target)
+      ) {
+        return
+      }
+
+      setShowLunaHud(false)
+    }
+
+    const handleEscape = event => {
+      if (event.key === 'Escape') {
+        setShowLunaHud(false)
+        lunaButtonRef.current?.focus()
+      }
+    }
+
+    document.addEventListener(
+      'pointerdown',
+      handleOutsidePointer
+    )
+    document.addEventListener(
+      'keydown',
+      handleEscape
+    )
+
+    return () => {
+      document.removeEventListener(
+        'pointerdown',
+        handleOutsidePointer
+      )
+      document.removeEventListener(
+        'keydown',
+        handleEscape
+      )
+    }
+  }, [showLunaHud])
+
+  useEffect(() => {
+    setShowLunaHud(false)
+  }, [activeConvo?.id])
 
   useEffect(() => {
     if (!('serviceWorker' in navigator)) return
@@ -995,7 +1045,9 @@ export default function Chat({ user, onLogout }) {
             context_omitted_messages:
               json.context.omittedMessages,
             context_over_budget:
-              json.context.overBudget
+              json.context.overBudget,
+            context_model:
+              json.context.model
           } : null
 
           const doneUsage = json.usage || null
@@ -1313,6 +1365,18 @@ export default function Chat({ user, onLogout }) {
     .reverse()
     .find(message => message.role === 'assistant')
 
+  const latestContextUsage = [...messages]
+    .reverse()
+    .find(message =>
+      message.role === 'assistant' &&
+      Number(message.usage?.context_budget_tokens) > 0
+    )?.usage
+
+  const lunaHudModel =
+    activeConvo?.model ||
+    latestContextUsage?.context_model ||
+    ''
+
   const latestToolText =
     getLunaToolText(latestAssistant?.toolStatus)
 
@@ -1453,12 +1517,16 @@ export default function Chat({ user, onLogout }) {
             mobile ? (
               <>
                 <button
+                  ref={lunaButtonRef}
                   type="button"
-                  onClick={() =>
-                    setShowSysPanel(true)
-                  }
-                  title="Systemstatus"
-                  aria-label="Systemstatus"
+                  onClick={() => {
+                    setShowTools(false)
+                    setShowLunaHud(open => !open)
+                  }}
+                  title="Luna Mini-HUD"
+                  aria-label="Luna Mini-HUD"
+                  aria-expanded={showLunaHud}
+                  aria-controls="luna-mini-hud"
                   style={{
                     ...styles.systemFaceCenter,
                     color:
@@ -1475,9 +1543,10 @@ export default function Chat({ user, onLogout }) {
 
                 <button
                   type="button"
-                  onClick={() =>
+                  onClick={() => {
+                    setShowLunaHud(false)
                     setShowSysPanel(true)
-                  }
+                  }}
                   title="Systemstatus"
                   aria-label="Systemstatus"
                   style={styles.systemDotsRight}
@@ -1505,48 +1574,85 @@ export default function Chat({ user, onLogout }) {
                 </button>
               </>
             ) : (
-              <button
-                type="button"
-                onClick={() =>
-                  setShowSysPanel(true)
-                }
-                title="Systemstatus"
-                aria-label="Systemstatus"
-                style={{
-                  ...styles.systemDesktop,
-                  color:
-                    systemMood === 'panic'
-                      ? 'var(--danger)'
-                      : 'var(--text2)'
-                }}
-              >
-                <CorsnFace
+              <div style={styles.systemDesktop}>
+                <button
+                  ref={lunaButtonRef}
+                  type="button"
+                  onClick={() => {
+                    setShowTools(false)
+                    setShowLunaHud(open => !open)
+                  }}
+                  title="Luna Mini-HUD"
+                  aria-label="Luna Mini-HUD"
+                  aria-expanded={showLunaHud}
+                  aria-controls="luna-mini-hud"
+                  style={{
+                    ...styles.systemDesktopFace,
+                    color:
+                      systemMood === 'panic'
+                        ? 'var(--danger)'
+                        : 'var(--text2)'
+                  }}
+                >
+                  <CorsnFace
                     mood={lunaFaceMood}
                     activity={lunaActivity}
                   />
+                </button>
 
-                <span style={styles.systemDots}>
-                  {sysStatus.apps
-                    .filter(app =>
-                      monitoredApps.includes(
-                        app.name
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowLunaHud(false)
+                    setShowSysPanel(true)
+                  }}
+                  title="Systemstatus"
+                  aria-label="Systemstatus"
+                  style={styles.systemDesktopDots}
+                >
+                  <span style={styles.systemDots}>
+                    {sysStatus.apps
+                      .filter(app =>
+                        monitoredApps.includes(
+                          app.name
+                        )
                       )
-                    )
-                    .map(app => (
-                      <span
-                        key={app.name}
-                        style={{
-                          ...styles.systemDot,
-                          background:
-                            app.status === 'online'
-                              ? 'var(--accent)'
-                              : 'var(--danger)'
-                        }}
-                      />
-                    ))}
-                </span>
-              </button>
+                      .map(app => (
+                        <span
+                          key={app.name}
+                          style={{
+                            ...styles.systemDot,
+                            background:
+                              app.status === 'online'
+                                ? 'var(--accent)'
+                                : 'var(--danger)'
+                          }}
+                        />
+                      ))}
+                  </span>
+                </button>
+              </div>
             )
+          )}
+
+          {showLunaHud && sysStatus && (
+            <LunaMiniHud
+              containerRef={lunaHudRef}
+              model={lunaHudModel}
+              usage={latestContextUsage}
+              toolText={latestToolText}
+              toolActive={streaming && Boolean(latestToolText)}
+              waitingForApproval={waitingForApproval}
+              streaming={streaming}
+              systemMood={systemMood}
+              status={sysStatus}
+              mobile={mobile}
+              onOpenSystem={() => {
+                setShowLunaHud(false)
+                setShowSysPanel(true)
+              }}
+              onClose={() => setShowLunaHud(false)}
+            />
           )}
 <button
             type="button"
@@ -1781,6 +1887,7 @@ export default function Chat({ user, onLogout }) {
           }}
           onOpenSystem={() => {
             setShowTools(false)
+            setShowLunaHud(false)
             setShowSysPanel(true)
           }}
           onOpenSettings={() => {
@@ -2017,13 +2124,28 @@ const styles = {
     height: 42,
     flexShrink: 0,
     display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    padding: '0 9px',
+    alignItems: 'stretch',
+    overflow: 'hidden',
     border: '1px solid var(--border)',
     borderRadius: 11,
     background: 'var(--bg3)'
+  },
+  systemDesktopFace: {
+    width: 42,
+    display: 'grid',
+    placeItems: 'center',
+    padding: 0,
+    background: 'transparent'
+  },
+  systemDesktopDots: {
+    minWidth: 34,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: '0 9px 0 7px',
+    borderLeft: '1px solid var(--border)',
+    background: 'transparent',
+    color: 'var(--text2)'
   },
   systemDots: {
     display: 'flex',
