@@ -776,6 +776,7 @@ export default function Chat({ user, onLogout }) {
   const messagesContainerRef = useRef(null)
   const inputRef = useRef(null)
   const abortControllerRef = useRef(null)
+  const activeChatRequestRef = useRef(null)
   const streamGenerationRef = useRef(0)
   const sendStartingRef = useRef(false)
   const chatRunStateRef = useRef(null)
@@ -1092,6 +1093,33 @@ export default function Chat({ user, onLogout }) {
     setActiveConvo(updated)
   }
 
+  function cancelActiveChatRequest() {
+    const activeRequest = activeChatRequestRef.current
+
+    if (activeRequest) {
+      fetch(
+        `/api/chat/${activeRequest.conversationId}/cancel`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            requestId: activeRequest.requestId
+          }),
+          keepalive: true
+        }
+      ).catch(error => {
+        console.warn(
+          'Server-side chat cancellation failed:',
+          error?.message || error
+        )
+      })
+    }
+
+    abortControllerRef.current?.abort()
+  }
+
   function stopStreaming() {
     const chatRunState = chatRunStateRef.current
 
@@ -1101,9 +1129,7 @@ export default function Chat({ user, onLogout }) {
       )
     }
 
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort()
-    }
+    cancelActiveChatRequest()
   }
 
   async function sendMessage(contentOverride, skipSave = false) {
@@ -1119,9 +1145,9 @@ export default function Chat({ user, onLogout }) {
 
     sendStartingRef.current = true
 
-    // Interrupt: if already streaming, abort current stream before starting new one
+    // Interrupt: stop the previous server run before starting a new one.
     if (streaming && abortControllerRef.current) {
-      abortControllerRef.current.abort()
+      cancelActiveChatRequest()
     }
     const myGeneration = ++streamGenerationRef.current
     const attachmentsToSend = attachments
@@ -1130,6 +1156,10 @@ export default function Chat({ user, onLogout }) {
 
     const userId = `u_${Date.now()}_${Math.random().toString(36).slice(2)}`
     const assistantId = `a_${Date.now()}_${Math.random().toString(36).slice(2)}`
+    const requestId =
+      window.crypto?.randomUUID?.() ||
+      `chat_${Date.now()}_${Math.random().toString(36).slice(2)}`
+    const conversationId = activeConvo.id
 
     let chatRunState
 
@@ -1239,9 +1269,13 @@ export default function Chat({ user, onLogout }) {
     let assistantContent = ''
 
     abortControllerRef.current = new AbortController()
+    activeChatRequestRef.current = {
+      requestId,
+      conversationId
+    }
 
     // SSE stream with auto-reconnect (max 3 retries, exponential backoff)
-    const endpoint = `/api/chat/${activeConvo.id}`
+    const endpoint = `/api/chat/${conversationId}`
     const maxRetries = 3
     let retryCount = 0
 
@@ -1249,7 +1283,12 @@ export default function Chat({ user, onLogout }) {
       const response = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content, attachments: attachmentsToSend, skipSave: skipSave || isRetry }),
+        body: JSON.stringify({
+          content,
+          attachments: attachmentsToSend,
+          skipSave: skipSave || isRetry,
+          requestId
+        }),
         signal: abortControllerRef.current.signal
       })
 
@@ -1485,6 +1524,12 @@ export default function Chat({ user, onLogout }) {
         m.id === assistantId ? { ...m, streaming: false } : m
       ))
       abortControllerRef.current = null
+      if (
+        activeChatRequestRef.current?.requestId ===
+        requestId
+      ) {
+        activeChatRequestRef.current = null
+      }
       loadConversations()
       // Reload messages from DB to replace temp string IDs with real integer IDs
       // (needed for delete/regenerate to work — temp IDs like "u_..." don't match DB rows)

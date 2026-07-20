@@ -40,6 +40,16 @@ import { OPENAI_KEY, ZAI_KEY, streamZai, splitSystemTimeNote } from '../provider
 import { ANTHROPIC_KEY, streamAnthropic } from '../providers/anthropic.js'
 import { streamResponses } from '../providers/openai-responses.js'
 import { exec } from 'child_process'
+import {
+  abortChatRequest,
+  assertAbortSignalActive,
+  assertChatRequestActive,
+  cancelChatRequest,
+  isChatRequestCancelled,
+  isValidChatRequestId,
+  registerChatRequest,
+  unregisterChatRequest
+} from '../lib/chatCancellation.js'
 import { resizeImageBuffer } from '../utils/image.js'
 import fs from 'fs'
 import path from 'path'
@@ -282,10 +292,23 @@ function validateChatBody(body) {
     return 'regenerate muss true oder false sein'
   }
 
+  if (
+    body.requestId !== undefined &&
+    !isValidChatRequestId(body.requestId)
+  ) {
+    return 'Ungueltige Chat-Request-ID'
+  }
+
   return validateAttachments(body.attachments)
 }
 
-async function executeTool(toolCall, res, conversationId) {
+async function executeTool(
+  toolCall,
+  res,
+  conversationId,
+  abortSignal
+) {
+  assertAbortSignalActive(abortSignal)
   const name = toolCall.function?.name
   let args = toolCall.function?.arguments || {}
   if (typeof args === 'string') {
@@ -295,7 +318,8 @@ async function executeTool(toolCall, res, conversationId) {
   if (name === 'web_search') {
     const query = args.query
     res.write(`data: ${JSON.stringify({ tool: 'web_search', status: 'running', query })}\n\n`)
-    const result = await webSearch(query)
+    const result = await webSearch(query, abortSignal)
+    assertAbortSignalActive(abortSignal)
     res.write(`data: ${JSON.stringify({ tool: 'web_search', status: 'done', query, resultCount: result.results?.length || 0 })}\n\n`)
 
     if (result.error) return `Search error: ${result.error}`
@@ -338,7 +362,11 @@ async function executeTool(toolCall, res, conversationId) {
     const url = args.url
     if (looksLikeExfil(url)) return 'Blocked: URL enthaelt verdaechtige Parameter (moegliche Datenexfiltration).'
     res.write(`data: ${JSON.stringify({ tool: 'firecrawl_scrape', status: 'running', query: url })}\n\n`)
-    const result = await firecrawlScrape(url)
+    const result = await firecrawlScrape(
+      url,
+      abortSignal
+    )
+    assertAbortSignalActive(abortSignal)
     res.write(`data: ${JSON.stringify({ tool: 'firecrawl_scrape', status: 'done', query: url })}\n\n`)
     if (result.error) return `Scrape error: ${result.error}`
     return `Content from ${url}:\n\n${result.content}`
@@ -720,6 +748,46 @@ async function updateMemory(userId, conversationId, model, force = false) {
   }
 }
 
+router.post(
+  '/:conversationId/cancel',
+  requireAuth,
+  (req, res) => {
+    const conversationId = Number(
+      req.params.conversationId
+    )
+    const requestId = req.body?.requestId
+
+    if (!isValidChatRequestId(requestId)) {
+      return res.status(400).json({
+        error: 'Ungueltige Chat-Request-ID'
+      })
+    }
+
+    const convo = db.prepare(`
+      SELECT id
+      FROM conversations
+      WHERE id = ? AND user_id = ?
+    `).get(
+      conversationId,
+      req.session.userId
+    )
+
+    if (!convo) {
+      return res.status(404).json({
+        error: 'Not found'
+      })
+    }
+
+    const cancelled = cancelChatRequest({
+      userId: req.session.userId,
+      conversationId,
+      requestId
+    })
+
+    return res.json({ cancelled })
+  }
+)
+
 router.post('/:conversationId', requireAuth, async (req, res) => {
   const validationError = validateChatBody(req.body)
   if (validationError) {
@@ -730,7 +798,15 @@ router.post('/:conversationId', requireAuth, async (req, res) => {
     .get(req.params.conversationId, req.session.userId)
   if (!convo) return res.status(404).json({ error: 'Not found' })
 
-  const { content, attachments, skipSave, regenerate } = req.body
+  const {
+    content,
+    attachments,
+    skipSave,
+    regenerate,
+    requestId: suppliedRequestId
+  } = req.body
+  const requestId =
+    suppliedRequestId || crypto.randomUUID()
   if (!content?.trim() && (!attachments || attachments.length === 0)) {
     return res.status(400).json({ error: 'Empty message' })
   }
@@ -1365,14 +1441,25 @@ Use these as background context. If these memories fully answer the request, ans
   res.setHeader('Cache-Control', 'no-cache')
   res.setHeader('Connection', 'keep-alive')
 
-  // AbortController — kills the upstream Ollama fetch when the client disconnects
+  // Explicit registry makes cancellation work even when a reverse
+  // proxy keeps the original streaming connection alive.
   const abortController = new AbortController()
+  const activeRequest = registerChatRequest({
+    userId: req.session.userId,
+    conversationId: convo.id,
+    requestId,
+    controller: abortController
+  })
+
   let clientDisconnected = false
-  const onClose = () => {
+  const onDisconnect = () => {
+    if (res.writableEnded) return
     clientDisconnected = true
-    abortController.abort()
+    abortChatRequest(activeRequest)
   }
-  req.on('close', onClose)
+
+  req.on('aborted', onDisconnect)
+  res.on('close', onDisconnect)
 
   const options = {
     temperature: convo.temperature,
@@ -1398,7 +1485,21 @@ Use these as background context. If these memories fully answer the request, ans
       if (streamFn === streamZai || streamFn === streamResponses) {
         workingMessages = splitSystemTimeNote(workingMessages)
       }
-      const { fullContent, fullThinking, toolCalls, tokenUsage, rawOutput } = await streamFn(providerModel, workingMessages, options, res, abortController.signal)
+      assertChatRequestActive(activeRequest)
+      const {
+        fullContent,
+        fullThinking,
+        toolCalls,
+        tokenUsage,
+        rawOutput
+      } = await streamFn(
+        providerModel,
+        workingMessages,
+        options,
+        res,
+        abortController.signal
+      )
+      assertChatRequestActive(activeRequest)
       if (fullContent) allContent += (allContent ? '\n\n' : '') + fullContent
       if (fullThinking) accThinking += (accThinking ? '\n\n' : '') + fullThinking
 
@@ -1414,7 +1515,14 @@ Use these as background context. If these memories fully answer the request, ans
 
         let terminalDone = false
         for (const tc of toolCalls) {
-          const result = await executeTool(tc, res, convo.id)
+          assertChatRequestActive(activeRequest)
+          const result = await executeTool(
+            tc,
+            res,
+            convo.id,
+            abortController.signal
+          )
+          assertChatRequestActive(activeRequest)
           if (result === '__TERMINAL_DONE__') {
             terminalDone = true
           }
@@ -1443,8 +1551,11 @@ Use these as background context. If these memories fully answer the request, ans
         allThinking = thinkTagMatch.map(m => m.replace(/<\/?think>/g, '').trim()).filter(Boolean).join('\n\n')
       }
 
-      // Only save to DB if client is still connected
-      if (!clientDisconnected) {
+      // Never persist or publish after an explicit cancellation.
+      if (
+        !clientDisconnected &&
+        !isChatRequestCancelled(activeRequest)
+      ) {
         db.prepare('INSERT INTO messages (conversation_id, role, content, think, usage) VALUES (?, ?, ?, ?, ?)')
           .run(convo.id, 'assistant', cleanResponse, allThinking || '', tokenUsage ? JSON.stringify({
             prompt_tokens: tokenUsage.promptTokens,
@@ -1494,7 +1605,11 @@ Use these as background context. If these memories fully answer the request, ans
     if (iterations >= MAX_TOOL_ITERATIONS) {
       res.write(`data: ${JSON.stringify({ error: 'Max tool iterations reached' })}\n\n`)
       const partial = allContent.replace(/<think>[\s\S]*?<\/think>/g, '').trim()
-      if (!clientDisconnected && partial) {
+      if (
+        !clientDisconnected &&
+        !isChatRequestCancelled(activeRequest) &&
+        partial
+      ) {
         db.prepare('INSERT INTO messages (conversation_id, role, content) VALUES (?, ?, ?)')
           .run(convo.id, 'assistant', partial + '\n\n*[abgebrochen: Tool-Limit erreicht]*')
         res.write('data: ' + JSON.stringify({ done: true }) + '\n\n')
@@ -1502,10 +1617,20 @@ Use these as background context. If these memories fully answer the request, ans
     }
   } catch (err) {
     if (err.name === 'AbortError') {
-      console.log('Chat stream aborted by client disconnect')
+      console.log(
+        'Chat request cancelled',
+        JSON.stringify({
+          conversationId: convo.id,
+          requestId,
+          clientDisconnected
+        })
+      )
     } else {
       console.error('Chat error:', err)
-      if (!clientDisconnected) {
+      if (
+        !clientDisconnected &&
+        !isChatRequestCancelled(activeRequest)
+      ) {
         res.write(`data: ${JSON.stringify({ error: err.message })}\n\n`)
         const partial = allContent.replace(/<think>[\s\S]*?<\/think>/g, '').trim()
         if (partial) {
@@ -1516,7 +1641,9 @@ Use these as background context. If these memories fully answer the request, ans
     }
   }
 
-  req.off('close', onClose)
+  req.off('aborted', onDisconnect)
+  res.off('close', onDisconnect)
+  unregisterChatRequest(activeRequest)
   res.end()
 })
 

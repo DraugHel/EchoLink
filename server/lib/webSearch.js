@@ -3,9 +3,44 @@ const FIRECRAWL_URL = process.env.FIRECRAWL_URL || 'http://localhost:3002'
 const SEARCH_TIMEOUT_MS = 10000
 const MAX_RESULTS = 5
 
-export async function webSearch(query) {
+function linkedAbortController(externalSignal, timeoutMs) {
   const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), SEARCH_TIMEOUT_MS)
+
+  const onExternalAbort = () => controller.abort()
+
+  if (externalSignal?.aborted) {
+    controller.abort()
+  } else {
+    externalSignal?.addEventListener(
+      'abort',
+      onExternalAbort,
+      { once: true }
+    )
+  }
+
+  const timeout = setTimeout(
+    () => controller.abort(),
+    timeoutMs
+  )
+
+  return {
+    controller,
+    cleanup() {
+      clearTimeout(timeout)
+      externalSignal?.removeEventListener(
+        'abort',
+        onExternalAbort
+      )
+    }
+  }
+}
+
+export async function webSearch(query, abortSignal) {
+  const { controller, cleanup } =
+    linkedAbortController(
+      abortSignal,
+      SEARCH_TIMEOUT_MS
+    )
   try {
     const url = `${SEARXNG_URL}/search?q=${encodeURIComponent(query)}&format=json&categories=general`
     const res = await fetch(url, { signal: controller.signal })
@@ -22,13 +57,13 @@ export async function webSearch(query) {
     if (err.name === 'AbortError') return { error: 'Search timeout', query }
     return { error: err.message, query }
   } finally {
-    clearTimeout(timeout)
+    cleanup()
   }
 }
 
-export async function firecrawlScrape(url) {
-  const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), 15000)
+export async function firecrawlScrape(url, abortSignal) {
+  const { controller, cleanup } =
+    linkedAbortController(abortSignal, 15000)
   try {
     const res = await fetch(`${FIRECRAWL_URL}/v1/scrape`, {
       method: 'POST',
@@ -44,7 +79,7 @@ export async function firecrawlScrape(url) {
     if (err.name === 'AbortError') return { error: 'Scrape timeout', url }
     return { error: err.message, url }
   } finally {
-    clearTimeout(timeout)
+    cleanup()
   }
 }
 
