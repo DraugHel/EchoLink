@@ -1685,6 +1685,79 @@ export default function Chat({ user, onLogout }) {
     .reverse()
     .find(message => message.role === 'assistant')
 
+  const latestUserForChatRun = [...messages]
+    .reverse()
+    .find(message => message.role === 'user')
+
+  useEffect(() => {
+    if (
+      chatRun ||
+      !streaming ||
+      !latestAssistant?.streaming
+    ) {
+      return undefined
+    }
+
+    const content = latestUserForChatRun?.content || ''
+    const hasToolStatus = Boolean(
+      latestAssistant?.toolStatus
+    )
+
+    if (!content && !hasToolStatus) {
+      return undefined
+    }
+
+    let alive = true
+
+    loadChatRunStateModule()
+      .then(module => {
+        if (!alive) return
+
+        const shouldRecover =
+          hasToolStatus ||
+          module.shouldShowChatRun({ content })
+
+        if (!shouldRecover) return
+
+        chatRunStateRef.current = module
+
+        let recovered = module.createChatRun({
+          id: latestAssistant.id,
+          content
+        })
+
+        if (hasToolStatus) {
+          recovered = {
+            ...recovered,
+            phase: 'running',
+            currentStep: 1,
+            progress: normalizeLunaToolStatus(
+              latestAssistant.toolStatus
+            ) || 'Werkzeug wird ausgeführt'
+          }
+        }
+
+        setChatRun(current => current || recovered)
+      })
+      .catch(error => {
+        console.error(
+          'Chat run recovery failed:',
+          error?.message || error
+        )
+      })
+
+    return () => {
+      alive = false
+    }
+  }, [
+    chatRun,
+    streaming,
+    latestAssistant?.id,
+    latestAssistant?.streaming,
+    latestAssistant?.toolStatus,
+    latestUserForChatRun?.content
+  ])
+
   const latestContextUsage = [...messages]
     .reverse()
     .find(message =>
@@ -2120,30 +2193,6 @@ export default function Chat({ user, onLogout }) {
             <div style={styles.emptyChat}><p>Start the conversation below.</p></div>
           )}
 
-          {chatRun && (
-            <Suspense
-              fallback={
-                <div
-                  style={{
-                    alignSelf: 'center',
-                    marginTop: 10,
-                    color: 'var(--text3)',
-                    fontSize: 11
-                  }}
-                >
-                  Chat-Ablauf wird geladen …
-                </div>
-              }
-            >
-              <ChatAgentCockpit
-                run={chatRun}
-                streaming={streaming}
-                onCancel={stopStreaming}
-                onDismiss={() => setChatRun(null)}
-              />
-            </Suspense>
-          )}
-
           {showScrollBtn && (
             <button
               onClick={scrollToBottom}
@@ -2189,6 +2238,31 @@ export default function Chat({ user, onLogout }) {
             ))}
           </div>
         )}
+        {chatRun && (
+          <Suspense
+            fallback={
+              <div
+                style={{
+                  flexShrink: 0,
+                  margin: '6px 12px 4px',
+                  color: 'var(--text3)',
+                  fontSize: 11
+                }}
+              >
+                Chat-Ablauf wird geladen …
+              </div>
+            }
+          >
+            <ChatAgentCockpit
+              run={chatRun}
+              streaming={streaming}
+              mobile={mobile}
+              onCancel={stopStreaming}
+              onDismiss={() => setChatRun(null)}
+            />
+          </Suspense>
+        )}
+
         {lunaPresence && (
           <div
             className={

@@ -22,14 +22,15 @@ function statusText(run) {
 export default function ChatAgentCockpit({
   run,
   streaming,
+  mobile = false,
   onCancel,
   onDismiss
 }) {
-  const [expanded, setExpanded] = useState(true)
+  const [expanded, setExpanded] = useState(!mobile)
 
   useEffect(() => {
-    setExpanded(true)
-  }, [run?.id])
+    setExpanded(!mobile)
+  }, [run?.id, mobile])
 
   if (!run) return null
 
@@ -39,10 +40,13 @@ export default function ChatAgentCockpit({
     <section
       aria-label="Arbeitsablauf des aktuellen Chat-Auftrags"
       style={{
-        width: '100%',
+        width: mobile
+          ? 'calc(100% - 20px)'
+          : 'min(760px, calc(100% - 32px))',
         maxWidth: 760,
+        flexShrink: 0,
         alignSelf: 'center',
-        marginTop: 10,
+        marginTop: 6,
         marginBottom: 4,
         border: '1px solid var(--border2)',
         borderRadius: 11,
@@ -149,7 +153,15 @@ export default function ChatAgentCockpit({
       </div>
 
       {expanded && (
-        <div style={{ padding: '0 8px 8px' }}>
+        <div
+          style={{
+            maxHeight: mobile ? '46dvh' : '52vh',
+            padding: '0 8px 8px',
+            overflowY: 'auto',
+            overscrollBehavior: 'contain',
+            WebkitOverflowScrolling: 'touch'
+          }}
+        >
           <AgentRunCockpit
             run={run}
             loading={false}

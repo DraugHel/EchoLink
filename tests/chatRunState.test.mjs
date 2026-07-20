@@ -104,3 +104,27 @@ test('Worker speichert geplante Abbrüche als cancelled und loggt sie normal', (
     /if \(cancelled\) \{\s*console\.log\(logPayload\)/
   )
 })
+
+
+test('Chat-Cockpit wird bei verlorenem UI-State wiederhergestellt und composer-nah gerendert', () => {
+  const chat = fs.readFileSync(
+    new URL('../client/src/pages/Chat.jsx', import.meta.url),
+    'utf8'
+  )
+
+  assert.match(
+    chat,
+    /Chat run recovery failed:/
+  )
+  assert.match(
+    chat,
+    /setChatRun\(current => current \|\| recovered\)/
+  )
+
+  const cockpitIndex = chat.indexOf('<ChatAgentCockpit')
+  const presenceIndex = chat.indexOf('{lunaPresence && (')
+  const messagesEndIndex = chat.indexOf('<div ref={messagesEndRef}')
+
+  assert.ok(cockpitIndex > messagesEndIndex)
+  assert.ok(cockpitIndex < presenceIndex)
+})
