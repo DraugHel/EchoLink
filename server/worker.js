@@ -591,7 +591,7 @@ async function processTask(task) {
       error instanceof AgentRunCancelledError
 
     finishTaskRun(db, runId, {
-      status: 'failed',
+      status: cancelled ? 'cancelled' : 'failed',
       phase: cancelled ? 'cancelled' : 'failed',
       error: cancelled
         ? null
@@ -615,7 +615,7 @@ async function processTask(task) {
 
     failTask(task, finishedAt, nextRunAt)
 
-    console.error(JSON.stringify({
+    const logPayload = JSON.stringify({
       level: cancelled ? 'info' : 'error',
       event: cancelled
         ? 'scheduled_task_cancelled'
@@ -626,7 +626,13 @@ async function processTask(task) {
         ? null
         : error?.message || String(error),
       nextRunAt
-    }))
+    })
+
+    if (cancelled) {
+      console.log(logPayload)
+    } else {
+      console.error(logPayload)
+    }
   } finally {
     clearInterval(lockHeartbeat)
   }

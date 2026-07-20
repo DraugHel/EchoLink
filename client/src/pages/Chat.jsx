@@ -25,6 +25,21 @@ const ShiftImporter = lazy(
 const SystemStatusPanel = lazy(
   () => import('../components/SystemStatusPanel.jsx')
 )
+const ChatAgentCockpit = lazy(
+  () => import('../components/ChatAgentCockpit.jsx')
+)
+
+let chatRunStateModulePromise
+
+function loadChatRunStateModule() {
+  if (!chatRunStateModulePromise) {
+    chatRunStateModulePromise = import(
+      '../lib/chatRunState.js'
+    )
+  }
+
+  return chatRunStateModulePromise
+}
 
 function ToolPanelFallback({ label }) {
   return (
@@ -558,6 +573,7 @@ export default function Chat({ user, onLogout }) {
   const [showLunaHud, setShowLunaHud] = useState(false)
   const [lunaLiveContext, setLunaLiveContext] = useState(null)
   const [lunaResolvedContext, setLunaResolvedContext] = useState(null)
+  const [chatRun, setChatRun] = useState(null)
   const [monitoredApps, setMonitoredApps] = useState(() => { try { const saved = localStorage.getItem('echolink.monitoredApps'); return saved ? JSON.parse(saved) : ['echolink', 'echolink-worker'] } catch { return ['echolink', 'echolink-worker'] } })
   const [showSettings, setShowSettings] = useState(false)
   const [showMemory, setShowMemory] = useState(false)
@@ -688,6 +704,7 @@ export default function Chat({ user, onLogout }) {
     setShowLunaHud(false)
     setLunaLiveContext(null)
     setLunaResolvedContext(null)
+    setChatRun(null)
   }, [activeConvo?.id])
 
   useEffect(() => {
@@ -760,6 +777,8 @@ export default function Chat({ user, onLogout }) {
   const inputRef = useRef(null)
   const abortControllerRef = useRef(null)
   const streamGenerationRef = useRef(0)
+  const sendStartingRef = useRef(false)
+  const chatRunStateRef = useRef(null)
   const mobile = useIsMobile()
   useTheme()
 
@@ -799,7 +818,7 @@ export default function Chat({ user, onLogout }) {
     if (stickToBottomRef.current) {
       messagesEndRef.current?.scrollIntoView({ behavior: 'auto' })
     }
-  }, [messages])
+  }, [messages, chatRun?.events?.length, chatRun?.phase])
 
   // Scroll-to-bottom button: show when scrolled up >200px from bottom
   useEffect(() => {
@@ -1074,6 +1093,14 @@ export default function Chat({ user, onLogout }) {
   }
 
   function stopStreaming() {
+    const chatRunState = chatRunStateRef.current
+
+    if (chatRunState) {
+      setChatRun(current =>
+        chatRunState.requestChatRunCancel(current)
+      )
+    }
+
     if (abortControllerRef.current) {
       abortControllerRef.current.abort()
     }
@@ -1082,7 +1109,16 @@ export default function Chat({ user, onLogout }) {
   async function sendMessage(contentOverride, skipSave = false) {
     const content = contentOverride
     const hasAttachments = attachments.length > 0
-    if ((!content && !hasAttachments) || !activeConvo) return
+    if (
+      (!content && !hasAttachments) ||
+      !activeConvo ||
+      sendStartingRef.current
+    ) {
+      return
+    }
+
+    sendStartingRef.current = true
+
     // Interrupt: if already streaming, abort current stream before starting new one
     if (streaming && abortControllerRef.current) {
       abortControllerRef.current.abort()
@@ -1094,6 +1130,87 @@ export default function Chat({ user, onLogout }) {
 
     const userId = `u_${Date.now()}_${Math.random().toString(36).slice(2)}`
     const assistantId = `a_${Date.now()}_${Math.random().toString(36).slice(2)}`
+
+    let chatRunState
+
+    try {
+      chatRunState = await loadChatRunStateModule()
+    } catch (error) {
+      sendStartingRef.current = false
+      console.error(
+        'Chat run module failed to load:',
+        error?.message || error
+      )
+      return
+    }
+
+    if (streamGenerationRef.current !== myGeneration) {
+      sendStartingRef.current = false
+      return
+    }
+
+    chatRunStateRef.current = chatRunState
+
+    const baseChatRun = chatRunState.createChatRun({
+      id: assistantId,
+      content
+    })
+
+    let trackChatRun = chatRunState.shouldShowChatRun({
+      content,
+      attachments: attachmentsToSend
+    })
+    let chatRunSettled = false
+
+    const updateTrackedChatRun = updater => {
+      if (
+        !trackChatRun ||
+        streamGenerationRef.current !== myGeneration
+      ) {
+        return
+      }
+
+      setChatRun(current => updater(
+        current?.id === assistantId
+          ? current
+          : baseChatRun
+      ))
+    }
+
+    const ensureTrackedChatRun = updater => {
+      trackChatRun = true
+      updateTrackedChatRun(updater)
+    }
+
+    const completeTrackedChatRun = () => {
+      if (!trackChatRun || chatRunSettled) return
+      chatRunSettled = true
+      updateTrackedChatRun(current =>
+        chatRunState.finishChatRun(current)
+      )
+    }
+
+    const cancelTrackedChatRun = () => {
+      if (!trackChatRun || chatRunSettled) return
+      chatRunSettled = true
+      updateTrackedChatRun(current =>
+        chatRunState.cancelChatRun(current)
+      )
+    }
+
+    const failTrackedChatRun = error => {
+      if (!trackChatRun || chatRunSettled) return
+      chatRunSettled = true
+      updateTrackedChatRun(current =>
+        chatRunState.failChatRun(current, error)
+      )
+    }
+
+    if (trackChatRun) {
+      setChatRun(baseChatRun)
+    } else {
+      setChatRun(null)
+    }
 
     setLunaLiveContext(
       createLunaLiveContext({
@@ -1108,6 +1225,8 @@ export default function Chat({ user, onLogout }) {
         model: activeConvo.model
       })
     )
+
+    sendStartingRef.current = false
 
     setMessages(prev => [
       ...prev,
@@ -1155,6 +1274,10 @@ export default function Chat({ user, onLogout }) {
         if (json.tool) {
           const toolStatus = formatLunaToolEvent(json)
 
+          ensureTrackedChatRun(current =>
+            chatRunState.markChatRunTool(current, json)
+          )
+
           setMessages(prev => prev.map(m =>
             m.id === assistantId
               ? { ...m, toolStatus }
@@ -1162,6 +1285,12 @@ export default function Chat({ user, onLogout }) {
           ))
         }
         if (json.token) {
+          if (trackChatRun) {
+            updateTrackedChatRun(current =>
+              chatRunState.markChatRunWriting(current)
+            )
+          }
+
           assistantContent += json.token
           setMessages(prev => prev.map(m =>
             m.id === assistantId ? { ...m, content: assistantContent, toolStatus: null } : m
@@ -1173,6 +1302,7 @@ export default function Chat({ user, onLogout }) {
           ))
         }
         if (json.done) {
+          completeTrackedChatRun()
           setLunaLiveContext(null)
 
           const normalized = json.tokens ? {
@@ -1239,6 +1369,13 @@ export default function Chat({ user, onLogout }) {
           throw new Error(json.error)
         }
         if (json.actionRequest) {
+          ensureTrackedChatRun(current =>
+            chatRunState.markChatRunWaitingApproval(
+              current,
+              json.description || json.reason || ''
+            )
+          )
+
           const action = {
             actionId: json.actionId,
             description: json.description,
@@ -1280,13 +1417,16 @@ export default function Chat({ user, onLogout }) {
 
     try {
       await streamAttempt(false)
+      completeTrackedChatRun()
     } catch (err) {
       if (err.name === 'AbortError') {
+        cancelTrackedChatRun()
         // Stopped by user — mark as done
         setMessages(prev => prev.map(m =>
           m.id === assistantId ? { ...m, streaming: false, content: assistantContent || '_(stopped)_' } : m
         ))
       } else if (err.retryable === false) {
+        failTrackedChatRun(err)
         // Client-, Auth- oder Validierungsfehler werden durch einen Retry nicht besser.
         setMessages(prev => prev.map(m =>
           m.id === assistantId ? {
@@ -1308,14 +1448,19 @@ export default function Chat({ user, onLogout }) {
           try {
             abortControllerRef.current = new AbortController()
             await streamAttempt(true)
+            completeTrackedChatRun()
             // Reconnect succeeded — restore content without the reconnecting text
             setMessages(prev => prev.map(m =>
               m.id === assistantId ? { ...m, content: assistantContent, streaming: true } : m
             ))
             break
           } catch (retryErr) {
-            if (retryErr.name === 'AbortError') break
+            if (retryErr.name === 'AbortError') {
+              cancelTrackedChatRun()
+              break
+            }
             if (retryErr.retryable === false || retryCount >= maxRetries) {
+              failTrackedChatRun(retryErr)
               setMessages(prev => prev.map(m =>
                 m.id === assistantId ? {
                   ...m,
@@ -1361,6 +1506,12 @@ export default function Chat({ user, onLogout }) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' }
       })
+      const chatRunState = chatRunStateRef.current
+      if (chatRunState) {
+        setChatRun(current =>
+          chatRunState.markChatRunApproval(current, true)
+        )
+      }
     } catch (err) {
       console.error('Approve error:', err)
     }
@@ -1386,6 +1537,12 @@ export default function Chat({ user, onLogout }) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' }
       })
+      const chatRunState = chatRunStateRef.current
+      if (chatRunState) {
+        setChatRun(current =>
+          chatRunState.markChatRunApproval(current, false)
+        )
+      }
     } catch (err) {
       console.error('Deny error:', err)
     }
@@ -1961,6 +2118,30 @@ export default function Chat({ user, onLogout }) {
 
           {activeConvo && !loading && messages.length === 0 && (
             <div style={styles.emptyChat}><p>Start the conversation below.</p></div>
+          )}
+
+          {chatRun && (
+            <Suspense
+              fallback={
+                <div
+                  style={{
+                    alignSelf: 'center',
+                    marginTop: 10,
+                    color: 'var(--text3)',
+                    fontSize: 11
+                  }}
+                >
+                  Chat-Ablauf wird geladen …
+                </div>
+              }
+            >
+              <ChatAgentCockpit
+                run={chatRun}
+                streaming={streaming}
+                onCancel={stopStreaming}
+                onDismiss={() => setChatRun(null)}
+              />
+            </Suspense>
           )}
 
           {showScrollBtn && (

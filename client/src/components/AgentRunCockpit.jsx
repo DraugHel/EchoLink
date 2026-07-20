@@ -23,6 +23,7 @@ function phaseLabel(phase, controlState) {
     queued: 'Wartet',
     planning: 'Plant',
     running: 'Läuft',
+    waiting_approval: 'Wartet auf Freigabe',
     finalizing: 'Schließt ab',
     success: 'Erfolgreich',
     failed: 'Fehlgeschlagen',
@@ -52,6 +53,10 @@ function eventSymbol(type) {
   if (type === 'failed') return '!'
   if (type === 'cancelled') return '×'
   if (type === 'cancel_requested') return '◼'
+  if (type === 'approval_requested') return '?'
+  if (type === 'approval_granted') return '✓'
+  if (type === 'approval_denied') return '×'
+  if (type === 'tool_failed') return '!'
   if (type === 'tool_started') return '›'
   if (type === 'tool_finished') return '·'
   if (type === 'plan') return '≡'
@@ -80,7 +85,10 @@ export default function AgentRunCockpit({
   loading,
   cancelling,
   onRefresh,
-  onCancel
+  onCancel,
+  showRefresh = true,
+  cancelLabel = 'Run abbrechen',
+  embedded = false
 }) {
   if (loading && !run) {
     return (
@@ -103,10 +111,12 @@ export default function AgentRunCockpit({
     <section
       aria-label="Agent Run Cockpit"
       style={{
-        marginTop: 8,
-        padding: 10,
-        border: '1px solid var(--border2)',
-        borderRadius: 10,
+        marginTop: embedded ? 0 : 8,
+        padding: embedded ? '2px 2px 4px' : 10,
+        border: embedded
+          ? 'none'
+          : '1px solid var(--border2)',
+        borderRadius: embedded ? 0 : 10,
         background: 'var(--bg2)'
       }}
     >
@@ -158,14 +168,16 @@ export default function AgentRunCockpit({
         </div>
 
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-          <button
-            type="button"
-            onClick={onRefresh}
-            disabled={loading}
-            style={smallButton({ disabled: loading })}
-          >
-            Aktualisieren
-          </button>
+          {showRefresh && (
+            <button
+              type="button"
+              onClick={onRefresh}
+              disabled={loading}
+              style={smallButton({ disabled: loading })}
+            >
+              Aktualisieren
+            </button>
+          )}
 
           {active && (
             <button
@@ -181,7 +193,7 @@ export default function AgentRunCockpit({
                 ? 'Abbruch angefordert'
                 : cancelling
                   ? 'Fordere Abbruch an …'
-                  : 'Run abbrechen'}
+                  : cancelLabel}
             </button>
           )}
         </div>
