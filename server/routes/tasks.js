@@ -9,6 +9,10 @@ import {
   DEFAULT_TASK_TIMEZONE,
   normalizeSchedule
 } from '../lib/scheduler.js'
+import {
+  appendTaskRunEvent,
+  requestTaskRunCancel
+} from '../lib/taskRunState.js'
 
 const router = Router()
 
@@ -40,8 +44,64 @@ function taskToJson(task) {
     lastRunStartedAt:
       task.last_run_started_at || null,
     lastRunFinishedAt:
-      task.last_run_finished_at || null
+      task.last_run_finished_at || null,
+    lastRunPhase: task.last_run_phase || null,
+    lastRunProgress: task.last_run_progress || null,
+    lastRunControlState:
+      task.last_run_control_state || null,
+    lastRunId: task.last_run_id || null
   }
+}
+
+
+function parseRunPlan(value) {
+  try {
+    const parsed = JSON.parse(value || '[]')
+    return Array.isArray(parsed) ? parsed : []
+  } catch {
+    return []
+  }
+}
+
+function runToJson(run, { includeResult = false } = {}) {
+  return {
+    id: run.id,
+    status: run.status,
+    phase: run.phase || run.status,
+    plan: parseRunPlan(run.plan),
+    currentStep: Number(run.current_step) || 0,
+    progress: run.progress || '',
+    controlState: run.control_state || 'active',
+    error: run.error || null,
+    startedAt: run.started_at ?? run.startedAt,
+    finishedAt: run.finished_at ?? run.finishedAt,
+    updatedAt: run.updated_at ?? run.updatedAt ?? null,
+    ...(includeResult
+      ? { result: run.result || null }
+      : {})
+  }
+}
+
+function getOwnedRun(userId, taskId, runId) {
+  return db.prepare(`
+    SELECT run.*
+    FROM task_runs AS run
+    INNER JOIN scheduled_tasks AS task
+      ON task.id = run.task_id
+    WHERE
+      run.id = ?
+      AND run.task_id = ?
+      AND task.user_id = ?
+  `).get(runId, taskId, userId)
+}
+
+function hasActiveRun(taskId) {
+  return Boolean(db.prepare(`
+    SELECT 1
+    FROM task_runs
+    WHERE task_id = ? AND status = 'running'
+    LIMIT 1
+  `).get(taskId))
 }
 
 function getOwnedTask(userId, taskId) {
@@ -130,7 +190,11 @@ router.get('/', requireAuth, (req, res) => {
       latest.status AS last_run_status,
       latest.error AS last_run_error,
       latest.started_at AS last_run_started_at,
-      latest.finished_at AS last_run_finished_at
+      latest.finished_at AS last_run_finished_at,
+      latest.phase AS last_run_phase,
+      latest.progress AS last_run_progress,
+      latest.control_state AS last_run_control_state,
+      latest.id AS last_run_id
     FROM scheduled_tasks AS task
     LEFT JOIN conversations AS conversation
       ON conversation.id = task.conversation_id
@@ -168,18 +232,108 @@ router.get('/:id/runs', requireAuth, (req, res) => {
     SELECT
       id,
       status,
-      result,
+      phase,
+      plan,
+      current_step,
+      progress,
+      control_state,
       error,
-      started_at AS startedAt,
-      finished_at AS finishedAt
+      started_at,
+      finished_at,
+      updated_at
     FROM task_runs
     WHERE task_id = ?
     ORDER BY id DESC
     LIMIT 50
   `).all(task.id)
 
-  res.json(runs)
+  res.json(runs.map(run => runToJson(run)))
 })
+
+router.get('/:id/runs/:runId', requireAuth, (req, res) => {
+  const taskId = Number(req.params.id)
+  const runId = Number(req.params.runId)
+  const run = getOwnedRun(
+    req.session.userId,
+    taskId,
+    runId
+  )
+
+  if (!run) {
+    return res.status(404).json({
+      error: 'Task-Lauf nicht gefunden'
+    })
+  }
+
+  const events = db.prepare(`
+    SELECT
+      id,
+      event_type AS type,
+      message,
+      detail,
+      step_index AS stepIndex,
+      created_at AS createdAt
+    FROM task_run_events
+    WHERE run_id = ?
+    ORDER BY id ASC
+    LIMIT 500
+  `).all(run.id)
+
+  res.json({
+    ...runToJson(run, { includeResult: true }),
+    events
+  })
+})
+
+router.post(
+  '/:id/runs/:runId/cancel',
+  requireAuth,
+  (req, res) => {
+    const taskId = Number(req.params.id)
+    const runId = Number(req.params.runId)
+    const run = getOwnedRun(
+      req.session.userId,
+      taskId,
+      runId
+    )
+
+    if (!run) {
+      return res.status(404).json({
+        error: 'Task-Lauf nicht gefunden'
+      })
+    }
+
+    if (run.status !== 'running') {
+      return res.status(409).json({
+        error: 'Dieser Lauf ist nicht mehr aktiv'
+      })
+    }
+
+    const result = requestTaskRunCancel(db, run.id)
+
+    if (!result.changes) {
+      return res.status(409).json({
+        error: 'Abbruch wurde bereits angefordert'
+      })
+    }
+
+    appendTaskRunEvent(db, run.id, {
+      type: 'cancel_requested',
+      message: 'Abbruch wurde vom Benutzer angefordert'
+    })
+
+    res.json({
+      ok: true,
+      run: runToJson(
+        getOwnedRun(
+          req.session.userId,
+          taskId,
+          runId
+        )
+      )
+    })
+  }
+)
 
 router.post('/', requireAuth, (req, res) => {
   try {
@@ -300,6 +454,12 @@ router.patch('/:id', requireAuth, (req, res) => {
   if (!existing) {
     return res.status(404).json({
       error: 'Task nicht gefunden'
+    })
+  }
+
+  if (hasActiveRun(taskId)) {
+    return res.status(409).json({
+      error: 'Ein laufender Task muss zuerst beendet oder abgebrochen werden'
     })
   }
 
@@ -444,6 +604,19 @@ router.patch('/:id', requireAuth, (req, res) => {
 
 router.post('/:id/run-now', requireAuth, (req, res) => {
   const taskId = Number(req.params.id)
+  const task = getOwnedTask(req.session.userId, taskId)
+
+  if (!task) {
+    return res.status(404).json({
+      error: 'Task nicht gefunden'
+    })
+  }
+
+  if (hasActiveRun(taskId)) {
+    return res.status(409).json({
+      error: 'Dieser Task läuft bereits'
+    })
+  }
 
   const result = db.prepare(`
     UPDATE scheduled_tasks
@@ -470,13 +643,25 @@ router.post('/:id/run-now', requireAuth, (req, res) => {
 })
 
 router.delete('/:id', requireAuth, (req, res) => {
+  const taskId = Number(req.params.id)
+  const task = getOwnedTask(req.session.userId, taskId)
+
+  if (!task) {
+    return res.status(404).json({
+      error: 'Task nicht gefunden'
+    })
+  }
+
+  if (hasActiveRun(taskId)) {
+    return res.status(409).json({
+      error: 'Ein laufender Task muss zuerst beendet oder abgebrochen werden'
+    })
+  }
+
   const result = db.prepare(`
     DELETE FROM scheduled_tasks
     WHERE id = ? AND user_id = ?
-  `).run(
-    Number(req.params.id),
-    req.session.userId
-  )
+  `).run(taskId, req.session.userId)
 
   if (!result.changes) {
     return res.status(404).json({

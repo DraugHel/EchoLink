@@ -15,6 +15,20 @@ import { streamResponses } from '../providers/openai-responses.js'
 const MAX_TOOL_ITERATIONS = 16
 const MAX_TOOL_CALLS = 24
 const AGENT_TIMEOUT_MS = 6 * 60 * 1000
+const CONTROL_POLL_MS = 750
+
+export class AgentRunCancelledError extends Error {
+  constructor(message = 'Agentenlauf wurde abgebrochen') {
+    super(message)
+    this.name = 'AgentRunCancelledError'
+  }
+}
+
+function emitProgress(onProgress, event) {
+  try {
+    onProgress?.(event)
+  } catch {}
+}
 
 const READ_ONLY_TOOLS = [
   SEARCH_TOOL,
@@ -209,8 +223,16 @@ async function finalizeWithoutTools({
   conversation,
   workingMessages,
   controller,
-  reason
+  reason,
+  onProgress
 }) {
+  emitProgress(onProgress, {
+    type: 'finalizing',
+    phase: 'finalizing',
+    stepIndex: 3,
+    message: 'Ergebnis wird ohne weitere Tools fertiggestellt',
+    detail: reason
+  })
   const finalMessages = [
     ...workingMessages,
     {
@@ -231,6 +253,13 @@ async function finalizeWithoutTools({
 
   const content = cleanFinalContent(fullContent)
 
+  emitProgress(onProgress, {
+    type: 'quality',
+    phase: 'finalizing',
+    stepIndex: 4,
+    message: 'Abschluss und Vollständigkeit werden geprüft'
+  })
+
   if (content) {
     return content
   }
@@ -243,7 +272,9 @@ async function finalizeWithoutTools({
 
 export async function runScheduledAgent({
   task,
-  conversation
+  conversation,
+  shouldCancel,
+  onProgress
 }) {
   const model =
     conversation.model ||
@@ -251,10 +282,31 @@ export async function runScheduledAgent({
     'openai/gpt-5.6-luna'
 
   const controller = new AbortController()
-  const timeout = setTimeout(
-    () => controller.abort(),
-    AGENT_TIMEOUT_MS
-  )
+  let abortReason = ''
+
+  const timeout = setTimeout(() => {
+    abortReason = 'timeout'
+    controller.abort()
+  }, AGENT_TIMEOUT_MS)
+
+  const checkControl = () => {
+    if (shouldCancel?.()) {
+      abortReason = 'cancelled'
+      controller.abort()
+      throw new AgentRunCancelledError()
+    }
+  }
+
+  const controlTimer = setInterval(() => {
+    try {
+      if (shouldCancel?.()) {
+        abortReason = 'cancelled'
+        controller.abort()
+      }
+    } catch {}
+  }, CONTROL_POLL_MS)
+
+  controlTimer.unref?.()
 
   const allowedUrls = new Set()
   let toolCallCount = 0
@@ -269,12 +321,21 @@ export async function runScheduledAgent({
     }
   ]
 
+  emitProgress(onProgress, {
+    type: 'step',
+    phase: 'running',
+    stepIndex: 0,
+    message: 'Auftrag wird analysiert'
+  })
+
   try {
     for (
       let iteration = 0;
       iteration < MAX_TOOL_ITERATIONS;
       iteration++
     ) {
+      checkControl()
+
       const {
         fullContent,
         toolCalls,
@@ -295,6 +356,14 @@ export async function runScheduledAgent({
           ...(rawOutput ? { _raw: rawOutput } : {})
         })
 
+        emitProgress(onProgress, {
+          type: 'step',
+          phase: 'running',
+          stepIndex: 1,
+          message: 'Aktuelle Informationen werden gesammelt',
+          detail: `${toolCalls.length} Tool-Aufruf${toolCalls.length === 1 ? '' : 'e'} angefordert`
+        })
+
         const remaining = Math.max(
           0,
           MAX_TOOL_CALLS - toolCallCount
@@ -304,10 +373,35 @@ export async function runScheduledAgent({
         const skipped = toolCalls.slice(remaining)
 
         for (const toolCall of executable) {
+          checkControl()
+
+          const toolName =
+            toolCall?.function?.name || 'unknown'
+          const toolArgs = parseArguments(toolCall)
+          const toolDetail = String(
+            toolArgs.query || toolArgs.url || ''
+          ).slice(0, 500)
+
+          emitProgress(onProgress, {
+            type: 'tool_started',
+            phase: 'running',
+            stepIndex: 1,
+            message: `${toolName} wird ausgeführt`,
+            detail: toolDetail
+          })
+
           const result = await executeReadOnlyTool(
             toolCall,
             allowedUrls
           )
+
+          emitProgress(onProgress, {
+            type: 'tool_finished',
+            phase: 'running',
+            stepIndex: 1,
+            message: `${toolName} abgeschlossen`,
+            detail: `${String(result || '').length} Zeichen Ergebnis`
+          })
 
           workingMessages.push({
             role: 'tool',
@@ -319,6 +413,13 @@ export async function runScheduledAgent({
         }
 
         toolCallCount += executable.length
+
+        emitProgress(onProgress, {
+          type: 'step',
+          phase: 'running',
+          stepIndex: 2,
+          message: 'Gesammelte Informationen werden geprüft'
+        })
 
         for (const toolCall of skipped) {
           workingMessages.push({
@@ -340,7 +441,8 @@ export async function runScheduledAgent({
             conversation,
             workingMessages,
             controller,
-            reason: 'research budget exhausted'
+            reason: 'research budget exhausted',
+            onProgress
           })
         }
 
@@ -355,9 +457,24 @@ export async function runScheduledAgent({
           conversation,
           workingMessages,
           controller,
-          reason: 'the model returned no final text after research'
+          reason: 'the model returned no final text after research',
+          onProgress
         })
       }
+
+      emitProgress(onProgress, {
+        type: 'step',
+        phase: 'finalizing',
+        stepIndex: 3,
+        message: 'Nutzerfreundliches Ergebnis wird formuliert'
+      })
+
+      emitProgress(onProgress, {
+        type: 'quality',
+        phase: 'finalizing',
+        stepIndex: 4,
+        message: 'Abschluss und Vollständigkeit werden geprüft'
+      })
 
       return content
     }
@@ -367,9 +484,21 @@ export async function runScheduledAgent({
       conversation,
       workingMessages,
       controller,
-      reason: 'maximum research iterations reached'
+      reason: 'maximum research iterations reached',
+      onProgress
     })
+  } catch (error) {
+    if (abortReason === 'cancelled') {
+      throw new AgentRunCancelledError()
+    }
+
+    if (abortReason === 'timeout') {
+      throw new Error('Agentenlauf hat das Zeitlimit überschritten')
+    }
+
+    throw error
   } finally {
     clearTimeout(timeout)
+    clearInterval(controlTimer)
   }
 }

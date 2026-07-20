@@ -257,9 +257,50 @@ try { db.exec(`ALTER TABLE conversations ADD COLUMN archived_at INTEGER`) } catc
 try { db.exec(`ALTER TABLE messages ADD COLUMN source_task_id INTEGER`) } catch {}
 try { db.exec(`ALTER TABLE scheduled_tasks ADD COLUMN retention_days INTEGER`) } catch {}
 
+// Agent Run Cockpit: additive migration, existing task_runs rows remain compatible.
+try { db.exec(`ALTER TABLE task_runs ADD COLUMN phase TEXT NOT NULL DEFAULT 'queued'`) } catch {}
+try { db.exec(`ALTER TABLE task_runs ADD COLUMN plan TEXT NOT NULL DEFAULT '[]'`) } catch {}
+try { db.exec(`ALTER TABLE task_runs ADD COLUMN current_step INTEGER NOT NULL DEFAULT 0`) } catch {}
+try { db.exec(`ALTER TABLE task_runs ADD COLUMN progress TEXT NOT NULL DEFAULT ''`) } catch {}
+try { db.exec(`ALTER TABLE task_runs ADD COLUMN control_state TEXT NOT NULL DEFAULT 'active'`) } catch {}
+try { db.exec(`ALTER TABLE task_runs ADD COLUMN updated_at INTEGER`) } catch {}
+
 db.exec(`
   CREATE INDEX IF NOT EXISTS idx_messages_source_task_created
     ON messages(source_task_id, created_at);
+
+  CREATE TABLE IF NOT EXISTS task_run_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id INTEGER NOT NULL,
+    event_type TEXT NOT NULL,
+    message TEXT NOT NULL DEFAULT '',
+    detail TEXT NOT NULL DEFAULT '',
+    step_index INTEGER,
+    created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    FOREIGN KEY (run_id)
+      REFERENCES task_runs(id)
+      ON DELETE CASCADE
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_task_run_events_run
+    ON task_run_events(run_id, id);
+
+  UPDATE task_runs
+  SET
+    phase = CASE
+      WHEN status = 'success' THEN 'success'
+      WHEN status = 'failed' THEN 'failed'
+      ELSE 'running'
+    END,
+    control_state = CASE
+      WHEN status = 'running' THEN 'active'
+      ELSE 'finished'
+    END,
+    updated_at = COALESCE(updated_at, finished_at, started_at)
+  WHERE
+    phase = 'queued'
+    AND plan = '[]'
+    AND progress = '';
 `)
 
 

@@ -2,13 +2,24 @@ import './loadEnv.js'
 import db from './db.js'
 import { computeNextRunAt } from './lib/scheduler.js'
 import { sendPushToUser } from './lib/push.js'
-import { runScheduledAgent } from './lib/agentRunner.js'
+import {
+  AgentRunCancelledError,
+  runScheduledAgent
+} from './lib/agentRunner.js'
 import {
   createDedicatedTaskConversation
 } from './lib/taskConversations.js'
 import {
   cleanupScheduledTasks
 } from './lib/taskCleanup.js'
+import {
+  appendTaskRunEvent,
+  createTaskRun,
+  defaultAgentPlan,
+  finishTaskRun,
+  readTaskRunControl,
+  updateTaskRun
+} from './lib/taskRunState.js'
 
 const POLL_MS = Math.max(
   5_000,
@@ -20,6 +31,68 @@ const MAX_TASKS_PER_TICK = 25
 
 let ticking = false
 let stopping = false
+
+function recoverInterruptedRuns() {
+  const now = Math.floor(Date.now() / 1000)
+
+  const recover = db.transaction(() => {
+    const runs = db.prepare(`
+      SELECT id, task_id
+      FROM task_runs
+      WHERE status = 'running'
+    `).all()
+
+    if (!runs.length) return 0
+
+    const finish = db.prepare(`
+      UPDATE task_runs
+      SET
+        status = 'failed',
+        phase = 'interrupted',
+        progress = 'Worker wurde während des Runs neu gestartet',
+        control_state = 'finished',
+        error = 'Agentenlauf wurde durch einen Worker-Neustart unterbrochen',
+        finished_at = ?,
+        updated_at = ?
+      WHERE id = ? AND status = 'running'
+    `)
+
+    const clearLock = db.prepare(`
+      UPDATE scheduled_tasks
+      SET locked_at = NULL, updated_at = ?
+      WHERE id = ?
+    `)
+
+    let recovered = 0
+
+    for (const run of runs) {
+      const result = finish.run(now, now, run.id)
+      if (!result.changes) continue
+
+      clearLock.run(now, run.task_id)
+      appendTaskRunEvent(db, run.id, {
+        type: 'interrupted',
+        message: 'Run wurde durch einen Worker-Neustart unterbrochen',
+        createdAt: now
+      })
+      recovered++
+    }
+
+    return recovered
+  })
+
+  const recovered = recover()
+
+  if (recovered > 0) {
+    console.warn(JSON.stringify({
+      level: 'warn',
+      event: 'task_runs_recovered_after_restart',
+      recovered
+    }))
+  }
+}
+
+recoverInterruptedRuns()
 
 const TASK_ONCE_RETENTION_DAYS = Math.max(
   1,
@@ -126,43 +199,6 @@ function nextRunAfter(task, fromMs) {
     task.schedule_value,
     task.timezone,
     fromMs
-  )
-}
-
-function createRun(taskId, startedAt) {
-  const result = db.prepare(`
-    INSERT INTO task_runs (
-      task_id,
-      status,
-      started_at
-    )
-    VALUES (?, 'running', ?)
-  `).run(taskId, startedAt)
-
-  return Number(result.lastInsertRowid)
-}
-
-function finishRun(
-  runId,
-  status,
-  result,
-  error,
-  finishedAt
-) {
-  db.prepare(`
-    UPDATE task_runs
-    SET
-      status = ?,
-      result = ?,
-      error = ?,
-      finished_at = ?
-    WHERE id = ?
-  `).run(
-    status,
-    result || null,
-    error || null,
-    finishedAt,
-    runId
   )
 }
 
@@ -364,12 +400,50 @@ function pushPreview(content) {
     : plain
 }
 
-async function executeAgent(task) {
+async function executeAgent(task, runId) {
   const conversation = resolveTaskConversation(task)
+  const plan = defaultAgentPlan(task)
+
+  updateTaskRun(db, runId, {
+    phase: 'planning',
+    plan,
+    currentStep: 0,
+    progress: 'Agentenplan wurde erstellt'
+  })
+
+  appendTaskRunEvent(db, runId, {
+    type: 'plan',
+    message: 'Agentenplan erstellt',
+    detail: plan.map((step, index) =>
+      `${index + 1}. ${step.title}`
+    ).join('\n'),
+    stepIndex: 0
+  })
 
   const content = await runScheduledAgent({
     task,
-    conversation
+    conversation,
+    shouldCancel: () =>
+      readTaskRunControl(db, runId) ===
+      'cancel_requested',
+    onProgress(event) {
+      const stepIndex = Number.isInteger(event?.stepIndex)
+        ? event.stepIndex
+        : undefined
+
+      updateTaskRun(db, runId, {
+        phase: event?.phase,
+        currentStep: stepIndex,
+        progress: event?.message
+      })
+
+      appendTaskRunEvent(db, runId, {
+        type: event?.type || 'progress',
+        message: event?.message || '',
+        detail: event?.detail || '',
+        stepIndex
+      })
+    }
   })
 
   db.prepare(`
@@ -418,13 +492,13 @@ async function executeAgent(task) {
   return content
 }
 
-async function executeTask(task) {
+async function executeTask(task, runId) {
   if (task.task_type === 'reminder') {
     return executeReminder(task)
   }
 
   if (task.task_type === 'agent') {
-    return executeAgent(task)
+    return executeAgent(task, runId)
   }
 
   throw new Error(
@@ -434,10 +508,39 @@ async function executeTask(task) {
 
 async function processTask(task) {
   const startedAt = Math.floor(Date.now() / 1000)
-  const runId = createRun(task.id, startedAt)
+  const initialPlan = task.task_type === 'agent'
+    ? defaultAgentPlan(task)
+    : []
+  const runId = createTaskRun(
+    db,
+    task.id,
+    startedAt,
+    initialPlan
+  )
+
+  appendTaskRunEvent(db, runId, {
+    type: 'started',
+    message: task.task_type === 'agent'
+      ? 'Agentenlauf gestartet'
+      : 'Erinnerungslauf gestartet',
+    stepIndex: 0,
+    createdAt: startedAt
+  })
+
+  const lockHeartbeat = setInterval(() => {
+    try {
+      db.prepare(`
+        UPDATE scheduled_tasks
+        SET locked_at = unixepoch()
+        WHERE id = ?
+      `).run(task.id)
+    } catch {}
+  }, 30_000)
+
+  lockHeartbeat.unref?.()
 
   try {
-    const result = await executeTask(task)
+    const result = await executeTask(task, runId)
     const finishedAt = Math.floor(Date.now() / 1000)
 
     const nextRunAt = nextRunAfter(
@@ -445,13 +548,21 @@ async function processTask(task) {
       Date.now()
     )
 
-    finishRun(
-      runId,
-      'success',
-      String(result).slice(0, 20_000),
-      null,
+    finishTaskRun(db, runId, {
+      status: 'success',
+      phase: 'success',
+      result,
       finishedAt
-    )
+    })
+
+    appendTaskRunEvent(db, runId, {
+      type: 'completed',
+      message: 'Run erfolgreich abgeschlossen',
+      stepIndex: initialPlan.length
+        ? initialPlan.length - 1
+        : 0,
+      createdAt: finishedAt
+    })
 
     completeTask(task, finishedAt, nextRunAt)
 
@@ -476,24 +587,48 @@ async function processTask(task) {
       nextRunAt = null
     }
 
-    finishRun(
-      runId,
-      'failed',
-      null,
-      error?.message || String(error),
+    const cancelled =
+      error instanceof AgentRunCancelledError
+
+    finishTaskRun(db, runId, {
+      status: 'failed',
+      phase: cancelled ? 'cancelled' : 'failed',
+      error: cancelled
+        ? null
+        : error?.message || String(error),
+      controlState: cancelled
+        ? 'cancelled'
+        : 'finished',
       finishedAt
-    )
+    })
+
+    appendTaskRunEvent(db, runId, {
+      type: cancelled ? 'cancelled' : 'failed',
+      message: cancelled
+        ? 'Run wurde abgebrochen'
+        : 'Run ist fehlgeschlagen',
+      detail: cancelled
+        ? ''
+        : error?.message || String(error),
+      createdAt: finishedAt
+    })
 
     failTask(task, finishedAt, nextRunAt)
 
     console.error(JSON.stringify({
-      level: 'error',
-      event: 'scheduled_task_failed',
+      level: cancelled ? 'info' : 'error',
+      event: cancelled
+        ? 'scheduled_task_cancelled'
+        : 'scheduled_task_failed',
       taskId: task.id,
       userId: task.user_id,
-      error: error?.message || String(error),
+      error: cancelled
+        ? null
+        : error?.message || String(error),
       nextRunAt
     }))
+  } finally {
+    clearInterval(lockHeartbeat)
   }
 }
 

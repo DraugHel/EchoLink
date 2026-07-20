@@ -4,6 +4,7 @@ import {
   useState
 } from 'react'
 import api from '../lib/api.js'
+import AgentRunCockpit from './AgentRunCockpit.jsx'
 
 const TYPE_OPTIONS = [
   ['reminder', 'Erinnerung'],
@@ -252,10 +253,18 @@ function scheduleText(task) {
 }
 
 function statusLabel(status) {
-  if (status === 'success') return 'Erfolgreich'
-  if (status === 'failed') return 'Fehlgeschlagen'
-  if (status === 'running') return 'Läuft'
-  return null
+  const labels = {
+    success: 'Erfolgreich',
+    failed: 'Fehlgeschlagen',
+    running: 'Läuft',
+    queued: 'Wartet',
+    planning: 'Plant',
+    finalizing: 'Schließt ab',
+    cancelled: 'Abgebrochen',
+    interrupted: 'Unterbrochen'
+  }
+
+  return labels[status] || null
 }
 
 function taskToDraft(task) {
@@ -726,6 +735,14 @@ export default function TaskPanel({
   const [runs, setRuns] = useState([])
   const [runsLoading, setRunsLoading] =
     useState(false)
+  const [selectedRunId, setSelectedRunId] =
+    useState(null)
+  const [runDetail, setRunDetail] =
+    useState(null)
+  const [runDetailLoading, setRunDetailLoading] =
+    useState(false)
+  const [runActionId, setRunActionId] =
+    useState(null)
 
   async function loadTasks({ quiet = false } = {}) {
     if (!quiet) setLoading(true)
@@ -902,6 +919,8 @@ export default function TaskPanel({
       if (expandedRuns === task.id) {
         setExpandedRuns(null)
         setRuns([])
+        setSelectedRunId(null)
+        setRunDetail(null)
       }
       await loadTasks({ quiet: true })
     } catch (deleteError) {
@@ -918,12 +937,16 @@ export default function TaskPanel({
     if (expandedRuns === taskId) {
       setExpandedRuns(null)
       setRuns([])
+      setSelectedRunId(null)
+      setRunDetail(null)
       return
     }
 
     setExpandedRuns(taskId)
     setRunsLoading(true)
     setRuns([])
+    setSelectedRunId(null)
+    setRunDetail(null)
 
     try {
       const data = await api.get(
@@ -939,6 +962,109 @@ export default function TaskPanel({
       setRunsLoading(false)
     }
   }
+
+  async function loadRunDetail(
+    taskId,
+    runId,
+    { quiet = false } = {}
+  ) {
+    if (!quiet) setRunDetailLoading(true)
+
+    try {
+      const data = await api.get(
+        `/api/tasks/${taskId}/runs/${runId}`
+      )
+      setRunDetail(data)
+      setRuns(current => current.map(run =>
+        run.id === data.id
+          ? { ...run, ...data, events: undefined }
+          : run
+      ))
+      return data
+    } catch (detailError) {
+      if (!quiet) {
+        setError(
+          detailError?.message ||
+          'Run-Cockpit konnte nicht geladen werden.'
+        )
+      }
+      return null
+    } finally {
+      if (!quiet) setRunDetailLoading(false)
+    }
+  }
+
+  async function openRunCockpit(task, run) {
+    if (selectedRunId === run.id) {
+      setSelectedRunId(null)
+      setRunDetail(null)
+      return
+    }
+
+    setSelectedRunId(run.id)
+    setRunDetail(null)
+    await loadRunDetail(task.id, run.id)
+  }
+
+  async function cancelRun(task, run) {
+    const confirmed = window.confirm(
+      `Lauf von „${task.title}“ wirklich abbrechen?`
+    )
+
+    if (!confirmed) return
+
+    setRunActionId(run.id)
+    setError('')
+
+    try {
+      await api.post(
+        `/api/tasks/${task.id}/runs/${run.id}/cancel`,
+        {}
+      )
+      await loadRunDetail(task.id, run.id, { quiet: true })
+      await loadTasks({ quiet: true })
+    } catch (cancelError) {
+      setError(
+        cancelError?.message ||
+        'Der Run konnte nicht abgebrochen werden.'
+      )
+    } finally {
+      setRunActionId(null)
+    }
+  }
+
+  useEffect(() => {
+    if (!expandedRuns || !selectedRunId) return undefined
+
+    const selected = runs.find(run => run.id === selectedRunId)
+    const active = selected?.status === 'running' ||
+      runDetail?.status === 'running'
+
+    if (!active) return undefined
+
+    const timer = setInterval(async () => {
+      const detail = await loadRunDetail(
+        expandedRuns,
+        selectedRunId,
+        { quiet: true }
+      )
+
+      await loadTasks({ quiet: true })
+
+      if (detail?.status !== 'running') {
+        const data = await api.get(
+          `/api/tasks/${expandedRuns}/runs`
+        )
+        setRuns(Array.isArray(data) ? data : [])
+      }
+    }, 2000)
+
+    return () => clearInterval(timer)
+  }, [
+    expandedRuns,
+    selectedRunId,
+    runDetail?.status
+  ])
 
   return (
     <div
@@ -1147,6 +1273,8 @@ export default function TaskPanel({
                   task.scheduleKind === 'once' &&
                   !task.enabled &&
                   Boolean(task.lastRunAt)
+                const activeRun =
+                  task.lastRunStatus === 'running'
 
                 return (
                   <article
@@ -1280,14 +1408,25 @@ export default function TaskPanel({
                               <div
                                 style={{
                                   marginTop: 3,
-                                  color: task.lastRunStatus === 'failed'
+                                  color: [
+                                    'failed',
+                                    'cancelled',
+                                    'interrupted'
+                                  ].includes(task.lastRunPhase)
                                     ? 'var(--danger)'
-                                    : 'var(--text3)',
+                                    : activeRun
+                                      ? 'var(--accent)'
+                                      : 'var(--text3)',
                                   fontSize: 11,
                                   lineHeight: 1.4
                                 }}
                               >
-                                Letzter Status: {statusLabel(task.lastRunStatus)}
+                                Letzter Status: {statusLabel(
+                                  task.lastRunPhase || task.lastRunStatus
+                                ) || task.lastRunPhase || task.lastRunStatus}
+                                {task.lastRunProgress
+                                  ? ` · ${task.lastRunProgress}`
+                                  : ''}
                                 {task.lastRunError
                                   ? ` · ${task.lastRunError}`
                                   : ''}
@@ -1341,8 +1480,8 @@ export default function TaskPanel({
                           <button
                             type="button"
                             onClick={() => startEdit(task)}
-                            disabled={busy}
-                            style={buttonStyle({ disabled: busy })}
+                            disabled={busy || activeRun}
+                            style={buttonStyle({ disabled: busy || activeRun })}
                           >
                             Bearbeiten
                           </button>
@@ -1351,8 +1490,8 @@ export default function TaskPanel({
                             <button
                               type="button"
                               onClick={() => toggleTask(task)}
-                              disabled={busy}
-                              style={buttonStyle({ disabled: busy })}
+                              disabled={busy || activeRun}
+                              style={buttonStyle({ disabled: busy || activeRun })}
                             >
                               {task.enabled
                                 ? 'Deaktivieren'
@@ -1363,10 +1502,10 @@ export default function TaskPanel({
                           <button
                             type="button"
                             onClick={() => runNow(task)}
-                            disabled={busy}
+                            disabled={busy || activeRun}
                             style={buttonStyle({
                               accent: true,
-                              disabled: busy
+                              disabled: busy || activeRun
                             })}
                           >
                             Jetzt ausführen
@@ -1391,11 +1530,11 @@ export default function TaskPanel({
                             type="button"
                             className="echolink-task-delete"
                             onClick={() => deleteTask(task)}
-                            disabled={busy}
+                            disabled={busy || activeRun}
                             style={{
                               ...buttonStyle({
                                 danger: true,
-                                disabled: busy
+                                disabled: busy || activeRun
                               }),
                               marginLeft: 'auto'
                             }}
@@ -1434,20 +1573,60 @@ export default function TaskPanel({
                                       lineHeight: 1.4
                                     }}
                                   >
-                                    <strong
+                                    <div
                                       style={{
-                                        color: run.status === 'failed'
-                                          ? 'var(--danger)'
-                                          : 'var(--text1)'
+                                        display: 'flex',
+                                        alignItems: 'flex-start',
+                                        gap: 7,
+                                        flexWrap: 'wrap'
                                       }}
                                     >
-                                      {statusLabel(run.status) || run.status}
-                                    </strong>
-                                    {' · '}
-                                    {formatUnix(run.startedAt, task.timezone)}
-                                    {run.finishedAt
-                                      ? ` – ${formatUnix(run.finishedAt, task.timezone)}`
-                                      : ''}
+                                      <div style={{ flex: 1, minWidth: 160 }}>
+                                        <strong
+                                          style={{
+                                            color: [
+                                              'failed',
+                                              'cancelled',
+                                              'interrupted'
+                                            ].includes(run.phase)
+                                              ? 'var(--danger)'
+                                              : run.status === 'running'
+                                                ? 'var(--accent)'
+                                                : 'var(--text1)'
+                                          }}
+                                        >
+                                          {statusLabel(run.phase || run.status) ||
+                                            run.phase || run.status}
+                                        </strong>
+                                        {' · '}
+                                        {formatUnix(run.startedAt, task.timezone)}
+                                        {run.finishedAt
+                                          ? ` – ${formatUnix(run.finishedAt, task.timezone)}`
+                                          : ''}
+                                        {run.progress && (
+                                          <div
+                                            style={{
+                                              marginTop: 3,
+                                              color: 'var(--text3)',
+                                              overflowWrap: 'anywhere'
+                                            }}
+                                          >
+                                            {run.progress}
+                                          </div>
+                                        )}
+                                      </div>
+
+                                      <button
+                                        type="button"
+                                        onClick={() => openRunCockpit(task, run)}
+                                        style={buttonStyle()}
+                                      >
+                                        {selectedRunId === run.id
+                                          ? 'Cockpit schließen'
+                                          : 'Cockpit'}
+                                      </button>
+                                    </div>
+
                                     {run.error && (
                                       <div
                                         style={{
@@ -1458,6 +1637,20 @@ export default function TaskPanel({
                                       >
                                         {run.error}
                                       </div>
+                                    )}
+
+                                    {selectedRunId === run.id && (
+                                      <AgentRunCockpit
+                                        run={runDetail}
+                                        timezone={task.timezone}
+                                        loading={runDetailLoading}
+                                        cancelling={runActionId === run.id}
+                                        onRefresh={() => loadRunDetail(
+                                          task.id,
+                                          run.id
+                                        )}
+                                        onCancel={() => cancelRun(task, run)}
+                                      />
                                     )}
                                   </div>
                                 ))}
