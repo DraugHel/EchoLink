@@ -1,3 +1,5 @@
+import { useEffect, useState } from 'react'
+
 function formatNumber(value) {
   const number = Number(value)
 
@@ -9,7 +11,7 @@ function formatNumber(value) {
 }
 
 function contextDetails(usage) {
-  const estimated = Number(
+  const input = Number(
     usage?.context_estimated_input_tokens
   )
   const budget = Number(
@@ -18,21 +20,41 @@ function contextDetails(usage) {
   const omitted = Number(
     usage?.context_omitted_messages
   )
+  const exactOutput = Number(
+    usage?.completion_tokens
+  )
+  const liveOutput = Number(
+    usage?.context_live_output_tokens
+  )
+  const live = Boolean(usage?.context_live)
+
+  const output = live
+    ? liveOutput
+    : exactOutput
+
+  const safeOutput = Number.isFinite(output)
+    ? Math.max(0, output)
+    : 0
 
   const available =
-    Number.isFinite(estimated) &&
+    Number.isFinite(input) &&
     Number.isFinite(budget) &&
     budget > 0
+
+  const used = available
+    ? Math.max(0, input) + safeOutput
+    : 0
 
   const percent = available
     ? Math.min(
         100,
-        Math.max(0, estimated / budget * 100)
+        Math.max(0, used / budget * 100)
       )
     : 0
 
   const warning =
     Boolean(usage?.context_over_budget) ||
+    used >= budget ||
     (
       Number.isFinite(omitted) &&
       omitted > 0
@@ -40,34 +62,170 @@ function contextDetails(usage) {
 
   return {
     available,
-    estimated,
+    input,
+    output: safeOutput,
     budget,
     omitted,
+    used,
     percent,
-    warning
+    warning,
+    live
   }
+}
+
+function formatUpdatedAt(updatedAt, now) {
+  const timestamp = Number(updatedAt)
+
+  if (!Number.isFinite(timestamp)) {
+    return 'Zeitpunkt unbekannt'
+  }
+
+  const ageSeconds = Math.max(
+    0,
+    Math.floor((now - timestamp) / 1000)
+  )
+
+  if (ageSeconds < 5) return 'gerade aktualisiert'
+  if (ageSeconds < 60) return `vor ${ageSeconds} s aktualisiert`
+
+  const minutes = Math.floor(ageSeconds / 60)
+  if (minutes < 60) return `vor ${minutes} min aktualisiert`
+
+  const hours = Math.floor(minutes / 60)
+  return `vor ${hours} h aktualisiert`
+}
+
+function ExpandableValue({
+  field,
+  value,
+  expandedField,
+  onToggle,
+  className = ''
+}) {
+  const expanded = expandedField === field
+
+  return (
+    <button
+      type="button"
+      className={[
+        'luna-mini-hud-value',
+        'luna-mini-hud-expandable',
+        expanded ? 'is-expanded' : '',
+        className
+      ].filter(Boolean).join(' ')}
+      title={value}
+      aria-expanded={expanded}
+      onClick={() => onToggle(
+        expanded ? '' : field
+      )}
+    >
+      {value}
+    </button>
+  )
 }
 
 export default function LunaMiniHud({
   containerRef,
   model,
+  requestedModel,
   usage,
   toolText,
+  toolDetail,
   toolActive,
   waitingForApproval,
   streaming,
   systemMood,
   status,
+  statusUpdatedAt,
   mobile,
   onOpenSystem,
   onClose
 }) {
+  const [expandedField, setExpandedField] = useState('')
+  const [now, setNow] = useState(Date.now())
+  const [mobileMaxHeight, setMobileMaxHeight] = useState(null)
   const context = contextDetails(usage)
+
+  useEffect(() => {
+    setExpandedField('')
+  }, [model, toolDetail, toolText])
+
+  useEffect(() => {
+    const interval = window.setInterval(() => {
+      setNow(Date.now())
+    }, 10000)
+
+    return () => window.clearInterval(interval)
+  }, [])
+
+  useEffect(() => {
+    if (!mobile) {
+      setMobileMaxHeight(null)
+      return undefined
+    }
+
+    let frame = 0
+
+    const updateMaxHeight = () => {
+      window.cancelAnimationFrame(frame)
+
+      frame = window.requestAnimationFrame(() => {
+        const element = containerRef.current
+        if (!element) return
+
+        const viewport = window.visualViewport
+        const viewportTop = viewport?.offsetTop || 0
+        const viewportHeight =
+          viewport?.height || window.innerHeight
+        const viewportBottom =
+          viewportTop + viewportHeight
+        const elementTop =
+          element.getBoundingClientRect().top
+
+        setMobileMaxHeight(
+          Math.max(
+            96,
+            Math.floor(viewportBottom - elementTop - 8)
+          )
+        )
+      })
+    }
+
+    updateMaxHeight()
+
+    window.addEventListener('resize', updateMaxHeight)
+    window.addEventListener('orientationchange', updateMaxHeight)
+    window.visualViewport?.addEventListener(
+      'resize',
+      updateMaxHeight
+    )
+    window.visualViewport?.addEventListener(
+      'scroll',
+      updateMaxHeight
+    )
+
+    return () => {
+      window.cancelAnimationFrame(frame)
+      window.removeEventListener('resize', updateMaxHeight)
+      window.removeEventListener(
+        'orientationchange',
+        updateMaxHeight
+      )
+      window.visualViewport?.removeEventListener(
+        'resize',
+        updateMaxHeight
+      )
+      window.visualViewport?.removeEventListener(
+        'scroll',
+        updateMaxHeight
+      )
+    }
+  }, [containerRef, mobile])
 
   const toolValue = waitingForApproval
     ? 'Freigabe ausstehend'
-    : toolActive && toolText
-      ? toolText
+    : toolActive && (toolDetail || toolText)
+      ? toolDetail || toolText
       : streaming
         ? 'Kein Tool · Antwort läuft'
         : 'Kein Tool aktiv'
@@ -81,6 +239,17 @@ export default function LunaMiniHud({
     ? `CPU ${status.cpu ?? '–'} % · RAM ${status.memory?.usedPercent ?? '–'} % · Speicher ${status.disk ?? '–'} %`
     : 'Status noch nicht geladen'
 
+  const routedModel =
+    model &&
+    requestedModel &&
+    model !== requestedModel
+
+  const contextBreakdown = context.live
+    ? `Live-Schätzung · Eingabe ca. ${formatNumber(context.input)} + Ausgabe ca. ${formatNumber(context.output)}`
+    : context.output > 0
+      ? `Eingabe ${formatNumber(context.input)} + Ausgabe ${formatNumber(context.output)}`
+      : 'Serverwert für die Modelleingabe'
+
   return (
     <section
       ref={containerRef}
@@ -93,6 +262,11 @@ export default function LunaMiniHud({
           ? 'luna-mini-hud-mobile'
           : 'luna-mini-hud-desktop'
       ].join(' ')}
+      style={
+        mobileMaxHeight
+          ? { maxHeight: `${mobileMaxHeight}px` }
+          : undefined
+      }
     >
       <header className="luna-mini-hud-header">
         <div>
@@ -115,12 +289,25 @@ export default function LunaMiniHud({
           <span className="luna-mini-hud-label">
             Modell
           </span>
-          <strong
-            className="luna-mini-hud-value luna-mini-hud-model"
-            title={model || 'Kein Modell ausgewählt'}
-          >
-            {model || 'Kein Modell ausgewählt'}
-          </strong>
+          <div className="luna-mini-hud-value-stack">
+            <ExpandableValue
+              field="model"
+              value={model || 'Kein Modell ausgewählt'}
+              expandedField={expandedField}
+              onToggle={setExpandedField}
+              className="luna-mini-hud-model"
+            />
+
+            {routedModel ? (
+              <small className="luna-mini-hud-note">
+                Automatisch geroutet · angefordert: {requestedModel}
+              </small>
+            ) : context.live ? (
+              <small className="luna-mini-hud-note">
+                Während der Antwort vorläufig
+              </small>
+            ) : null}
+          </div>
         </div>
 
         <div className="luna-mini-hud-row luna-mini-hud-context-row">
@@ -138,7 +325,8 @@ export default function LunaMiniHud({
                     : ''
                 ].filter(Boolean).join(' ')}
               >
-                {formatNumber(context.estimated)} /{' '}
+                {context.live && 'ca. '}
+                {formatNumber(context.used)} /{' '}
                 {formatNumber(context.budget)} ·{' '}
                 {context.percent
                   .toFixed(1)
@@ -165,6 +353,10 @@ export default function LunaMiniHud({
                 />
               </div>
 
+              <small className="luna-mini-hud-note">
+                {contextBreakdown}
+              </small>
+
               {context.warning && (
                 <small className="luna-mini-hud-note luna-mini-hud-warning">
                   {Number.isFinite(context.omitted) &&
@@ -185,16 +377,17 @@ export default function LunaMiniHud({
           <span className="luna-mini-hud-label">
             Tool
           </span>
-          <strong
-            className={[
-              'luna-mini-hud-value',
+          <ExpandableValue
+            field="tool"
+            value={toolValue}
+            expandedField={expandedField}
+            onToggle={setExpandedField}
+            className={
               toolActive || waitingForApproval
                 ? 'luna-mini-hud-active'
                 : 'luna-mini-hud-muted'
-            ].join(' ')}
-          >
-            {toolValue}
-          </strong>
+            }
+          />
         </div>
 
         <div className="luna-mini-hud-row">
@@ -214,6 +407,17 @@ export default function LunaMiniHud({
             </strong>
             <small className="luna-mini-hud-note">
               {systemDetail}
+            </small>
+            <small
+              className="luna-mini-hud-note luna-mini-hud-updated"
+              title={
+                statusUpdatedAt
+                  ? new Date(statusUpdatedAt)
+                    .toLocaleString('de-DE')
+                  : undefined
+              }
+            >
+              {formatUpdatedAt(statusUpdatedAt, now)}
             </small>
           </div>
         </div>

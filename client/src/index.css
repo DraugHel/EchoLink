@@ -1210,3 +1210,84 @@ a { color: var(--accent); text-decoration: none; }
     padding: 8px 0;
   }
 }
+
+/* EchoLink Phase 5.4: Luna Mini-HUD live polish */
+.luna-mini-hud-value-stack {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.luna-mini-hud-expandable {
+  width: 100%;
+  min-width: 0;
+  display: block;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.luna-mini-hud-expandable:hover,
+.luna-mini-hud-expandable:active {
+  background: transparent;
+  color: var(--text);
+}
+
+.luna-mini-hud-expandable.is-expanded {
+  overflow: visible;
+  white-space: normal;
+  word-break: break-word;
+}
+
+.luna-mini-hud-updated {
+  color: var(--text3);
+  opacity: 0.86;
+}
+
+.luna-mini-hud-context-row {
+  grid-template-rows: auto auto auto auto;
+}
+
+@media (max-width: 767px) {
+  .luna-mini-hud {
+    max-height: calc(100dvh - 68px - env(safe-area-inset-top));
+  }
+
+  .luna-mini-hud-grid {
+    padding-right: 11px;
+    padding-left: 11px;
+  }
+}
+
+@media (max-width: 767px) and (orientation: landscape) {
+  .luna-mini-hud {
+    top: calc(100% + 4px);
+    width: min(360px, calc(100vw - 20px));
+  }
+
+  .luna-mini-hud-header {
+    min-height: 39px;
+    padding-top: 6px;
+    padding-bottom: 6px;
+  }
+
+  .luna-mini-hud-row {
+    padding-top: 6px;
+    padding-bottom: 6px;
+  }
+
+  .luna-mini-hud-system-button {
+    min-height: 36px;
+    padding-top: 7px;
+    padding-bottom: 7px;
+  }
+}
+
+.luna-mini-hud-value-stack .luna-mini-hud-note {
+  grid-column: auto;
+}

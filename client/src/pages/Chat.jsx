@@ -378,6 +378,43 @@ function getLunaToolText(value) {
 }
 
 
+function formatLunaToolEvent(event) {
+  const rawName = String(event?.tool || '').trim()
+
+  if (!rawName) return ''
+
+  const readableName = rawName
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+
+  const status = String(event?.status || '')
+    .trim()
+    .toLowerCase()
+
+  const statusText =
+    status === 'running'
+      ? 'läuft'
+      : status === 'done'
+        ? 'fertig'
+        : status === 'error'
+          ? 'Fehler'
+          : status || 'aktiv'
+
+  const query = typeof event?.query === 'string'
+    ? event.query.trim()
+    : ''
+
+  const showQuery =
+    query &&
+    /web|search|scrape|terminal/i.test(rawName)
+
+  return `${readableName} · ${statusText}${
+    showQuery ? `: ${query}` : ''
+  }`
+}
+
+
 // EchoLink Phase 5.2: Luna Reactions
 function getLunaToolKind(value) {
   const raw = normalizeLunaToolStatus(value)
@@ -415,6 +452,91 @@ function getLunaPresenceSymbol(kind) {
   return symbols[kind] || '•'
 }
 
+function estimateLunaContextTokens(value) {
+  const text = String(value || '')
+  if (!text) return 0
+  return Math.ceil(text.length / 3.2)
+}
+
+function createLunaLiveContext({
+  assistantId,
+  usage,
+  messages,
+  content,
+  attachments,
+  skipSave,
+  model
+}) {
+  const budget = Number(
+    usage?.context_budget_tokens
+  )
+  const previousInput = Number(
+    usage?.context_estimated_input_tokens
+  )
+
+  if (
+    !Number.isFinite(budget) ||
+    budget <= 0 ||
+    !Number.isFinite(previousInput)
+  ) {
+    return null
+  }
+
+  let estimatedInput = previousInput
+
+  if (!skipSave) {
+    const sourceAssistant = [...messages]
+      .reverse()
+      .find(message =>
+        message.role === 'assistant' &&
+        !message.streaming
+      )
+
+    const exactPreviousOutput = Number(
+      usage?.completion_tokens
+    )
+
+    if (Number.isFinite(exactPreviousOutput)) {
+      estimatedInput += Math.max(
+        0,
+        exactPreviousOutput
+      ) + 8
+    } else if (sourceAssistant) {
+      estimatedInput +=
+        estimateLunaContextTokens(
+          sourceAssistant.content
+        ) +
+        estimateLunaContextTokens(
+          sourceAssistant.think
+        ) +
+        8
+    }
+
+    estimatedInput +=
+      estimateLunaContextTokens(content) + 8
+
+    estimatedInput += (attachments || [])
+      .filter(attachment =>
+        attachment?.kind === 'image'
+      )
+      .length * 1600
+  }
+
+  return {
+    assistantId,
+    usage: {
+      ...usage,
+      context_estimated_input_tokens:
+        estimatedInput,
+      context_live_output_tokens: 0,
+      context_live: true,
+      context_model: model ||
+        usage?.context_model ||
+        ''
+    }
+  }
+}
+
 function useIsMobile() {
   const [mobile, setMobile] = useState(typeof window !== 'undefined' && window.innerWidth < 768)
   useEffect(() => {
@@ -431,8 +553,11 @@ export default function Chat({ user, onLogout }) {
   const [messages, setMessages] = useState([])
   const [streaming, setStreaming] = useState(false)
   const [sysStatus, setSysStatus] = useState(null)
+  const [sysStatusUpdatedAt, setSysStatusUpdatedAt] = useState(null)
   const [showSysPanel, setShowSysPanel] = useState(false)
   const [showLunaHud, setShowLunaHud] = useState(false)
+  const [lunaLiveContext, setLunaLiveContext] = useState(null)
+  const [lunaResolvedContext, setLunaResolvedContext] = useState(null)
   const [monitoredApps, setMonitoredApps] = useState(() => { try { const saved = localStorage.getItem('echolink.monitoredApps'); return saved ? JSON.parse(saved) : ['echolink', 'echolink-worker'] } catch { return ['echolink', 'echolink-worker'] } })
   const [showSettings, setShowSettings] = useState(false)
   const [showMemory, setShowMemory] = useState(false)
@@ -561,6 +686,8 @@ export default function Chat({ user, onLogout }) {
 
   useEffect(() => {
     setShowLunaHud(false)
+    setLunaLiveContext(null)
+    setLunaResolvedContext(null)
   }, [activeConvo?.id])
 
   useEffect(() => {
@@ -734,7 +861,11 @@ export default function Chat({ user, onLogout }) {
   useEffect(() => {
     let alive = true
     const load = () => api.get('/api/system/status')
-      .then(d => { if (alive) setSysStatus(d) })
+      .then(d => {
+        if (!alive) return
+        setSysStatus(d)
+        setSysStatusUpdatedAt(Date.now())
+      })
       .catch(() => {})
     load()
     const iv = setInterval(load, 30000)
@@ -963,6 +1094,21 @@ export default function Chat({ user, onLogout }) {
 
     const userId = `u_${Date.now()}_${Math.random().toString(36).slice(2)}`
     const assistantId = `a_${Date.now()}_${Math.random().toString(36).slice(2)}`
+
+    setLunaLiveContext(
+      createLunaLiveContext({
+        assistantId,
+        usage:
+          lunaResolvedContext ||
+          latestContextUsage,
+        messages,
+        content,
+        attachments: attachmentsToSend,
+        skipSave,
+        model: activeConvo.model
+      })
+    )
+
     setMessages(prev => [
       ...prev,
       // On regenerate (skipSave=true), don't add user message to UI again
@@ -1007,16 +1153,14 @@ export default function Chat({ user, onLogout }) {
         if (!json) return
 
         if (json.tool) {
-              if (json.status === 'running') {
-                setMessages(prev => prev.map(m =>
-                  m.id === assistantId ? { ...m, toolStatus: `Searching: "${json.query}"` } : m
-                ))
-              } else if (json.status === 'done') {
-                setMessages(prev => prev.map(m =>
-                  m.id === assistantId ? { ...m, toolStatus: `Searched: "${json.query}" (${json.resultCount} results)` } : m
-                ))
-              }
-            }
+          const toolStatus = formatLunaToolEvent(json)
+
+          setMessages(prev => prev.map(m =>
+            m.id === assistantId
+              ? { ...m, toolStatus }
+              : m
+          ))
+        }
         if (json.token) {
           assistantContent += json.token
           setMessages(prev => prev.map(m =>
@@ -1029,6 +1173,8 @@ export default function Chat({ user, onLogout }) {
           ))
         }
         if (json.done) {
+          setLunaLiveContext(null)
+
           const normalized = json.tokens ? {
             prompt_tokens: json.tokens.promptTokens,
             completion_tokens: json.tokens.completionTokens,
@@ -1051,13 +1197,29 @@ export default function Chat({ user, onLogout }) {
           } : null
 
           const doneUsage = json.usage || null
+          const resolvedBaseUsage =
+            normalized ||
+            doneUsage ||
+            null
+          const resolvedContextUsage =
+            contextUsage
+              ? {
+                  ...(resolvedBaseUsage || {}),
+                  ...contextUsage
+                }
+              : null
+
+          if (resolvedContextUsage) {
+            setLunaResolvedContext(
+              resolvedContextUsage
+            )
+          }
 
           setMessages(prev => prev.map(m => {
             if (m.id !== assistantId) return m
 
             const baseUsage =
-              normalized ||
-              doneUsage ||
+              resolvedBaseUsage ||
               m.usage ||
               null
 
@@ -1172,6 +1334,7 @@ export default function Chat({ user, onLogout }) {
       // the new sendMessage call handles streaming state and message reload
       if (streamGenerationRef.current !== myGeneration) return
       setStreaming(false)
+      setLunaLiveContext(null)
       // Always clear per-message streaming flag — done event may not arrive
       setMessages(prev => prev.map(m =>
         m.id === assistantId ? { ...m, streaming: false } : m
@@ -1372,10 +1535,32 @@ export default function Chat({ user, onLogout }) {
       Number(message.usage?.context_budget_tokens) > 0
     )?.usage
 
+  const lunaHudUsage =
+    lunaLiveContext &&
+    latestAssistant?.id ===
+      lunaLiveContext.assistantId
+      ? {
+          ...lunaLiveContext.usage,
+          context_live_output_tokens:
+            estimateLunaContextTokens(
+              latestAssistant.content
+            ) +
+            estimateLunaContextTokens(
+              latestAssistant.think
+            )
+        }
+      : lunaResolvedContext ||
+        latestContextUsage
+
   const lunaHudModel =
+    lunaHudUsage?.context_model ||
     activeConvo?.model ||
-    latestContextUsage?.context_model ||
     ''
+
+  const latestToolDetail =
+    normalizeLunaToolStatus(
+      latestAssistant?.toolStatus
+    )
 
   const latestToolText =
     getLunaToolText(latestAssistant?.toolStatus)
@@ -1639,13 +1824,16 @@ export default function Chat({ user, onLogout }) {
             <LunaMiniHud
               containerRef={lunaHudRef}
               model={lunaHudModel}
-              usage={latestContextUsage}
+              requestedModel={activeConvo?.model || ''}
+              usage={lunaHudUsage}
               toolText={latestToolText}
+              toolDetail={latestToolDetail}
               toolActive={streaming && Boolean(latestToolText)}
               waitingForApproval={waitingForApproval}
               streaming={streaming}
               systemMood={systemMood}
               status={sysStatus}
+              statusUpdatedAt={sysStatusUpdatedAt}
               mobile={mobile}
               onOpenSystem={() => {
                 setShowLunaHud(false)
