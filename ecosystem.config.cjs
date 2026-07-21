@@ -30,5 +30,14 @@ You're allowed to have humor, sarcasm, personality. You're not a robot.`
       TASK_POLL_MS: 30000,
       DEFAULT_TASK_TIMEZONE: 'Europe/Vienna'
     }
+  }, {
+    name: 'echolink-mcp-web',
+    script: 'server/mcp/webServer.js',
+    cwd: '/root/echolink',
+    env: {
+      NODE_ENV: 'production',
+      MCP_WEB_HOST: '127.0.0.1',
+      MCP_WEB_PORT: 3011
+    }
   }]
 }

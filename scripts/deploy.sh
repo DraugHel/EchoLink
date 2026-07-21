@@ -170,10 +170,20 @@ echo "Bundle geprüft: dist/$ASSET"
 echo "===== SERVER-SYNTAX ====="
 node --check server/index.js
 node --check server/worker.js
+node --check server/mcp/webServer.js
+node --check scripts/mcp-web-smoke.js
 
 echo "===== NEUSTART ====="
 pm2 restart echolink --update-env
 pm2 restart echolink-worker --update-env
+
+if pm2 describe echolink-mcp-web >/dev/null 2>&1; then
+  pm2 restart echolink-mcp-web --update-env
+else
+  pm2 start ecosystem.config.cjs \
+    --only echolink-mcp-web \
+    --update-env
+fi
 
 sleep 4
 
@@ -181,6 +191,12 @@ echo "===== HEALTH CHECK ====="
 curl -fsS --max-time 10 \
   http://127.0.0.1:3000/ \
   >/dev/null
+
+curl -fsS --max-time 10 \
+  http://127.0.0.1:3011/health \
+  >/dev/null
+
+timeout 20s node scripts/mcp-web-smoke.js --list-only
 
 pm2 save
 

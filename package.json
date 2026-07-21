@@ -9,9 +9,12 @@
     "adduser": "node scripts/adduser.js",
     "test:smoke": "node --test tests/*.test.mjs",
     "test": "npm run test:smoke",
-    "deploy": "bash scripts/deploy.sh"
+    "deploy": "bash scripts/deploy.sh",
+    "mcp:web": "node server/mcp/webServer.js",
+    "mcp:web:smoke": "node scripts/mcp-web-smoke.js"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "1.29.0",
     "bcryptjs": "^2.4.3",
     "better-sqlite3": "^12.11.1",
     "cheerio": "^1.2.0",
@@ -24,6 +27,7 @@
     "pdf-parse": "^2.4.5",
     "sharp": "^0.35.3",
     "web-push": "^3.6.7",
-    "xlsx": "^0.18.5"
+    "xlsx": "^0.18.5",
+    "zod": "4.4.3"
   }
 }
