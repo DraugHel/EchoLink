@@ -412,6 +412,7 @@ test('Chat, Agent, PM2, Deploy und Container-Härtung sind vollständig verdraht
 
   for (const marker of [
     '--network=host',
+    '127.0.0.1:3012,localhost:3012',
     '--read-only',
     '--cap-drop=ALL',
     '--security-opt=no-new-privileges:true',

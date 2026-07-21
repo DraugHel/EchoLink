@@ -164,7 +164,7 @@ const dockerArgs = [
   '--port',
   String(PORT),
   '--allowed-hosts',
-  '127.0.0.1,localhost',
+  '127.0.0.1:3012,localhost:3012',
   '--allowed-origins',
   origins.join(';'),
   '--isolated',
