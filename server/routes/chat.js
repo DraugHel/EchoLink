@@ -7,7 +7,10 @@ import {
 } from '../lib/memoryItems.js'
 import { extractUrls, fetchAllUrls } from '../lib/fetchUrl.js'
 import { UPLOAD_DIR, extractTextFromFile } from './uploads.js'
-import { webSearch, firecrawlScrape } from '../lib/webSearch.js'
+import {
+  executeFirecrawlScrape,
+  executeWebSearch
+} from '../lib/readOnlyWebRuntime.js'
 import {
   chatCheckpointForTool,
   chatCheckpointKey,
@@ -336,30 +339,37 @@ async function executeTool(
     }
 
     res.write(`data: ${JSON.stringify({ tool: 'web_search', status: 'running', query })}\n\n`)
-    const result = await webSearch(query, abortSignal)
+    const execution = await executeWebSearch(
+      query,
+      {
+        signal: abortSignal,
+        source: 'chat'
+      }
+    )
     assertAbortSignalActive(abortSignal)
-    const formatted = result.error
-      ? `Search error: ${result.error}`
-      : result.results.map((r, i) =>
-        `[${i+1}] ${r.title}\n${r.snippet}\nSource: ${r.source}`
-      ).join('\n\n')
-    const checkpoint = result.error
+    const checkpoint = execution.error
       ? null
-      : chatCheckpointForTool(name, { query }, formatted)
+      : chatCheckpointForTool(
+          name,
+          { query },
+          execution.text
+        )
     if (checkpoint) {
       checkpointCache.set(key, {
         ...checkpoint,
-        resultCount: result.results?.length || 0
+        resultCount: execution.resultCount || 0
       })
     }
     res.write(`data: ${JSON.stringify({
       tool: 'web_search',
-      status: 'done',
+      status: execution.error ? 'error' : 'done',
       query,
-      resultCount: result.results?.length || 0,
+      resultCount: execution.resultCount || 0,
+      backend: execution.backend,
+      fallback: execution.fallback,
       ...(checkpoint ? { checkpoint } : {})
     })}\n\n`)
-    return formatted
+    return execution.text
   }
   if (name === 'terminal') {
     const command = args.command
@@ -403,25 +413,31 @@ async function executeTool(
     }
 
     res.write(`data: ${JSON.stringify({ tool: 'firecrawl_scrape', status: 'running', query: url })}\n\n`)
-    const result = await firecrawlScrape(
+    const execution = await executeFirecrawlScrape(
       url,
-      abortSignal
+      {
+        signal: abortSignal,
+        source: 'chat'
+      }
     )
     assertAbortSignalActive(abortSignal)
-    const formatted = result.error
-      ? `Scrape error: ${result.error}`
-      : `Content from ${url}:\n\n${result.content}`
-    const checkpoint = result.error
+    const checkpoint = execution.error
       ? null
-      : chatCheckpointForTool(name, { url }, formatted)
+      : chatCheckpointForTool(
+          name,
+          { url },
+          execution.text
+        )
     if (checkpoint) checkpointCache.set(key, checkpoint)
     res.write(`data: ${JSON.stringify({
       tool: 'firecrawl_scrape',
-      status: 'done',
+      status: execution.error ? 'error' : 'done',
       query: url,
+      backend: execution.backend,
+      fallback: execution.fallback,
       ...(checkpoint ? { checkpoint } : {})
     })}\n\n`)
-    return formatted
+    return execution.text
   }
 
   if (

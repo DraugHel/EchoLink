@@ -171,7 +171,9 @@ echo "===== SERVER-SYNTAX ====="
 node --check server/index.js
 node --check server/worker.js
 node --check server/mcp/webServer.js
+node --check server/lib/readOnlyWebRuntime.js
 node --check scripts/mcp-web-smoke.js
+node --check scripts/mcp-web-runtime-smoke.js
 
 echo "===== NEUSTART ====="
 pm2 restart echolink --update-env
@@ -197,6 +199,22 @@ curl -fsS --max-time 10 \
   >/dev/null
 
 timeout 20s node scripts/mcp-web-smoke.js --list-only
+
+MCP_RUNTIME_MODE="$(
+  node --input-type=module -e "
+    import './server/loadEnv.js'
+    import { mcpWebExecutionMode } from './server/lib/readOnlyWebRuntime.js'
+    process.stdout.write(mcpWebExecutionMode())
+  "
+)"
+
+if [[ "$MCP_RUNTIME_MODE" == "active" ]]; then
+  timeout 30s node scripts/mcp-web-runtime-smoke.js \
+    --expect-backend=mcp
+else
+  timeout 30s node scripts/mcp-web-runtime-smoke.js \
+    --expect-backend=direct
+fi
 
 pm2 save
 

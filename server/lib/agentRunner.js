@@ -1,9 +1,11 @@
 import {
   FIRECRAWL_TOOL,
-  SEARCH_TOOL,
-  firecrawlScrape,
-  webSearch
+  SEARCH_TOOL
 } from './webSearch.js'
+import {
+  executeFirecrawlScrape,
+  executeWebSearch
+} from './readOnlyWebRuntime.js'
 import { streamOllama } from '../providers/ollama.js'
 import {
   splitSystemTimeNote,
@@ -140,7 +142,8 @@ function finalizationPrompt(reason) {
 
 async function executeReadOnlyTool(
   toolCall,
-  allowedUrls
+  allowedUrls,
+  abortSignal
 ) {
   const name = toolCall?.function?.name
   const args = parseArguments(toolCall)
@@ -154,21 +157,19 @@ async function executeReadOnlyTool(
       return 'Search error: query is required'
     }
 
-    const result = await webSearch(query)
+    const execution = await executeWebSearch(
+      query,
+      {
+        signal: abortSignal,
+        source: 'scheduled-agent'
+      }
+    )
 
-    if (result.error) {
-      return `Search error: ${result.error}`
+    for (const source of execution.sources || []) {
+      if (source) allowedUrls.add(source)
     }
 
-    for (const item of result.results || []) {
-      if (item.source) allowedUrls.add(item.source)
-    }
-
-    return (result.results || []).map((item, index) => [
-      `[${index + 1}] ${item.title}`,
-      item.snippet,
-      `Source: ${item.source}`
-    ].filter(Boolean).join('\n')).join('\n\n')
+    return execution.text
   }
 
   if (name === 'firecrawl_scrape') {
@@ -178,13 +179,15 @@ async function executeReadOnlyTool(
       return 'Scrape blocked: URL was not returned by a web search in this task run.'
     }
 
-    const result = await firecrawlScrape(url)
+    const execution = await executeFirecrawlScrape(
+      url,
+      {
+        signal: abortSignal,
+        source: 'scheduled-agent'
+      }
+    )
 
-    if (result.error) {
-      return `Scrape error: ${result.error}`
-    }
-
-    return `Content from ${url}:\n\n${result.content}`
+    return execution.text
   }
 
   return `Blocked tool: ${name || 'unknown'}`
@@ -405,7 +408,8 @@ export async function runScheduledAgent({
 
           const result = await executeReadOnlyTool(
             toolCall,
-            allowedUrls
+            allowedUrls,
+            controller.signal
           )
 
           emitProgress(onProgress, {

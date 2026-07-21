@@ -11,7 +11,8 @@
     "test": "npm run test:smoke",
     "deploy": "bash scripts/deploy.sh",
     "mcp:web": "node server/mcp/webServer.js",
-    "mcp:web:smoke": "node scripts/mcp-web-smoke.js"
+    "mcp:web:smoke": "node scripts/mcp-web-smoke.js",
+    "mcp:web:runtime-smoke": "node scripts/mcp-web-runtime-smoke.js"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.29.0",

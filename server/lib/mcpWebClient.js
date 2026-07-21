@@ -23,7 +23,8 @@ export function mcpWebConfig(env = process.env) {
 export async function connectMcpWebClient({
   url,
   token,
-  name = 'echolink-mcp-web-client'
+  name = 'echolink-mcp-web-client',
+  signal
 }) {
   const client = new Client({
     name,
@@ -37,7 +38,8 @@ export async function connectMcpWebClient({
         requestInit: {
           headers: {
             Authorization: `Bearer ${token}`
-          }
+          },
+          ...(signal ? { signal } : {})
         }
       }
     )

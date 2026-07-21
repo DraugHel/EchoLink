@@ -138,6 +138,14 @@ function createWebMcpServer({
           .max(500)
           .describe('Specific and concise search query')
       },
+      outputSchema: {
+        query: z.string(),
+        results: z.array(z.object({
+          title: z.string(),
+          snippet: z.string(),
+          source: z.string()
+        })).max(5)
+      },
       annotations: {
         readOnlyHint: true,
         destructiveHint: false,
@@ -158,7 +166,15 @@ function createWebMcpServer({
         )
       }
 
-      const text = (result.results || [])
+      const results = (result.results || [])
+        .slice(0, 5)
+        .map(item => ({
+          title: String(item?.title || ''),
+          snippet: String(item?.snippet || ''),
+          source: String(item?.source || '')
+        }))
+
+      const text = results
         .map((item, index) => [
           `[${index + 1}] ${item.title}`,
           item.snippet,
@@ -166,7 +182,15 @@ function createWebMcpServer({
         ].filter(Boolean).join('\n'))
         .join('\n\n')
 
-      return toolText(text || 'No results found')
+      const structuredContent = {
+        query: String(result.query || query),
+        results
+      }
+
+      return {
+        ...toolText(text || 'No results found'),
+        structuredContent
+      }
     }
   )
 
@@ -182,6 +206,10 @@ function createWebMcpServer({
           .min(1)
           .max(2_000)
           .describe('Public HTTP or HTTPS URL')
+      },
+      outputSchema: {
+        url: z.string(),
+        content: z.string()
       },
       annotations: {
         readOnlyHint: true,
@@ -214,9 +242,17 @@ function createWebMcpServer({
         )
       }
 
-      return toolText(
-        `Content from ${safeUrl}:\n\n${result.content || ''}`
-      )
+      const structuredContent = {
+        url: safeUrl,
+        content: String(result.content || '')
+      }
+
+      return {
+        ...toolText(
+          `Content from ${safeUrl}:\n\n${structuredContent.content}`
+        ),
+        structuredContent
+      }
     }
   )
 
@@ -227,7 +263,8 @@ export function createMcpWebApp({
   token,
   webSearchFn = webSearch,
   firecrawlFn = firecrawlScrape,
-  publicUrlCheck = assertPublicHttpUrl
+  publicUrlCheck = assertPublicHttpUrl,
+  mode = process.env.MCP_WEB_MODE || 'active'
 } = {}) {
   if (!token || String(token).length < 16) {
     throw new Error(
@@ -247,7 +284,7 @@ export function createMcpWebApp({
       service: SERVER_NAME,
       version: SERVER_VERSION,
       transport: 'streamable-http',
-      mode: 'shadow'
+      mode: String(mode || 'active')
     })
   })
 

@@ -93,6 +93,19 @@ test('MCP-Web-Pilot entdeckt und ruft read-only Tools auf', async () => {
       result.content[0].text,
       /MCP works/
     )
+    assert.deepEqual(
+      result.structuredContent,
+      {
+        query: 'EchoLink MCP test',
+        results: [
+          {
+            title: 'Test result',
+            snippet: 'MCP works',
+            source: 'https://example.com/'
+          }
+        ]
+      }
+    )
   } finally {
     await client.close().catch(() => {})
     await new Promise(resolve =>
@@ -173,7 +186,7 @@ test('öffentliche URL-Prüfung blockiert lokale Netze', async () => {
   )
 })
 
-test('Pilot bleibt im Schattenbetrieb und verändert Chat-Tools nicht', () => {
+test('Chat und Agent nutzen die gemeinsame MCP-Web-Laufzeit', () => {
   const route = fs.readFileSync(
     new URL(
       '../server/routes/chat.js',
@@ -189,8 +202,18 @@ test('Pilot bleibt im Schattenbetrieb und verändert Chat-Tools nicht', () => {
     'utf8'
   )
 
-  assert.match(route, /webSearch\(/)
-  assert.match(agent, /webSearch\(/)
-  assert.doesNotMatch(route, /connectMcpWebClient/)
-  assert.doesNotMatch(agent, /connectMcpWebClient/)
+  assert.match(
+    route,
+    /from '\.\.\/lib\/readOnlyWebRuntime\.js'/
+  )
+  assert.match(
+    agent,
+    /from '\.\/readOnlyWebRuntime\.js'/
+  )
+  assert.match(route, /executeWebSearch\(/)
+  assert.match(route, /executeFirecrawlScrape\(/)
+  assert.match(agent, /executeWebSearch\(/)
+  assert.match(agent, /executeFirecrawlScrape\(/)
+  assert.doesNotMatch(route, /await webSearch\(/)
+  assert.doesNotMatch(agent, /await webSearch\(/)
 })

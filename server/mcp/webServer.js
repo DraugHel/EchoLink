@@ -4,6 +4,7 @@ import { createMcpWebApp } from './webApp.js'
 
 const HOST = process.env.MCP_WEB_HOST || '127.0.0.1'
 const PORT = Number(process.env.MCP_WEB_PORT || 3011)
+const MODE = process.env.MCP_WEB_MODE || 'active'
 const TOKEN =
   process.env.MCP_WEB_TOKEN ||
   process.env.SESSION_SECRET
@@ -43,7 +44,10 @@ if (
 let app
 
 try {
-  app = createMcpWebApp({ token: TOKEN })
+  app = createMcpWebApp({
+    token: TOKEN,
+    mode: MODE
+  })
 } catch (error) {
   console.error(`FATAL: ${error.message}`)
   process.exit(1)
@@ -55,7 +59,7 @@ const server = app.listen(PORT, HOST, () => {
     event: 'mcp_web_started',
     host: HOST,
     port: PORT,
-    mode: 'shadow'
+    mode: MODE
   }))
 })
 
