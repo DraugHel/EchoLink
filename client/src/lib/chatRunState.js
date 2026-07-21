@@ -82,6 +82,7 @@ export function shouldShowChatRun({
 export function createChatRun({
   id,
   content,
+  checkpoints = [],
   startedAt = unixNow()
 }) {
   const goal = compactText(content, MAX_GOAL_LENGTH) ||
@@ -113,6 +114,8 @@ export function createChatRun({
   let run = {
     id,
     source: 'chat',
+    requestContent: String(content || ''),
+    checkpoints: Array.isArray(checkpoints) ? checkpoints : [],
     status: 'running',
     phase: 'planning',
     plan,
@@ -201,6 +204,41 @@ export function markChatRunTool(run, event = {}) {
     detail: query,
     stepIndex: 1
   })
+}
+
+export function addChatRunCheckpoint(run, checkpoint) {
+  if (!run || run.status !== 'running' || !checkpoint) return run
+
+  const name = checkpoint.name
+  const args = checkpoint.args
+  const result = checkpoint.result
+  if (
+    !['web_search', 'firecrawl_scrape'].includes(name) ||
+    !args ||
+    typeof result !== 'string' ||
+    !result
+  ) {
+    return run
+  }
+
+  const key = String(
+    checkpoint.key || `${name}:${name === 'web_search' ? args.query : args.url}`
+  )
+  const checkpoints = Array.isArray(run.checkpoints)
+    ? run.checkpoints
+    : []
+
+  if (checkpoints.some(item => String(item?.key || '') === key)) {
+    return run
+  }
+
+  return {
+    ...run,
+    checkpoints: [
+      ...checkpoints,
+      { name, args, result, key }
+    ]
+  }
 }
 
 export function markChatRunWriting(run) {

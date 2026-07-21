@@ -43,7 +43,8 @@ export default function SettingsPanel({
     ollama: 'Ollama (lokal)',
     anthropic: 'Anthropic',
     openai: 'OpenAI',
-    zai: 'Z.ai'
+    zai: 'Z.ai',
+    kimi: 'Kimi (Moonshot)'
   }
 
   const [provider, setProvider] = useState(null)
@@ -56,7 +57,9 @@ export default function SettingsPanel({
         ? 'openai'
         : form.model.startsWith('zai/')
           ? 'zai'
-          : undefined
+          : form.model.startsWith('kimi/')
+            ? 'kimi'
+            : undefined
   })
 
   const currentProvider =

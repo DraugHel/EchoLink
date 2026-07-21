@@ -7,7 +7,8 @@ import {
 import { streamOllama } from '../providers/ollama.js'
 import {
   splitSystemTimeNote,
-  streamZai
+  streamZai,
+  streamKimi
 } from '../providers/openai-compatible.js'
 import { streamAnthropic } from '../providers/anthropic.js'
 import { streamResponses } from '../providers/openai-responses.js'
@@ -87,6 +88,13 @@ function providerFor(model) {
     return {
       streamFn: streamZai,
       providerModel: model.slice(4)
+    }
+  }
+
+  if (model.startsWith('kimi/')) {
+    return {
+      streamFn: streamKimi,
+      providerModel: model.slice(5)
     }
   }
 
@@ -205,6 +213,7 @@ async function callModel({
 
   const providerMessages =
     streamFn === streamZai ||
+    streamFn === streamKimi ||
     streamFn === streamResponses
       ? splitSystemTimeNote(workingMessages)
       : workingMessages
@@ -338,6 +347,7 @@ export async function runScheduledAgent({
 
       const {
         fullContent,
+        fullThinking,
         toolCalls,
         rawOutput
       } = await callModel({
@@ -353,7 +363,10 @@ export async function runScheduledAgent({
           role: 'assistant',
           content: fullContent || '',
           tool_calls: toolCalls,
-          ...(rawOutput ? { _raw: rawOutput } : {})
+          ...(rawOutput ? { _raw: rawOutput } : {}),
+          ...(model.startsWith('kimi/') && fullThinking
+            ? { reasoning_content: fullThinking }
+            : {})
         })
 
         emitProgress(onProgress, {

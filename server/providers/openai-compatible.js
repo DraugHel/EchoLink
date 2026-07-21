@@ -12,6 +12,10 @@ function imgMediaType(b64) {
 const ZAI_URL = 'https://api.z.ai/api/paas/v4/chat/completions'
 export const ZAI_KEY = process.env.ZAI_API_KEY || ''
 
+// ===================== Moonshot AI (Kimi) — OpenAI-kompatibel =====================
+const KIMI_URL = 'https://api.moonshot.ai/v1/chat/completions'
+export const KIMI_KEY = process.env.MOONSHOT_API_KEY || ''
+
 // Ollama-internes Format -> OpenAI Chat Completions Format
 function toOpenAI(messages) {
   const out = []
@@ -22,6 +26,7 @@ function toOpenAI(messages) {
       out.push({
         role: 'assistant',
         content: m.content || null,
+        ...(m.reasoning_content ? { reasoning_content: m.reasoning_content } : {}),
         tool_calls: m.tool_calls.map((tc, i) => {
           const id = tc.id || `call_gen_${out.length}_${i}`
           pendingIds.push(id)
@@ -75,15 +80,19 @@ export function splitSystemTimeNote(messages) {
 }
 
 // Gleiches Interface wie streamOllama: { fullContent, fullThinking, toolCalls, tokenUsage }
-async function streamOpenAICompatible(providerName, endpoint, key, model, messages, options, res, abortSignal, extra = {}) {
+async function streamOpenAICompatible(providerName, endpoint, key, model, messages, options, res, abortSignal, extra = {}, requestOptions = {}) {
   if (!key) throw new Error(`API-Key fuer ${providerName} fehlt in der .env`)
   const body = {
     model, stream: true,
     messages: toOpenAI(messages),
     tools: options?.tools ?? ALL_TOOLS,
     stream_options: { include_usage: true },
-    ...(options?.temperature != null ? { temperature: Math.min(options.temperature, 2) } : {}),
-    ...(options?.top_p != null ? { top_p: options.top_p } : {}),
+    ...(requestOptions.allowSampling !== false && options?.temperature != null
+      ? { temperature: Math.min(options.temperature, 2) }
+      : {}),
+    ...(requestOptions.allowSampling !== false && options?.top_p != null
+      ? { top_p: options.top_p }
+      : {}),
     ...extra
   }
   const r = await fetch(endpoint, {
@@ -113,8 +122,10 @@ async function streamOpenAICompatible(providerName, endpoint, key, model, messag
       if (payload === '[DONE]') continue
       let ev
       try { ev = JSON.parse(payload) } catch { continue }
-      if (ev.error) throw new Error(ev.error.message || 'Z.ai stream error')
-      if (ev.usage) usage = ev.usage
+      if (ev.error) throw new Error(ev.error.message || `${providerName} stream error`)
+      if (ev.usage || ev.choices?.[0]?.usage) {
+        usage = ev.usage || ev.choices[0].usage
+      }
       const delta = ev.choices?.[0]?.delta
       if (!delta) continue
       if (delta.reasoning_content) {
@@ -150,9 +161,35 @@ async function streamOpenAICompatible(providerName, endpoint, key, model, messag
   return { fullContent, fullThinking, toolCalls, tokenUsage }
 }
 
+function kimiRequestExtras(model, reasoningEffort) {
+  if (model === 'kimi-k3') {
+    if (reasoningEffort === 'off') return { reasoning_effort: 'low' }
+    if (reasoningEffort === 'medium') return { reasoning_effort: 'high' }
+    if (reasoningEffort === 'low' || reasoningEffort === 'high') {
+      return { reasoning_effort: reasoningEffort }
+    }
+    return {}
+  }
+
+  if (model.startsWith('kimi-k2.6') && reasoningEffort === 'off') {
+    return { thinking: { type: 'disabled' } }
+  }
+
+  return {}
+}
+
 export const streamZai = (model, messages, options, res, abortSignal) =>
   streamOpenAICompatible('Z.ai', ZAI_URL, ZAI_KEY, model, messages, options, res, abortSignal,
     options?.reasoningEffort === 'off' ? { thinking: { type: 'disabled' } } : {})
+
+// Kimi fixes temperature/top_p per model family. K3 controls reasoning via
+// reasoning_effort; only K2.6 supports disabling thinking explicitly.
+export const streamKimi = (model, messages, options, res, abortSignal) =>
+  streamOpenAICompatible(
+    'Kimi', KIMI_URL, KIMI_KEY, model, messages, options, res, abortSignal,
+    kimiRequestExtras(model, options?.reasoningEffort),
+    { allowSampling: false }
+  )
 
 export const OPENAI_KEY = process.env.OPENAI_API_KEY || ''
 // ===================== Ende OpenAI-kompatible Provider =====================

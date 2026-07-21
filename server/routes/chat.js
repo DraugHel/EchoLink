@@ -9,6 +9,12 @@ import { extractUrls, fetchAllUrls } from '../lib/fetchUrl.js'
 import { UPLOAD_DIR, extractTextFromFile } from './uploads.js'
 import { webSearch, firecrawlScrape } from '../lib/webSearch.js'
 import {
+  chatCheckpointForTool,
+  chatCheckpointKey,
+  formatChatCheckpointContext,
+  normalizeChatCheckpoints
+} from '../lib/chatCheckpoints.js'
+import {
   executeTaskTool,
   TASK_TOOL_NAMES
 } from '../lib/taskTools.js'
@@ -36,7 +42,7 @@ import {
   prepareGmailSendDraft
 } from '../lib/gmailTools.js'
 import { OLLAMA_URL, streamOllama } from '../providers/ollama.js'
-import { OPENAI_KEY, ZAI_KEY, streamZai, splitSystemTimeNote } from '../providers/openai-compatible.js'
+import { OPENAI_KEY, ZAI_KEY, KIMI_KEY, streamZai, streamKimi, splitSystemTimeNote } from '../providers/openai-compatible.js'
 import { ANTHROPIC_KEY, streamAnthropic } from '../providers/anthropic.js'
 import { streamResponses } from '../providers/openai-responses.js'
 import { exec } from 'child_process'
@@ -292,6 +298,10 @@ function validateChatBody(body) {
     return 'regenerate muss true oder false sein'
   }
 
+  if (body.resumeCheckpoints !== undefined && !Array.isArray(body.resumeCheckpoints)) {
+    return 'resumeCheckpoints muss ein Array sein'
+  }
+
   if (
     body.requestId !== undefined &&
     !isValidChatRequestId(body.requestId)
@@ -306,7 +316,8 @@ async function executeTool(
   toolCall,
   res,
   conversationId,
-  abortSignal
+  abortSignal,
+  checkpointCache = new Map()
 ) {
   assertAbortSignalActive(abortSignal)
   const name = toolCall.function?.name
@@ -317,15 +328,38 @@ async function executeTool(
 
   if (name === 'web_search') {
     const query = args.query
+    const key = chatCheckpointKey(name, { query })
+    const reused = checkpointCache.get(key)
+    if (reused) {
+      res.write(`data: ${JSON.stringify({ tool: 'web_search', status: 'done', query, resultCount: reused.resultCount, reused: true })}\n\n`)
+      return reused.result
+    }
+
     res.write(`data: ${JSON.stringify({ tool: 'web_search', status: 'running', query })}\n\n`)
     const result = await webSearch(query, abortSignal)
     assertAbortSignalActive(abortSignal)
-    res.write(`data: ${JSON.stringify({ tool: 'web_search', status: 'done', query, resultCount: result.results?.length || 0 })}\n\n`)
-
-    if (result.error) return `Search error: ${result.error}`
-    return result.results.map((r, i) =>
-      `[${i+1}] ${r.title}\n${r.snippet}\nSource: ${r.source}`
-    ).join('\n\n')
+    const formatted = result.error
+      ? `Search error: ${result.error}`
+      : result.results.map((r, i) =>
+        `[${i+1}] ${r.title}\n${r.snippet}\nSource: ${r.source}`
+      ).join('\n\n')
+    const checkpoint = result.error
+      ? null
+      : chatCheckpointForTool(name, { query }, formatted)
+    if (checkpoint) {
+      checkpointCache.set(key, {
+        ...checkpoint,
+        resultCount: result.results?.length || 0
+      })
+    }
+    res.write(`data: ${JSON.stringify({
+      tool: 'web_search',
+      status: 'done',
+      query,
+      resultCount: result.results?.length || 0,
+      ...(checkpoint ? { checkpoint } : {})
+    })}\n\n`)
+    return formatted
   }
   if (name === 'terminal') {
     const command = args.command
@@ -361,15 +395,33 @@ async function executeTool(
   if (name === 'firecrawl_scrape') {
     const url = args.url
     if (looksLikeExfil(url)) return 'Blocked: URL enthaelt verdaechtige Parameter (moegliche Datenexfiltration).'
+    const key = chatCheckpointKey(name, { url })
+    const reused = checkpointCache.get(key)
+    if (reused) {
+      res.write(`data: ${JSON.stringify({ tool: 'firecrawl_scrape', status: 'done', query: url, reused: true })}\n\n`)
+      return reused.result
+    }
+
     res.write(`data: ${JSON.stringify({ tool: 'firecrawl_scrape', status: 'running', query: url })}\n\n`)
     const result = await firecrawlScrape(
       url,
       abortSignal
     )
     assertAbortSignalActive(abortSignal)
-    res.write(`data: ${JSON.stringify({ tool: 'firecrawl_scrape', status: 'done', query: url })}\n\n`)
-    if (result.error) return `Scrape error: ${result.error}`
-    return `Content from ${url}:\n\n${result.content}`
+    const formatted = result.error
+      ? `Scrape error: ${result.error}`
+      : `Content from ${url}:\n\n${result.content}`
+    const checkpoint = result.error
+      ? null
+      : chatCheckpointForTool(name, { url }, formatted)
+    if (checkpoint) checkpointCache.set(key, checkpoint)
+    res.write(`data: ${JSON.stringify({
+      tool: 'firecrawl_scrape',
+      status: 'done',
+      query: url,
+      ...(checkpoint ? { checkpoint } : {})
+    })}\n\n`)
+    return formatted
   }
 
   if (
@@ -803,10 +855,17 @@ router.post('/:conversationId', requireAuth, async (req, res) => {
     attachments,
     skipSave,
     regenerate,
+    resumeCheckpoints: suppliedResumeCheckpoints,
     requestId: suppliedRequestId
   } = req.body
   const requestId =
     suppliedRequestId || crypto.randomUUID()
+  const resumeCheckpoints = normalizeChatCheckpoints(
+    suppliedResumeCheckpoints
+  )
+  const checkpointCache = new Map(
+    resumeCheckpoints.map(checkpoint => [checkpoint.key, checkpoint])
+  )
   if (!content?.trim() && (!attachments || attachments.length === 0)) {
     return res.status(400).json({ error: 'Empty message' })
   }
@@ -1131,6 +1190,14 @@ Use these as background context. If these memories fully answer the request, ans
         source: 'provider:zai'
       },
       {
+        matches:
+          normalizedModel.startsWith('kimi/'),
+        env:
+          process.env
+            .CHAT_CONTEXT_KIMI_INPUT_TOKENS,
+        source: 'provider:kimi'
+      },
+      {
         matches: true,
         env:
           process.env
@@ -1437,6 +1504,14 @@ Use these as background context. If these memories fully answer the request, ans
     if (last.role === 'user') last.content = last.content + urlContext
   }
 
+  const checkpointContext = formatChatCheckpointContext(
+    resumeCheckpoints
+  )
+  if (checkpointContext && ollamaMessages.length > 0) {
+    const last = ollamaMessages[ollamaMessages.length - 1]
+    if (last.role === 'user') last.content = last.content + checkpointContext
+  }
+
   res.setHeader('Content-Type', 'text/event-stream')
   res.setHeader('Cache-Control', 'no-cache')
   res.setHeader('Connection', 'keep-alive')
@@ -1481,8 +1556,9 @@ Use these as background context. If these memories fully answer the request, ans
       let providerModel = activeModel
       if (activeModel.startsWith('claude')) streamFn = streamAnthropic
       else if (activeModel.startsWith('zai/')) { streamFn = streamZai; providerModel = activeModel.slice(4) }
+      else if (activeModel.startsWith('kimi/')) { streamFn = streamKimi; providerModel = activeModel.slice(5) }
       else if (activeModel.startsWith('openai/')) { streamFn = streamResponses; providerModel = activeModel.slice(7) }
-      if (streamFn === streamZai || streamFn === streamResponses) {
+      if (streamFn === streamZai || streamFn === streamKimi || streamFn === streamResponses) {
         workingMessages = splitSystemTimeNote(workingMessages)
       }
       assertChatRequestActive(activeRequest)
@@ -1510,7 +1586,10 @@ Use these as background context. If these memories fully answer the request, ans
           content: fullContent || '',
           tool_calls: toolCalls,
           // Responses-API: Items (inkl. Reasoning) fuer die naechste Iteration mitnehmen
-          ...(rawOutput ? { _raw: rawOutput } : {})
+          ...(rawOutput ? { _raw: rawOutput } : {}),
+          ...(streamFn === streamKimi && fullThinking
+            ? { reasoning_content: fullThinking }
+            : {})
         })
 
         let terminalDone = false
@@ -1520,7 +1599,8 @@ Use these as background context. If these memories fully answer the request, ans
             tc,
             res,
             convo.id,
-            abortController.signal
+            abortController.signal,
+            checkpointCache
           )
           assertChatRequestActive(activeRequest)
           if (result === '__TERMINAL_DONE__') {
@@ -2163,6 +2243,15 @@ async function loadModelList() {
       { name: 'zai/glm-5.2', provider: 'zai' },
       { name: 'zai/glm-5.1', provider: 'zai' },
       { name: 'zai/glm-4.7', provider: 'zai' }
+    )
+  }
+
+  if (KIMI_KEY) {
+    models.push(
+      { name: 'kimi/kimi-k3', provider: 'kimi' },
+      { name: 'kimi/kimi-k2.7-code', provider: 'kimi' },
+      { name: 'kimi/kimi-k2.7-code-highspeed', provider: 'kimi' },
+      { name: 'kimi/kimi-k2.6', provider: 'kimi' }
     )
   }
 

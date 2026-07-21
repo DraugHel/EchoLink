@@ -1132,7 +1132,11 @@ export default function Chat({ user, onLogout }) {
     cancelActiveChatRequest()
   }
 
-  async function sendMessage(contentOverride, skipSave = false) {
+  async function sendMessage(
+    contentOverride,
+    skipSave = false,
+    resumeCheckpoints = []
+  ) {
     const content = contentOverride
     const hasAttachments = attachments.length > 0
     if (
@@ -1183,7 +1187,8 @@ export default function Chat({ user, onLogout }) {
 
     const baseChatRun = chatRunState.createChatRun({
       id: assistantId,
-      content
+      content,
+      checkpoints: resumeCheckpoints
     })
 
     let trackChatRun = chatRunState.shouldShowChatRun({
@@ -1287,6 +1292,7 @@ export default function Chat({ user, onLogout }) {
           content,
           attachments: attachmentsToSend,
           skipSave: skipSave || isRetry,
+          resumeCheckpoints,
           requestId
         }),
         signal: abortControllerRef.current.signal
@@ -1310,6 +1316,14 @@ export default function Chat({ user, onLogout }) {
         const json = parseSseEvent(rawEvent)
         if (!json) return
 
+        if (json.checkpoint) {
+          ensureTrackedChatRun(current =>
+            chatRunState.addChatRunCheckpoint(
+              current,
+              json.checkpoint
+            )
+          )
+        }
         if (json.tool) {
           const toolStatus = formatLunaToolEvent(json)
 
@@ -2303,6 +2317,15 @@ export default function Chat({ user, onLogout }) {
               streaming={streaming}
               mobile={mobile}
               onCancel={stopStreaming}
+              onResume={checkpoints =>
+                sendMessage(
+                  chatRun?.requestContent ||
+                    latestUserForChatRun?.content ||
+                    '',
+                  true,
+                  checkpoints
+                )
+              }
               onDismiss={() => setChatRun(null)}
             />
           </Suspense>

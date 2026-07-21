@@ -24,6 +24,7 @@ export default function ChatAgentCockpit({
   streaming,
   mobile = false,
   onCancel,
+  onResume,
   onDismiss
 }) {
   const [expanded, setExpanded] = useState(!mobile)
@@ -171,6 +172,27 @@ export default function ChatAgentCockpit({
             embedded
             onCancel={onCancel}
           />
+        </div>
+      )}
+
+      {run.status === 'cancelled' && run.checkpoints?.length > 0 && (
+        <div style={{ padding: '0 11px 10px' }}>
+          <button
+            type="button"
+            onClick={() => onResume?.(run.checkpoints)}
+            style={{
+              width: '100%',
+              minHeight: 34,
+              border: '1px solid var(--accent)',
+              borderRadius: 8,
+              background: 'transparent',
+              color: 'var(--accent)',
+              fontFamily: 'var(--font-mono)',
+              fontSize: 11
+            }}
+          >
+            Fortsetzen ab {run.checkpoints.length} Checkpoint{run.checkpoints.length === 1 ? '' : 's'}
+          </button>
         </div>
       )}
 
