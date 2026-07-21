@@ -147,7 +147,7 @@ const dockerArgs = [
   '--ulimit=nofile=1024:1024',
   '--shm-size=256m',
   '--tmpfs=/tmp:rw,nosuid,nodev,noexec,size=128m',
-  '--tmpfs=/home/node:rw,nosuid,nodev,noexec,size=64m',
+  '--tmpfs=/home/node:rw,nosuid,nodev,noexec,size=64m,uid=1000,gid=1000,mode=0700',
   '--mount',
   `type=bind,src=${initPagePath},dst=/opt/echolink/playwrightInitPage.ts,readonly`,
   '--env',

@@ -414,6 +414,7 @@ test('Chat, Agent, PM2, Deploy und Container-Härtung sind vollständig verdraht
     '--network=host',
     '127.0.0.1:3012,localhost:3012',
     '--read-only',
+    '--tmpfs=/home/node:rw,nosuid,nodev,noexec,size=64m,uid=1000,gid=1000,mode=0700',
     '--cap-drop=ALL',
     '--security-opt=no-new-privileges:true',
     '--pull=never',
