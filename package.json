@@ -9,6 +9,7 @@
     "adduser": "node scripts/adduser.js",
     "test:smoke": "node --test tests/*.test.mjs",
     "test": "npm run test:smoke",
+    "ci": "npm test && npm run build",
     "deploy": "bash scripts/deploy.sh",
     "mcp:web": "node server/mcp/webServer.js",
     "mcp:web:smoke": "node scripts/mcp-web-smoke.js",
