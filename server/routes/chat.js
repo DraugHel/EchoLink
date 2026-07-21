@@ -36,6 +36,10 @@ import {
   prepareCalendarExtraAction
 } from '../lib/calendarExtraTools.js'
 import {
+  GITHUB_TOOL_NAMES,
+  executeGitHubTool
+} from '../lib/githubTools.js'
+import {
   GMAIL_TOOL_NAMES,
   GMAIL_WRITE_TOOL_NAMES,
   executeGmailTool,
@@ -438,6 +442,50 @@ async function executeTool(
       ...(checkpoint ? { checkpoint } : {})
     })}\n\n`)
     return execution.text
+  }
+
+  if (GITHUB_TOOL_NAMES.has(name)) {
+    res.write(`data: ${JSON.stringify({
+      tool: name,
+      status: 'running',
+      query: args
+    })}\n\n`)
+
+    try {
+      const result = await executeGitHubTool(
+        name,
+        args,
+        {
+          signal: abortSignal,
+          source: 'chat'
+        }
+      )
+
+      res.write(`data: ${JSON.stringify({
+        tool: name,
+        status: 'done'
+      })}\n\n`)
+
+      return result
+    } catch (error) {
+      if (
+        abortSignal?.aborted ||
+        error?.name === 'AbortError'
+      ) {
+        throw error
+      }
+
+      const message =
+        error?.message || String(error)
+
+      res.write(`data: ${JSON.stringify({
+        tool: name,
+        status: 'error',
+        error: message
+      })}\n\n`)
+
+      return `GitHub MCP error: ${message}`
+    }
   }
 
   if (

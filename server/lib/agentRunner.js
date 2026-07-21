@@ -6,6 +6,12 @@ import {
   executeFirecrawlScrape,
   executeWebSearch
 } from './readOnlyWebRuntime.js'
+import {
+  executeGitHubTool,
+  GITHUB_TOOLS,
+  GITHUB_TOOL_NAMES
+} from './githubTools.js'
+import { githubMcpEnabled } from './githubMcpClient.js'
 import { streamOllama } from '../providers/ollama.js'
 import {
   splitSystemTimeNote,
@@ -35,7 +41,8 @@ function emitProgress(onProgress, event) {
 
 const READ_ONLY_TOOLS = [
   SEARCH_TOOL,
-  FIRECRAWL_TOOL
+  FIRECRAWL_TOOL,
+  ...(githubMcpEnabled() ? GITHUB_TOOLS : [])
 ]
 
 const silentResponse = {
@@ -118,7 +125,7 @@ function systemPrompt(task) {
     'You are EchoLink\'s scheduled background agent.',
     'Complete the scheduled task now and return only the finished user-facing result.',
     'Do not discuss the scheduling instruction and do not ask follow-up questions.',
-    'You may use only the provided read-only web tools.',
+    'You may use only the provided read-only web and GitHub tools.',
     'Never create, update, delete, send, schedule, or execute anything.',
     'For current news, weather, warnings, gaming news, pollen data, prices, or other time-sensitive facts, perform fresh web searches during this run.',
     'For a morning briefing, search separately for world news, gaming news, local weather, and local pollen conditions.',
@@ -188,6 +195,28 @@ async function executeReadOnlyTool(
     )
 
     return execution.text
+  }
+
+  if (GITHUB_TOOL_NAMES.has(name)) {
+    try {
+      return await executeGitHubTool(
+        name,
+        args,
+        {
+          signal: abortSignal,
+          source: 'scheduled-agent'
+        }
+      )
+    } catch (error) {
+      if (
+        abortSignal?.aborted ||
+        error?.name === 'AbortError'
+      ) {
+        throw error
+      }
+
+      return `GitHub MCP error: ${error?.message || error}`
+    }
   }
 
   return `Blocked tool: ${name || 'unknown'}`

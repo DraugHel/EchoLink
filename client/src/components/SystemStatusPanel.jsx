@@ -31,6 +31,8 @@ function formatTimestamp(value) {
 }
 
 function mcpState(server) {
+  if (server?.mode !== 'active') return 'Deaktiviert'
+  if (server?.configured === false) return 'Nicht konfiguriert'
   if (server?.reachable === true) return 'Erreichbar'
   if (server?.reachable === false) return 'Nicht erreichbar'
   return 'Unbekannt'
@@ -99,6 +101,7 @@ export default function SystemStatusPanel({
     (status?.mcpServers || []).some(server =>
       server.mode === 'active' &&
       (
+        server.configured === false ||
         server.reachable !== true ||
         server.circuitBreaker?.state === 'open'
       )
@@ -269,6 +272,7 @@ export default function SystemStatusPanel({
               const warning =
                 server.mode === 'active' &&
                 (
+                  server.configured === false ||
                   server.reachable !== true ||
                   server.circuitBreaker?.state === 'open'
                 )
@@ -294,6 +298,8 @@ export default function SystemStatusPanel({
 
                     <span style={styles.mcpMode}>
                       {server.mode}
+                      {' · '}
+                      Read-only {booleanLabel(server.readOnly)}
                     </span>
                   </div>
 

@@ -2,31 +2,78 @@ import {
   connectMcpWebClient,
   mcpWebConfig
 } from './mcpWebClient.js'
+import {
+  connectGitHubMcpClient,
+  githubMcpConfig,
+  githubMcpConfigured,
+  githubMcpExecutionMode,
+  GITHUB_MCP_OFFICIAL_TOOLS,
+  GITHUB_MCP_SERVER
+} from './githubMcpClient.js'
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 20_000
 const DEFAULT_FALLBACK_COOLDOWN_MS = 15_000
 const DEFAULT_DISCOVERY_CACHE_MS = 10_000
 const MCP_WEB_SERVER = 'mcp-web'
 
+function toolDefinition({
+  timeoutEnv,
+  fallbackAllowed = false
+}) {
+  return Object.freeze({
+    enabled: true,
+    readOnly: true,
+    fallbackAllowed,
+    timeoutEnv
+  })
+}
+
+const githubTools = Object.fromEntries(
+  GITHUB_MCP_OFFICIAL_TOOLS.map(name => [
+    name,
+    toolDefinition({
+      timeoutEnv: 'GITHUB_MCP_TOOL_TIMEOUT_MS'
+    })
+  ])
+)
+
 const SERVER_DEFINITIONS = Object.freeze({
   [MCP_WEB_SERVER]: Object.freeze({
     id: MCP_WEB_SERVER,
     name: 'mcp-web',
     defaultUrl: 'http://127.0.0.1:3011/mcp',
+    mode: mcpWebExecutionMode,
+    configured: () => true,
+    connectionConfig: mcpWebConfig,
+    connect: connectMcpWebClient,
+    requestTimeoutEnv: 'MCP_WEB_REQUEST_TIMEOUT_MS',
+    fallbackCooldownEnv:
+      'MCP_WEB_FALLBACK_COOLDOWN_MS',
     tools: Object.freeze({
-      web_search: Object.freeze({
-        enabled: true,
-        readOnly: true,
-        fallbackAllowed: true,
-        timeoutEnv: 'MCP_WEB_SEARCH_TIMEOUT_MS'
+      web_search: toolDefinition({
+        timeoutEnv: 'MCP_WEB_SEARCH_TIMEOUT_MS',
+        fallbackAllowed: true
       }),
-      firecrawl_scrape: Object.freeze({
-        enabled: true,
-        readOnly: true,
-        fallbackAllowed: true,
-        timeoutEnv: 'MCP_WEB_SCRAPE_TIMEOUT_MS'
+      firecrawl_scrape: toolDefinition({
+        timeoutEnv: 'MCP_WEB_SCRAPE_TIMEOUT_MS',
+        fallbackAllowed: true
       })
     })
+  }),
+  [GITHUB_MCP_SERVER]: Object.freeze({
+    id: GITHUB_MCP_SERVER,
+    name: 'github',
+    defaultUrl:
+      'https://api.githubcopilot.com/mcp/',
+    mode: githubMcpExecutionMode,
+    configured: githubMcpConfigured,
+    connectionConfig: githubMcpConfig,
+    connect: connectGitHubMcpClient,
+    requestTimeoutEnv:
+      'GITHUB_MCP_REQUEST_TIMEOUT_MS',
+    fallbackCooldownEnv:
+      'GITHUB_MCP_FALLBACK_COOLDOWN_MS',
+    tools: Object.freeze(githubTools)
   })
 })
 
@@ -98,13 +145,15 @@ export function mcpWebExecutionMode(
 function serverConfig(serverId, env = process.env) {
   const definition = definitionFor(serverId)
   const requestTimeoutMs = positiveInteger(
-    env.MCP_WEB_REQUEST_TIMEOUT_MS,
+    env[definition.requestTimeoutEnv],
     DEFAULT_REQUEST_TIMEOUT_MS
   )
   const fallbackCooldownMs = positiveInteger(
-    env.MCP_WEB_FALLBACK_COOLDOWN_MS,
+    env[definition.fallbackCooldownEnv],
     DEFAULT_FALLBACK_COOLDOWN_MS
   )
+  const mode = definition.mode(env)
+  const configured = definition.configured(env)
   const tools = Object.entries(definition.tools)
     .map(([name, tool]) => ({
       name,
@@ -120,9 +169,14 @@ function serverConfig(serverId, env = process.env) {
   return {
     id: definition.id,
     name: definition.name,
-    mode: mcpWebExecutionMode(env),
+    mode,
+    configured,
+    readOnly: tools.every(tool => tool.readOnly),
     url: String(
-      env.MCP_WEB_URL || definition.defaultUrl
+      env[serverId === MCP_WEB_SERVER
+        ? 'MCP_WEB_URL'
+        : 'GITHUB_MCP_URL'] ||
+      definition.defaultUrl
     ),
     requestTimeoutMs,
     fallbackCooldownMs,
@@ -150,6 +204,7 @@ function publicUrl(value) {
 function secretValues(env) {
   return [
     env?.MCP_WEB_TOKEN,
+    env?.GITHUB_MCP_TOKEN,
     env?.SESSION_SECRET
   ]
     .map(value => String(value || '').trim())
@@ -200,7 +255,7 @@ function structuredLog(level, event, fields = {}) {
 }
 
 function abortError() {
-  const error = new Error('Web tool request aborted')
+  const error = new Error('MCP tool request aborted')
   error.name = 'AbortError'
   return error
 }
@@ -229,8 +284,6 @@ function linkedAbortSignal(externalSignal, timeoutMs) {
       new Error('MCP request timed out')
     )
   }, timeoutMs)
-
-  timeout.unref?.()
 
   return {
     signal: controller.signal,
@@ -294,6 +347,8 @@ function publicStatus(
     name: config.name,
     url: publicUrl(config.url),
     mode: config.mode,
+    configured: config.configured,
+    readOnly: config.readOnly,
     reachable: state.reachable,
     lastSuccessfulConnection:
       state.lastSuccessfulConnection,
@@ -318,6 +373,16 @@ function publicStatus(
       fallbackAllowed: tool.fallbackAllowed
     }))
   }
+}
+
+function connectorFor(serverId, connectFn, connectors) {
+  if (connectors?.[serverId]) {
+    return connectors[serverId]
+  }
+
+  if (connectFn) return connectFn
+
+  return definitionFor(serverId).connect
 }
 
 async function listKnownTools(
@@ -358,15 +423,33 @@ export async function discoverMcpServer(
   serverId,
   {
     env = process.env,
-    connectFn = connectMcpWebClient,
+    connectFn,
+    connectors,
     signal,
     force = false,
     now = Date.now
   } = {}
 ) {
+  const definition = definitionFor(serverId)
   const config = serverConfig(serverId, env)
   const state = stateFor(serverId)
   const nowValue = now()
+
+  if (config.mode !== 'active') {
+    state.reachable = null
+    state.lastError = null
+    state.discoveredTools = []
+    state.lastDiscoveryAt = 0
+    state.circuitOpenUntil = 0
+    return publicStatus(serverId, env, nowValue)
+  }
+
+  if (!config.configured) {
+    state.reachable = false
+    state.lastError = 'Nicht konfiguriert: Zugangstoken fehlt'
+    state.discoveredTools = []
+    return publicStatus(serverId, env, nowValue)
+  }
 
   if (
     !force &&
@@ -391,8 +474,14 @@ export async function discoverMcpServer(
     let connection
 
     try {
-      const connectionConfig = mcpWebConfig(env)
-      connection = await connectFn({
+      const connectionConfig =
+        definition.connectionConfig(env)
+      const connector = connectorFor(
+        serverId,
+        connectFn,
+        connectors
+      )
+      connection = await connector({
         ...connectionConfig,
         name: `echolink-${serverId}-registry`,
         signal: linked.signal
@@ -462,7 +551,8 @@ export async function discoverMcpServer(
 
 export async function getMcpRegistryStatus({
   env = process.env,
-  connectFn = connectMcpWebClient,
+  connectFn,
+  connectors,
   signal,
   forceDiscovery = false,
   now = Date.now
@@ -476,6 +566,7 @@ export async function getMcpRegistryStatus({
         {
           env,
           connectFn,
+          connectors,
           signal,
           force: forceDiscovery,
           now
@@ -555,12 +646,14 @@ export async function executeMcpRegistryTool(
   args,
   {
     env = process.env,
-    connectFn = connectMcpWebClient,
+    connectFn,
+    connectors,
     signal,
     source = 'unknown',
     now = Date.now
   } = {}
 ) {
+  const definition = definitionFor(serverId)
   const config = serverConfig(serverId, env)
   const tool = mcpRegistryToolConfig(
     serverId,
@@ -568,6 +661,22 @@ export async function executeMcpRegistryTool(
     env
   )
   const state = stateFor(serverId)
+
+  if (config.mode !== 'active') {
+    const error = new Error(
+      `MCP-Server ist nicht aktiv: ${serverId}`
+    )
+    error.name = 'McpRegistryServerDisabledError'
+    throw error
+  }
+
+  if (!config.configured) {
+    const error = new Error(
+      `MCP-Server ist nicht konfiguriert: ${serverId}`
+    )
+    error.name = 'McpRegistryServerNotConfiguredError'
+    throw error
+  }
 
   if (signal?.aborted) throw abortError()
 
@@ -587,8 +696,14 @@ export async function executeMcpRegistryTool(
   let connection
 
   try {
-    const connectionConfig = mcpWebConfig(env)
-    connection = await connectFn({
+    const connectionConfig =
+      definition.connectionConfig(env)
+    const connector = connectorFor(
+      serverId,
+      connectFn,
+      connectors
+    )
+    connection = await connector({
       ...connectionConfig,
       name: `echolink-${serverId}-${toolName}`,
       signal: linked.signal

@@ -13,7 +13,9 @@
     "mcp:web": "node server/mcp/webServer.js",
     "mcp:web:smoke": "node scripts/mcp-web-smoke.js",
     "mcp:web:runtime-smoke": "node scripts/mcp-web-runtime-smoke.js",
-    "mcp:registry:smoke": "node scripts/mcp-registry-smoke.js"
+    "mcp:registry:smoke": "node scripts/mcp-registry-smoke.js",
+    "mcp:github:smoke": "node scripts/mcp-github-smoke.js",
+    "mcp:github:configure": "bash scripts/configure-github-mcp.sh"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.29.0",

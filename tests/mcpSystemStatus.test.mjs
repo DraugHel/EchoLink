@@ -36,6 +36,8 @@ test('Systemstatus bleibt authentifiziert und ergänzt bekannte MCP-Registry-Dat
 test('SystemStatusPanel zeigt MCP-Server, Tools und read-only Metriken', () => {
   for (const marker of [
     'MCP-Server',
+    'server.configured',
+    'server.readOnly',
     'server.latencyMs',
     'server.lastSuccessfulConnection',
     'server.errorCount',

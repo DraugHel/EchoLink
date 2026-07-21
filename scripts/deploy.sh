@@ -171,12 +171,18 @@ echo "===== SERVER-SYNTAX ====="
 node --check server/index.js
 node --check server/worker.js
 node --check server/mcp/webServer.js
+node --check server/lib/mcpHttpClient.js
+node --check server/lib/mcpWebClient.js
+node --check server/lib/githubMcpClient.js
+node --check server/lib/githubTools.js
 node --check server/lib/mcpRegistry.js
 node --check server/lib/readOnlyWebRuntime.js
 node --check server/routes/system.js
 node --check scripts/mcp-web-smoke.js
 node --check scripts/mcp-web-runtime-smoke.js
 node --check scripts/mcp-registry-smoke.js
+node --check scripts/mcp-github-smoke.js
+bash -n scripts/configure-github-mcp.sh
 
 echo "===== NEUSTART ====="
 pm2 restart echolink --update-env
@@ -203,6 +209,7 @@ curl -fsS --max-time 10 \
 
 timeout 20s node scripts/mcp-web-smoke.js --list-only
 timeout 20s node scripts/mcp-registry-smoke.js
+timeout 45s node scripts/mcp-github-smoke.js
 
 MCP_RUNTIME_MODE="$(
   node --input-type=module -e "

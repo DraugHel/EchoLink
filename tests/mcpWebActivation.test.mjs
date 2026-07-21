@@ -96,9 +96,9 @@ test('Websuche verwendet MCP als primären Backend-Pfad', async () => {
   )
   assert.equal(directCalls, 0)
 
-  const [server] = getMcpRegistrySnapshot({
+  const server = getMcpRegistrySnapshot({
     env: ACTIVE_ENV
-  })
+  }).find(item => item.name === 'mcp-web')
   assert.equal(server.successCount, 1)
   assert.equal(server.errorCount, 0)
   assert.equal(server.fallbackCount, 0)
@@ -136,9 +136,9 @@ test('MCP-Ausfall fällt kontrolliert auf direkte Websuche zurück', async () =>
   assert.equal(directCalls, 1)
   assert.match(result.text, /Fallback works/)
 
-  const [server] = getMcpRegistrySnapshot({
+  const server = getMcpRegistrySnapshot({
     env: ACTIVE_ENV
-  })
+  }).find(item => item.name === 'mcp-web')
   assert.equal(server.errorCount, 1)
   assert.equal(server.fallbackCount, 1)
   assert.equal(server.circuitBreaker.state, 'open')
@@ -225,9 +225,9 @@ test('Chat-Abbruch startet nach MCP-Abbruch keinen direkten Fallback', async () 
 
   assert.equal(directCalls, 0)
 
-  const [server] = getMcpRegistrySnapshot({
+  const server = getMcpRegistrySnapshot({
     env: ACTIVE_ENV
-  })
+  }).find(item => item.name === 'mcp-web')
   assert.equal(server.errorCount, 0)
   assert.equal(server.fallbackCount, 0)
   assert.equal(server.circuitBreaker.state, 'closed')

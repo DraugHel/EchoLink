@@ -57,8 +57,14 @@ test('Registry zeigt nur bekannte Server und redigiert URL sowie Token', async (
     forceDiscovery: true
   })
 
-  assert.equal(statuses.length, 1)
-  const server = statuses[0]
+  assert.equal(statuses.length, 2)
+  const server = statuses.find(item => item.name === 'mcp-web')
+  const github = statuses.find(item => item.name === 'github')
+  assert.ok(server)
+  assert.ok(github)
+  assert.equal(github.mode, 'disabled')
+  assert.equal(github.configured, false)
+  assert.equal(github.reachable, null)
   assert.equal(server.name, 'mcp-web')
   assert.equal(server.url, 'http://127.0.0.1:3011/mcp')
   assert.equal(server.mode, 'active')
@@ -143,7 +149,8 @@ test('Registry zählt Erfolg, Fehler, Fallback und öffnet den Circuit Breaker',
     }
   )
 
-  const [server] = getMcpRegistrySnapshot({ env: ENV })
+  const server = getMcpRegistrySnapshot({ env: ENV })
+    .find(item => item.name === 'mcp-web')
   assert.equal(server.successCount, 1)
   assert.equal(server.errorCount, 1)
   assert.equal(server.fallbackCount, 1)

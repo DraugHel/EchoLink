@@ -1,5 +1,4 @@
-import { Client } from '@modelcontextprotocol/sdk/client/index.js'
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
+import { connectMcpHttpClient } from './mcpHttpClient.js'
 
 export function mcpWebConfig(env = process.env) {
   const token =
@@ -16,41 +15,22 @@ export function mcpWebConfig(env = process.env) {
     url:
       env.MCP_WEB_URL ||
       'http://127.0.0.1:3011/mcp',
-    token
+    headers: {
+      Authorization: `Bearer ${token}`
+    }
   }
 }
 
 export async function connectMcpWebClient({
   url,
-  token,
+  headers,
   name = 'echolink-mcp-web-client',
   signal
 }) {
-  const client = new Client({
+  return connectMcpHttpClient({
+    url,
+    headers,
     name,
-    version: '1.0.0'
+    signal
   })
-
-  const transport =
-    new StreamableHTTPClientTransport(
-      new URL(url),
-      {
-        requestInit: {
-          headers: {
-            Authorization: `Bearer ${token}`
-          },
-          ...(signal ? { signal } : {})
-        }
-      }
-    )
-
-  await client.connect(transport)
-
-  return {
-    client,
-    transport,
-    async close() {
-      await client.close()
-    }
-  }
 }
