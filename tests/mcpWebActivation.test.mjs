@@ -7,6 +7,9 @@ import {
   mcpWebExecutionMode,
   resetMcpWebCircuitForTests
 } from '../server/lib/readOnlyWebRuntime.js'
+import {
+  getMcpRegistrySnapshot
+} from '../server/lib/mcpRegistry.js'
 
 const ACTIVE_ENV = {
   MCP_WEB_MODE: 'active',
@@ -19,6 +22,14 @@ const ACTIVE_ENV = {
 function connectionWith(result) {
   return async () => ({
     client: {
+      async listTools() {
+        return {
+          tools: [
+            { name: 'web_search' },
+            { name: 'firecrawl_scrape' }
+          ]
+        }
+      },
       async callTool() {
         return result
       }
@@ -84,6 +95,13 @@ test('Websuche verwendet MCP als primären Backend-Pfad', async () => {
     ['https://example.com/']
   )
   assert.equal(directCalls, 0)
+
+  const [server] = getMcpRegistrySnapshot({
+    env: ACTIVE_ENV
+  })
+  assert.equal(server.successCount, 1)
+  assert.equal(server.errorCount, 0)
+  assert.equal(server.fallbackCount, 0)
 })
 
 test('MCP-Ausfall fällt kontrolliert auf direkte Websuche zurück', async () => {
@@ -117,6 +135,62 @@ test('MCP-Ausfall fällt kontrolliert auf direkte Websuche zurück', async () =>
   assert.equal(result.error, false)
   assert.equal(directCalls, 1)
   assert.match(result.text, /Fallback works/)
+
+  const [server] = getMcpRegistrySnapshot({
+    env: ACTIVE_ENV
+  })
+  assert.equal(server.errorCount, 1)
+  assert.equal(server.fallbackCount, 1)
+  assert.equal(server.circuitBreaker.state, 'open')
+})
+
+test('MCP-Timeout fällt zurück und wird nicht als Nutzer-Abbruch behandelt', async () => {
+  let directCalls = 0
+  const timeoutEnv = {
+    ...ACTIVE_ENV,
+    MCP_WEB_SEARCH_TIMEOUT_MS: '5'
+  }
+
+  const result = await executeWebSearch(
+    'Timeout fallback test',
+    {
+      env: timeoutEnv,
+      connectFn: async ({ signal }) =>
+        await new Promise((resolve, reject) => {
+          signal.addEventListener(
+            'abort',
+            () => {
+              const error = new Error('transport aborted')
+              error.name = 'AbortError'
+              reject(error)
+            },
+            { once: true }
+          )
+        }),
+      searchFn: async query => {
+        directCalls += 1
+        return {
+          query,
+          results: [{
+            title: 'Direct after timeout',
+            snippet: 'Timeout fallback works',
+            source: 'https://example.net/'
+          }]
+        }
+      }
+    }
+  )
+
+  assert.equal(result.backend, 'direct')
+  assert.equal(result.fallback, true)
+  assert.equal(directCalls, 1)
+
+  const [server] = getMcpRegistrySnapshot({
+    env: timeoutEnv
+  })
+  assert.equal(server.errorCount, 1)
+  assert.equal(server.fallbackCount, 1)
+  assert.match(server.lastError, /timed out/)
 })
 
 test('Chat-Abbruch startet nach MCP-Abbruch keinen direkten Fallback', async () => {
@@ -150,6 +224,13 @@ test('Chat-Abbruch startet nach MCP-Abbruch keinen direkten Fallback', async () 
   )
 
   assert.equal(directCalls, 0)
+
+  const [server] = getMcpRegistrySnapshot({
+    env: ACTIVE_ENV
+  })
+  assert.equal(server.errorCount, 0)
+  assert.equal(server.fallbackCount, 0)
+  assert.equal(server.circuitBreaker.state, 'closed')
 })
 
 test('Scrape validiert öffentliche URLs vor MCP und Fallback', async () => {

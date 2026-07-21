@@ -171,9 +171,12 @@ echo "===== SERVER-SYNTAX ====="
 node --check server/index.js
 node --check server/worker.js
 node --check server/mcp/webServer.js
+node --check server/lib/mcpRegistry.js
 node --check server/lib/readOnlyWebRuntime.js
+node --check server/routes/system.js
 node --check scripts/mcp-web-smoke.js
 node --check scripts/mcp-web-runtime-smoke.js
+node --check scripts/mcp-registry-smoke.js
 
 echo "===== NEUSTART ====="
 pm2 restart echolink --update-env
@@ -199,6 +202,7 @@ curl -fsS --max-time 10 \
   >/dev/null
 
 timeout 20s node scripts/mcp-web-smoke.js --list-only
+timeout 20s node scripts/mcp-registry-smoke.js
 
 MCP_RUNTIME_MODE="$(
   node --input-type=module -e "

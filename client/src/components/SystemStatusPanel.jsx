@@ -17,6 +17,29 @@ function backupAge(backup) {
   return `vor ${formatDuration(backup.ageSeconds)}`
 }
 
+function formatTimestamp(value) {
+  if (!value) return 'Noch nie'
+
+  const date = new Date(value)
+
+  if (Number.isNaN(date.getTime())) return 'Unbekannt'
+
+  return date.toLocaleString('de-AT', {
+    dateStyle: 'short',
+    timeStyle: 'short'
+  })
+}
+
+function mcpState(server) {
+  if (server?.reachable === true) return 'Erreichbar'
+  if (server?.reachable === false) return 'Nicht erreichbar'
+  return 'Unbekannt'
+}
+
+function booleanLabel(value) {
+  return value ? 'Ja' : 'Nein'
+}
+
 function Metric({
   label,
   value,
@@ -72,8 +95,18 @@ export default function SystemStatusPanel({
         app.status !== 'online'
     )
 
+  const mcpWarning =
+    (status?.mcpServers || []).some(server =>
+      server.mode === 'active' &&
+      (
+        server.reachable !== true ||
+        server.circuitBreaker?.state === 'open'
+      )
+    )
+
   const systemWarning =
     monitoredProcessWarning ||
+    mcpWarning ||
     Number(status?.memory?.usedPercent) >= 90 ||
     Number(status?.disk) >= 90 ||
     Number(status?.cpu) >= 95 ||
@@ -98,7 +131,7 @@ export default function SystemStatusPanel({
             </strong>
 
             <span style={styles.subtitle}>
-              Prozesse, Ressourcen und Backups
+              Prozesse, Ressourcen, MCP und Backups
             </span>
           </div>
 
@@ -217,6 +250,136 @@ export default function SystemStatusPanel({
                       : 'Ausgeblendet'}
                   </span>
                 </button>
+              )
+            })}
+          </div>
+
+          <div style={styles.sectionTitle}>
+            MCP-Server
+          </div>
+
+          <div style={styles.mcpList}>
+            {(status?.mcpServers || []).length === 0 && (
+              <div style={styles.emptyState}>
+                Keine MCP-Server registriert
+              </div>
+            )}
+
+            {(status?.mcpServers || []).map(server => {
+              const warning =
+                server.mode === 'active' &&
+                (
+                  server.reachable !== true ||
+                  server.circuitBreaker?.state === 'open'
+                )
+
+              return (
+                <article
+                  key={server.name}
+                  style={styles.mcpCard}
+                >
+                  <div style={styles.mcpHeader}>
+                    <span
+                      style={{
+                        ...styles.processDot,
+                        background: warning
+                          ? 'var(--danger)'
+                          : 'var(--accent)'
+                      }}
+                    />
+
+                    <strong style={styles.mcpName}>
+                      {server.name}
+                    </strong>
+
+                    <span style={styles.mcpMode}>
+                      {server.mode}
+                    </span>
+                  </div>
+
+                  <div style={styles.mcpUrl}>
+                    {server.url || '–'}
+                  </div>
+
+                  <div style={styles.mcpMetricGrid}>
+                    <Metric
+                      label="Status"
+                      value={mcpState(server)}
+                      warning={warning}
+                    />
+                    <Metric
+                      label="Latenz"
+                      value={server.latencyMs == null
+                        ? '–'
+                        : `${server.latencyMs} ms`}
+                    />
+                    <Metric
+                      label="Letzte Verbindung"
+                      value={formatTimestamp(
+                        server.lastSuccessfulConnection
+                      )}
+                    />
+                    <Metric
+                      label="Circuit Breaker"
+                      value={
+                        server.circuitBreaker?.state || '–'
+                      }
+                      detail={
+                        server.circuitBreaker?.openUntil
+                          ? `bis ${formatTimestamp(
+                              server.circuitBreaker.openUntil
+                            )}`
+                          : ''
+                      }
+                      warning={
+                        server.circuitBreaker?.state === 'open'
+                      }
+                    />
+                  </div>
+
+                  <div style={styles.counterRow}>
+                    <span>Erfolge {server.successCount ?? 0}</span>
+                    <span>Fehler {server.errorCount ?? 0}</span>
+                    <span>Fallbacks {server.fallbackCount ?? 0}</span>
+                  </div>
+
+                  <div style={styles.toolList}>
+                    {(server.tools || []).map(tool => (
+                      <div
+                        key={tool.name}
+                        style={styles.toolCard}
+                      >
+                        <strong style={styles.toolName}>
+                          {tool.name}
+                        </strong>
+                        <span style={styles.toolMeta}>
+                          {tool.enabled
+                            ? 'Aktiviert'
+                            : 'Deaktiviert'}
+                          {' · '}
+                          {tool.discovered
+                            ? 'Entdeckt'
+                            : 'Nicht entdeckt'}
+                          {' · '}
+                          {tool.timeoutMs ?? '–'} ms
+                        </span>
+                        <span style={styles.toolFlags}>
+                          Read-only {booleanLabel(tool.readOnly)}
+                          {' · '}
+                          Fallback {booleanLabel(
+                            tool.fallbackAllowed
+                          )}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+
+                  {server.lastError && (
+                    <div style={styles.mcpError}>
+                      Letzter Fehler: {server.lastError}
+                    </div>
+                  )}
+                </article>
               )
             })}
           </div>
@@ -385,6 +548,105 @@ const styles = {
   monitorState: {
     color: 'var(--text2)',
     fontSize: 10
+  },
+  mcpList: {
+    display: 'grid',
+    gap: 9,
+    marginBottom: 22
+  },
+  mcpCard: {
+    minWidth: 0,
+    display: 'grid',
+    gap: 10,
+    padding: 12,
+    border: '1px solid var(--border)',
+    borderRadius: 11,
+    background: 'var(--bg3)'
+  },
+  mcpHeader: {
+    minWidth: 0,
+    display: 'grid',
+    gridTemplateColumns: '10px minmax(0, 1fr) auto',
+    alignItems: 'center',
+    gap: 9
+  },
+  mcpName: {
+    minWidth: 0,
+    color: 'var(--text1)',
+    fontSize: 13,
+    overflowWrap: 'anywhere'
+  },
+  mcpMode: {
+    padding: '3px 7px',
+    border: '1px solid var(--border)',
+    borderRadius: 999,
+    color: 'var(--text2)',
+    fontSize: 9,
+    textTransform: 'uppercase'
+  },
+  mcpUrl: {
+    color: 'var(--text3)',
+    fontSize: 10,
+    overflowWrap: 'anywhere'
+  },
+  mcpMetricGrid: {
+    display: 'grid',
+    gridTemplateColumns:
+      'repeat(auto-fit, minmax(130px, 1fr))',
+    gap: 7
+  },
+  counterRow: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: '5px 12px',
+    color: 'var(--text2)',
+    fontSize: 10
+  },
+  toolList: {
+    display: 'grid',
+    gridTemplateColumns:
+      'repeat(auto-fit, minmax(210px, 1fr))',
+    gap: 7
+  },
+  toolCard: {
+    minWidth: 0,
+    display: 'grid',
+    gap: 3,
+    padding: 9,
+    border: '1px solid var(--border)',
+    borderRadius: 9,
+    background: 'var(--bg2)'
+  },
+  toolName: {
+    color: 'var(--text1)',
+    fontSize: 11,
+    overflowWrap: 'anywhere'
+  },
+  toolMeta: {
+    color: 'var(--text2)',
+    fontSize: 9,
+    overflowWrap: 'anywhere'
+  },
+  toolFlags: {
+    color: 'var(--text3)',
+    fontSize: 9,
+    overflowWrap: 'anywhere'
+  },
+  mcpError: {
+    padding: 9,
+    border: '1px solid var(--border)',
+    borderRadius: 9,
+    color: 'var(--danger)',
+    fontSize: 10,
+    overflowWrap: 'anywhere'
+  },
+  emptyState: {
+    padding: 12,
+    border: '1px dashed var(--border)',
+    borderRadius: 10,
+    color: 'var(--text3)',
+    fontSize: 11,
+    textAlign: 'center'
   },
   backupGrid: {
     display: 'grid',

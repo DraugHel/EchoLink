@@ -4,6 +4,9 @@ import { exec } from 'child_process'
 import { promises as fs } from 'fs'
 import path from 'path'
 import os from 'os'
+import {
+  getMcpRegistryStatus
+} from '../lib/mcpRegistry.js'
 
 const router = Router()
 
@@ -189,7 +192,8 @@ router.get(
         jlist,
         dfOutput,
         databaseBackup,
-        fullBackup
+        fullBackup,
+        mcpServers
       ] = await Promise.all([
         run('pm2 jlist'),
         run('df -Pk /'),
@@ -201,7 +205,8 @@ router.get(
           FULL_BACKUP_ROOT,
           name => name.endsWith('.tar.gz.enc'),
           1
-        )
+        ),
+        getMcpRegistryStatus()
       ])
 
       let apps = []
@@ -305,7 +310,8 @@ router.get(
         backups: {
           database: databaseBackup,
           full: fullBackup
-        }
+        },
+        mcpServers
       }
 
       cache = {
