@@ -40,6 +40,10 @@ import {
   executeGitHubTool
 } from '../lib/githubTools.js'
 import {
+  executePlaywrightTool,
+  PLAYWRIGHT_TOOL_NAMES
+} from '../lib/playwrightTools.js'
+import {
   GMAIL_TOOL_NAMES,
   GMAIL_WRITE_TOOL_NAMES,
   executeGmailTool,
@@ -485,6 +489,60 @@ async function executeTool(
       })}\n\n`)
 
       return `GitHub MCP error: ${message}`
+    }
+  }
+
+  if (PLAYWRIGHT_TOOL_NAMES.has(name)) {
+    const query = name === 'browser_type'
+      ? {
+          element: args.element,
+          target: args.target,
+          textLength: typeof args.text === 'string'
+            ? args.text.length
+            : 0
+        }
+      : args
+
+    res.write(`data: ${JSON.stringify({
+      tool: name,
+      status: 'running',
+      query
+    })}\n\n`)
+
+    try {
+      const result = await executePlaywrightTool(
+        name,
+        args,
+        {
+          signal: abortSignal,
+          source: 'chat'
+        }
+      )
+
+      res.write(`data: ${JSON.stringify({
+        tool: name,
+        status: 'done'
+      })}\n\n`)
+
+      return result
+    } catch (error) {
+      if (
+        abortSignal?.aborted ||
+        error?.name === 'AbortError'
+      ) {
+        throw error
+      }
+
+      const message =
+        error?.message || String(error)
+
+      res.write(`data: ${JSON.stringify({
+        tool: name,
+        status: 'error',
+        error: message
+      })}\n\n`)
+
+      return `Playwright MCP error: ${message}`
     }
   }
 

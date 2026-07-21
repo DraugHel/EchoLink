@@ -16,7 +16,9 @@
     "mcp:web:runtime-smoke": "node scripts/mcp-web-runtime-smoke.js",
     "mcp:registry:smoke": "node scripts/mcp-registry-smoke.js",
     "mcp:github:smoke": "node scripts/mcp-github-smoke.js",
-    "mcp:github:configure": "bash scripts/configure-github-mcp.sh"
+    "mcp:github:configure": "bash scripts/configure-github-mcp.sh",
+    "mcp:playwright": "node server/mcp/playwrightLauncher.js",
+    "mcp:playwright:smoke": "node scripts/mcp-playwright-smoke.js"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.29.0",

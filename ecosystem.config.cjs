@@ -39,5 +39,15 @@ You're allowed to have humor, sarcasm, personality. You're not a robot.`
       MCP_WEB_HOST: '127.0.0.1',
       MCP_WEB_PORT: 3011
     }
+  }, {
+    name: 'echolink-mcp-playwright',
+    script: 'server/mcp/playwrightLauncher.js',
+    cwd: '/root/echolink',
+    kill_timeout: 15000,
+    env: {
+      NODE_ENV: 'production',
+      MCP_PLAYWRIGHT_HOST: '127.0.0.1',
+      MCP_PLAYWRIGHT_PORT: 3012
+    }
   }]
 }

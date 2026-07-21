@@ -10,6 +10,14 @@ import {
   GITHUB_MCP_OFFICIAL_TOOLS,
   GITHUB_MCP_SERVER
 } from './githubMcpClient.js'
+import {
+  connectPlaywrightMcpClient,
+  playwrightMcpConfig,
+  playwrightMcpConfigured,
+  playwrightMcpExecutionMode,
+  PLAYWRIGHT_MCP_SERVER,
+  PLAYWRIGHT_MCP_TOOL_SPECS
+} from './playwrightMcpClient.js'
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 20_000
 const DEFAULT_FALLBACK_COOLDOWN_MS = 15_000
@@ -18,11 +26,12 @@ const MCP_WEB_SERVER = 'mcp-web'
 
 function toolDefinition({
   timeoutEnv,
-  fallbackAllowed = false
+  fallbackAllowed = false,
+  readOnly = true
 }) {
   return Object.freeze({
     enabled: true,
-    readOnly: true,
+    readOnly,
     fallbackAllowed,
     timeoutEnv
   })
@@ -37,13 +46,27 @@ const githubTools = Object.fromEntries(
   ])
 )
 
+const playwrightTools = Object.fromEntries(
+  PLAYWRIGHT_MCP_TOOL_SPECS.map(tool => [
+    tool.name,
+    toolDefinition({
+      timeoutEnv:
+        'MCP_PLAYWRIGHT_TOOL_TIMEOUT_MS',
+      readOnly: tool.readOnly
+    })
+  ])
+)
+
 const SERVER_DEFINITIONS = Object.freeze({
   [MCP_WEB_SERVER]: Object.freeze({
     id: MCP_WEB_SERVER,
     name: 'mcp-web',
+    urlEnv: 'MCP_WEB_URL',
     defaultUrl: 'http://127.0.0.1:3011/mcp',
     mode: mcpWebExecutionMode,
     configured: () => true,
+    notConfiguredMessage:
+      'Nicht konfiguriert',
     connectionConfig: mcpWebConfig,
     connect: connectMcpWebClient,
     requestTimeoutEnv: 'MCP_WEB_REQUEST_TIMEOUT_MS',
@@ -63,10 +86,13 @@ const SERVER_DEFINITIONS = Object.freeze({
   [GITHUB_MCP_SERVER]: Object.freeze({
     id: GITHUB_MCP_SERVER,
     name: 'github',
+    urlEnv: 'GITHUB_MCP_URL',
     defaultUrl:
       'https://api.githubcopilot.com/mcp/',
     mode: githubMcpExecutionMode,
     configured: githubMcpConfigured,
+    notConfiguredMessage:
+      'Nicht konfiguriert: Zugangstoken fehlt',
     connectionConfig: githubMcpConfig,
     connect: connectGitHubMcpClient,
     requestTimeoutEnv:
@@ -74,6 +100,23 @@ const SERVER_DEFINITIONS = Object.freeze({
     fallbackCooldownEnv:
       'GITHUB_MCP_FALLBACK_COOLDOWN_MS',
     tools: Object.freeze(githubTools)
+  }),
+  [PLAYWRIGHT_MCP_SERVER]: Object.freeze({
+    id: PLAYWRIGHT_MCP_SERVER,
+    name: 'playwright',
+    urlEnv: 'MCP_PLAYWRIGHT_URL',
+    defaultUrl: 'http://127.0.0.1:3012/mcp',
+    mode: playwrightMcpExecutionMode,
+    configured: playwrightMcpConfigured,
+    notConfiguredMessage:
+      'Nicht konfiguriert: lokale URL oder Origin-Allowlist ungültig',
+    connectionConfig: playwrightMcpConfig,
+    connect: connectPlaywrightMcpClient,
+    requestTimeoutEnv:
+      'MCP_PLAYWRIGHT_REQUEST_TIMEOUT_MS',
+    fallbackCooldownEnv:
+      'MCP_PLAYWRIGHT_FALLBACK_COOLDOWN_MS',
+    tools: Object.freeze(playwrightTools)
   })
 })
 
@@ -173,11 +216,11 @@ function serverConfig(serverId, env = process.env) {
     configured,
     readOnly: tools.every(tool => tool.readOnly),
     url: String(
-      env[serverId === MCP_WEB_SERVER
-        ? 'MCP_WEB_URL'
-        : 'GITHUB_MCP_URL'] ||
+      env[definition.urlEnv] ||
       definition.defaultUrl
     ),
+    notConfiguredMessage:
+      definition.notConfiguredMessage,
     requestTimeoutMs,
     fallbackCooldownMs,
     discoveryCacheMs: positiveInteger(
@@ -446,7 +489,7 @@ export async function discoverMcpServer(
 
   if (!config.configured) {
     state.reachable = false
-    state.lastError = 'Nicht konfiguriert: Zugangstoken fehlt'
+    state.lastError = config.notConfiguredMessage
     state.discoveredTools = []
     return publicStatus(serverId, env, nowValue)
   }

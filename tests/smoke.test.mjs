@@ -23,6 +23,22 @@ const files = {
   responses: path.join(
     root,
     'server/providers/openai-responses.js'
+  ),
+  playwrightClient: path.join(
+    root,
+    'server/lib/playwrightMcpClient.js'
+  ),
+  playwrightTools: path.join(
+    root,
+    'server/lib/playwrightTools.js'
+  ),
+  playwrightLauncher: path.join(
+    root,
+    'server/mcp/playwrightLauncher.js'
+  ),
+  playwrightSmoke: path.join(
+    root,
+    'scripts/mcp-playwright-smoke.js'
   )
 }
 

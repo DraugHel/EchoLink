@@ -175,14 +175,60 @@ node --check server/lib/mcpHttpClient.js
 node --check server/lib/mcpWebClient.js
 node --check server/lib/githubMcpClient.js
 node --check server/lib/githubTools.js
+node --check server/lib/playwrightMcpClient.js
+node --check server/lib/playwrightTools.js
 node --check server/lib/mcpRegistry.js
 node --check server/lib/readOnlyWebRuntime.js
+node --check server/mcp/playwrightLauncher.js
 node --check server/routes/system.js
 node --check scripts/mcp-web-smoke.js
 node --check scripts/mcp-web-runtime-smoke.js
 node --check scripts/mcp-registry-smoke.js
 node --check scripts/mcp-github-smoke.js
+node --check scripts/mcp-playwright-smoke.js
 bash -n scripts/configure-github-mcp.sh
+
+MCP_PLAYWRIGHT_MODE="$(
+  node --input-type=module -e "
+    import './server/loadEnv.js'
+    import { playwrightMcpExecutionMode } from './server/lib/playwrightMcpClient.js'
+    process.stdout.write(playwrightMcpExecutionMode())
+  "
+)"
+
+if [[ "$MCP_PLAYWRIGHT_MODE" == "active" ]]; then
+  PLAYWRIGHT_IMAGE="$(
+    node --input-type=module -e "
+      import { PLAYWRIGHT_MCP_IMAGE } from './server/lib/playwrightMcpClient.js'
+      process.stdout.write(PLAYWRIGHT_MCP_IMAGE)
+    "
+  )"
+
+  if ! command -v docker >/dev/null 2>&1; then
+    echo "Fehler: Docker fehlt für Playwright MCP."
+    exit 1
+  fi
+
+  if ! docker version >/dev/null 2>&1; then
+    echo "Fehler: Docker-Dienst ist nicht erreichbar."
+    exit 1
+  fi
+
+  if ! docker image inspect \
+    "$PLAYWRIGHT_IMAGE" \
+    >/dev/null 2>&1; then
+    echo "===== PLAYWRIGHT MCP IMAGE ====="
+    docker pull "$PLAYWRIGHT_IMAGE"
+  fi
+
+  PLAYWRIGHT_IMAGE_ID="$(
+    docker image inspect \
+      --format '{{.Id}}' \
+      "$PLAYWRIGHT_IMAGE"
+  )"
+
+  echo "Playwright MCP Image geprüft: $PLAYWRIGHT_IMAGE_ID"
+fi
 
 echo "===== NEUSTART ====="
 pm2 restart echolink --update-env
@@ -194,6 +240,18 @@ else
   pm2 start ecosystem.config.cjs \
     --only echolink-mcp-web \
     --update-env
+fi
+
+if [[ "$MCP_PLAYWRIGHT_MODE" == "active" ]]; then
+  if pm2 describe echolink-mcp-playwright >/dev/null 2>&1; then
+    pm2 restart echolink-mcp-playwright --update-env
+  else
+    pm2 start ecosystem.config.cjs \
+      --only echolink-mcp-playwright \
+      --update-env
+  fi
+elif pm2 describe echolink-mcp-playwright >/dev/null 2>&1; then
+  pm2 delete echolink-mcp-playwright
 fi
 
 sleep 4
@@ -210,6 +268,7 @@ curl -fsS --max-time 10 \
 timeout 20s node scripts/mcp-web-smoke.js --list-only
 timeout 20s node scripts/mcp-registry-smoke.js
 timeout 45s node scripts/mcp-github-smoke.js
+timeout 60s node scripts/mcp-playwright-smoke.js
 
 MCP_RUNTIME_MODE="$(
   node --input-type=module -e "

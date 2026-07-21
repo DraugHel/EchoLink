@@ -57,14 +57,21 @@ test('Registry zeigt nur bekannte Server und redigiert URL sowie Token', async (
     forceDiscovery: true
   })
 
-  assert.equal(statuses.length, 2)
+  assert.equal(statuses.length, 3)
   const server = statuses.find(item => item.name === 'mcp-web')
   const github = statuses.find(item => item.name === 'github')
+  const playwright = statuses.find(
+    item => item.name === 'playwright'
+  )
   assert.ok(server)
   assert.ok(github)
+  assert.ok(playwright)
   assert.equal(github.mode, 'disabled')
   assert.equal(github.configured, false)
   assert.equal(github.reachable, null)
+  assert.equal(playwright.mode, 'disabled')
+  assert.equal(playwright.configured, true)
+  assert.equal(playwright.reachable, null)
   assert.equal(server.name, 'mcp-web')
   assert.equal(server.url, 'http://127.0.0.1:3011/mcp')
   assert.equal(server.mode, 'active')
