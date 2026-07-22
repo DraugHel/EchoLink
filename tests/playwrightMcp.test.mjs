@@ -10,6 +10,7 @@ import {
   playwrightMcpExecutionMode
 } from '../server/lib/playwrightMcpClient.js'
 import {
+  createPlaywrightToolSession,
   executePlaywrightTool,
   PLAYWRIGHT_TOOLS,
   PLAYWRIGHT_TOOL_NAMES,
@@ -215,6 +216,180 @@ test('Navigation wird vor der MCP-Verbindung auf die Origin-Allowlist begrenzt',
   assert.equal(connections, 1)
 })
 
+test('Ein Playwright-Lauf behält eine serialisierte MCP-Sitzung und schließt sie sicher', async () => {
+  let connections = 0
+  let closes = 0
+  let activeCalls = 0
+  let maximumActiveCalls = 0
+  let currentUrl = 'about:blank'
+  const calls = []
+
+  const connectFn = async () => {
+    connections += 1
+
+    return {
+      client: {
+        async listTools() {
+          return {
+            tools: PLAYWRIGHT_MCP_OFFICIAL_TOOLS
+              .map(name => ({ name }))
+          }
+        },
+        async callTool(request) {
+          calls.push(request.name)
+          activeCalls += 1
+          maximumActiveCalls = Math.max(
+            maximumActiveCalls,
+            activeCalls
+          )
+
+          try {
+            await new Promise(resolve =>
+              setTimeout(resolve, 5)
+            )
+
+            if (request.name === 'browser_navigate') {
+              currentUrl = request.arguments.url
+            }
+
+            const text = request.name ===
+              'browser_snapshot'
+              ? [
+                  '### Page state',
+                  `- Page URL: ${currentUrl}`,
+                  '- Page Title: EchoLink'
+                ].join('\n')
+              : JSON.stringify(request)
+
+            return {
+              content: [{ type: 'text', text }]
+            }
+          } finally {
+            activeCalls -= 1
+          }
+        }
+      },
+      async close() {
+        closes += 1
+      }
+    }
+  }
+
+  const session = createPlaywrightToolSession({
+    env: ENV,
+    connectFn,
+    source: 'session-test'
+  })
+
+  const [, snapshot] = await Promise.all([
+    session.execute(
+      'browser_navigate',
+      { url: 'http://127.0.0.1:3000/' }
+    ),
+    session.execute('browser_snapshot', { depth: 8 })
+  ])
+
+  assert.equal(connections, 1)
+  assert.equal(maximumActiveCalls, 1)
+  assert.match(
+    snapshot,
+    /Page URL: http:\/\/127\.0\.0\.1:3000\//
+  )
+
+  await session.close()
+  await session.close()
+
+  assert.deepEqual(
+    calls,
+    [
+      'browser_navigate',
+      'browser_snapshot',
+      'browser_close'
+    ]
+  )
+  assert.equal(closes, 1)
+
+  await assert.rejects(
+    session.execute('browser_snapshot', {}),
+    error => error?.name ===
+      'PlaywrightMcpSessionClosedError'
+  )
+})
+
+test('Ein abgebrochener Playwright-Lauf schließt seine gehaltene Verbindung', async () => {
+  const controller = new AbortController()
+  let connections = 0
+  let closes = 0
+  let markStarted
+  const started = new Promise(resolve => {
+    markStarted = resolve
+  })
+
+  const session = createPlaywrightToolSession({
+    env: ENV,
+    signal: controller.signal,
+    connectFn: async () => {
+      connections += 1
+
+      return {
+        client: {
+          async listTools() {
+            return {
+              tools: PLAYWRIGHT_MCP_OFFICIAL_TOOLS
+                .map(name => ({ name }))
+            }
+          },
+          async callTool(
+            request,
+            _outputSchema,
+            options
+          ) {
+            if (request.name === 'browser_close') {
+              return { content: [] }
+            }
+
+            markStarted()
+
+            return new Promise((resolve, reject) => {
+              const onAbort = () => {
+                const error = new Error('aborted')
+                error.name = 'AbortError'
+                reject(error)
+              }
+
+              options.signal.addEventListener(
+                'abort',
+                onAbort,
+                { once: true }
+              )
+            })
+          }
+        },
+        async close() {
+          closes += 1
+        }
+      }
+    }
+  })
+
+  const pending = session.execute(
+    'browser_navigate',
+    { url: 'http://127.0.0.1:3000/' }
+  )
+
+  await started
+  controller.abort()
+
+  await assert.rejects(
+    pending,
+    error => error?.name === 'AbortError'
+  )
+  await session.close()
+
+  assert.equal(connections, 1)
+  assert.equal(closes, 1)
+})
+
 test('Browser-Aktionen entfernen Datei- und Submit-Funktionen und blockieren Gefahren', () => {
   assert.deepEqual(
     sanitizePlaywrightToolArgs(
@@ -398,8 +573,12 @@ test('Chat, Agent, PM2, Deploy und Container-Härtung sind vollständig verdraht
   ])
 
   assert.match(chat, /PLAYWRIGHT_TOOL_NAMES\.has\(name\)/)
+  assert.match(chat, /createPlaywrightToolSession\(/)
+  assert.match(chat, /await playwrightSession\.close\(\)/)
   assert.match(agent, /playwrightMcpEnabled\(\)/)
   assert.match(agent, /source: 'scheduled-agent'/)
+  assert.match(agent, /createPlaywrightToolSession\(/)
+  assert.match(agent, /await playwrightSession\.close\(\)/)
   assert.match(registry, /playwrightMcpEnabled\(\)/)
   assert.match(ecosystem, /echolink-mcp-playwright/)
   assert.match(deploy, /mcp-playwright-smoke\.js/)
@@ -419,7 +598,6 @@ test('Chat, Agent, PM2, Deploy und Container-Härtung sind vollständig verdraht
     '--security-opt=no-new-privileges:true',
     '--pull=never',
     '--isolated',
-    '--shared-browser-context',
     '--block-service-workers',
     '--init-page',
     '/opt/echolink/playwrightInitPage.ts',
@@ -436,7 +614,7 @@ test('Chat, Agent, PM2, Deploy und Container-Härtung sind vollständig verdraht
 
   assert.doesNotMatch(
     launcher,
-    /allow-unrestricted-file-access|user-data-dir|storage-state|grant-permissions/
+    /allow-unrestricted-file-access|user-data-dir|storage-state|grant-permissions|shared-browser-context/
   )
   assert.match(initPage, /context\.route\('\*\*\/\*'/)
   assert.match(initPage, /origins\.has\(url\.origin\)/)
@@ -448,6 +626,10 @@ test('Chat, Agent, PM2, Deploy und Container-Härtung sind vollständig verdraht
   assert.match(initPage, /document\.addEventListener\('submit'/)
   assert.match(initPage, /anchor\.hasAttribute\('download'\)/)
   assert.match(smoke, /browser_snapshot/)
+  assert.match(smoke, /createPlaywrightToolSession/)
+  assert.match(smoke, /about:blank/)
+  assert.match(smoke, /Page URL:/)
+  assert.match(smoke, /Page Title:/)
   assert.doesNotMatch(
     smoke,
     /executePlaywrightTool\(\s*['"]browser_(?:run_code|evaluate|file_upload|take_screenshot)/

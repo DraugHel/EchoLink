@@ -13,6 +13,7 @@ import {
 } from './githubTools.js'
 import { githubMcpEnabled } from './githubMcpClient.js'
 import {
+  createPlaywrightToolSession,
   executePlaywrightTool,
   PLAYWRIGHT_TOOLS,
   PLAYWRIGHT_TOOL_NAMES
@@ -163,7 +164,8 @@ function finalizationPrompt(reason) {
 async function executeAgentTool(
   toolCall,
   allowedUrls,
-  abortSignal
+  abortSignal,
+  playwrightSession
 ) {
   const name = toolCall?.function?.name
   const args = parseArguments(toolCall)
@@ -234,14 +236,19 @@ async function executeAgentTool(
 
   if (PLAYWRIGHT_TOOL_NAMES.has(name)) {
     try {
-      return await executePlaywrightTool(
-        name,
-        args,
-        {
-          signal: abortSignal,
-          source: 'scheduled-agent'
-        }
-      )
+      return playwrightSession
+        ? await playwrightSession.execute(
+            name,
+            args
+          )
+        : await executePlaywrightTool(
+            name,
+            args,
+            {
+              signal: abortSignal,
+              source: 'scheduled-agent'
+            }
+          )
     } catch (error) {
       if (
         abortSignal?.aborted ||
@@ -358,6 +365,11 @@ export async function runScheduledAgent({
     'openai/gpt-5.6-luna'
 
   const controller = new AbortController()
+  const playwrightSession =
+    createPlaywrightToolSession({
+      signal: controller.signal,
+      source: 'scheduled-agent'
+    })
   let abortReason = ''
 
   const timeout = setTimeout(() => {
@@ -473,7 +485,8 @@ export async function runScheduledAgent({
           const result = await executeAgentTool(
             toolCall,
             allowedUrls,
-            controller.signal
+            controller.signal,
+            playwrightSession
           )
 
           emitProgress(onProgress, {
@@ -581,5 +594,6 @@ export async function runScheduledAgent({
   } finally {
     clearTimeout(timeout)
     clearInterval(controlTimer)
+    await playwrightSession.close()
   }
 }

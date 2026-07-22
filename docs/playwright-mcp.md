@@ -72,6 +72,21 @@ Der Container ist read-only, besitzt keine Host-Dateisystemfreigabe außer der
 read-only Origin-Guard-Datei, verwirft sein Profil beim Beenden und bindet den
 MCP-Port ausschließlich an `127.0.0.1`.
 
+## Sitzungsmodell
+
+Jeder Chat-Auftrag, geplante Agentenlauf und Smoke-Test erhält eine eigene
+flüchtige MCP-Sitzung mit eigenem isolierten Browserkontext. Alle Browser-Tools
+eines Laufs werden seriell über dieselbe Verbindung ausgeführt. Dadurch sehen
+Snapshot, Console und Netzwerk dieselbe zuvor geöffnete Seite, ohne dass
+parallele Läufe Tabs oder Zustand miteinander teilen.
+
+EchoLink schließt die Sitzung am Laufende auch dann, wenn das Modell
+`browser_close` nicht selbst aufruft. Bei Nutzerabbruch oder Zeitüberschreitung
+wird die gehaltene MCP-Verbindung ebenfalls freigegeben. Das beschreibbare
+Browser-Home liegt ausschließlich in einem flüchtigen, auf UID/GID 1000
+begrenzten tmpfs; ein persönliches oder dauerhaftes Browserprofil wird nicht
+verwendet.
+
 ## Prüfen
 
 ```bash
@@ -82,5 +97,9 @@ pm2 describe echolink-mcp-playwright
 
 Der Systemstatus zeigt Registry-Erreichbarkeit, Discovery, Tool-Allowlist,
 Latenz, Fehlerzähler und Circuit Breaker automatisch an.
+
+Der Smoke-Test akzeptiert nur einen Snapshot der konfigurierten EchoLink-URL
+mit Seitentitel `EchoLink`; `about:blank` wird ausdrücklich als Fehler
+behandelt.
 
 Upstream: <https://github.com/microsoft/playwright-mcp>

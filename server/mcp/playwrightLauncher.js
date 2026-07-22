@@ -168,7 +168,6 @@ const dockerArgs = [
   '--allowed-origins',
   origins.join(';'),
   '--isolated',
-  '--shared-browser-context',
   '--block-service-workers',
   '--init-page',
   '/opt/echolink/playwrightInitPage.ts',

@@ -691,6 +691,7 @@ export async function executeMcpRegistryTool(
     env = process.env,
     connectFn,
     connectors,
+    getConnection,
     signal,
     source = 'unknown',
     now = Date.now
@@ -737,6 +738,8 @@ export async function executeMcpRegistryTool(
     tool.timeoutMs
   )
   let connection
+  const retainedConnection =
+    typeof getConnection === 'function'
 
   try {
     const connectionConfig =
@@ -746,11 +749,15 @@ export async function executeMcpRegistryTool(
       connectFn,
       connectors
     )
-    connection = await connector({
+    const openConnection = () => connector({
       ...connectionConfig,
       name: `echolink-${serverId}-${toolName}`,
       signal: linked.signal
     })
+
+    connection = retainedConnection
+      ? await getConnection(openConnection)
+      : await openConnection()
 
     if (
       state.discoveredTools.length === 0 ||
@@ -848,7 +855,9 @@ export async function executeMcpRegistryTool(
     throw wrapped
   } finally {
     linked.cleanup()
-    await connection?.close?.().catch(() => {})
+    if (!retainedConnection) {
+      await connection?.close?.().catch(() => {})
+    }
   }
 }
 

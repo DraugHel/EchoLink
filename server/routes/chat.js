@@ -40,6 +40,7 @@ import {
   executeGitHubTool
 } from '../lib/githubTools.js'
 import {
+  createPlaywrightToolSession,
   executePlaywrightTool,
   PLAYWRIGHT_TOOL_NAMES
 } from '../lib/playwrightTools.js'
@@ -328,7 +329,8 @@ async function executeTool(
   res,
   conversationId,
   abortSignal,
-  checkpointCache = new Map()
+  checkpointCache = new Map(),
+  playwrightSession
 ) {
   assertAbortSignalActive(abortSignal)
   const name = toolCall.function?.name
@@ -510,14 +512,19 @@ async function executeTool(
     })}\n\n`)
 
     try {
-      const result = await executePlaywrightTool(
-        name,
-        args,
-        {
-          signal: abortSignal,
-          source: 'chat'
-        }
-      )
+      const result = playwrightSession
+        ? await playwrightSession.execute(
+            name,
+            args
+          )
+        : await executePlaywrightTool(
+            name,
+            args,
+            {
+              signal: abortSignal,
+              source: 'chat'
+            }
+          )
 
       res.write(`data: ${JSON.stringify({
         tool: name,
@@ -1647,6 +1654,11 @@ Use these as background context. If these memories fully answer the request, ans
     requestId,
     controller: abortController
   })
+  const playwrightSession =
+    createPlaywrightToolSession({
+      signal: abortController.signal,
+      source: 'chat'
+    })
 
   let clientDisconnected = false
   const onDisconnect = () => {
@@ -1722,7 +1734,8 @@ Use these as background context. If these memories fully answer the request, ans
             res,
             convo.id,
             abortController.signal,
-            checkpointCache
+            checkpointCache,
+            playwrightSession
           )
           assertChatRequestActive(activeRequest)
           if (result === '__TERMINAL_DONE__') {
@@ -1843,6 +1856,7 @@ Use these as background context. If these memories fully answer the request, ans
     }
   }
 
+  await playwrightSession.close()
   req.off('aborted', onDisconnect)
   res.off('close', onDisconnect)
   unregisterChatRequest(activeRequest)

@@ -10,7 +10,7 @@ import {
   playwrightMcpExecutionMode
 } from '../server/lib/playwrightMcpClient.js'
 import {
-  executePlaywrightTool
+  createPlaywrightToolSession
 } from '../server/lib/playwrightTools.js'
 
 const mode = playwrightMcpExecutionMode()
@@ -84,44 +84,57 @@ for (const blocked of [
 }
 
 const [origin] = playwrightAllowedOrigins()
+const expectedUrl = new URL('/', origin).toString()
+const session = createPlaywrightToolSession({
+  source: 'playwright-mcp-smoke'
+})
 let snapshot = ''
+let consoleMessages = ''
+let networkRequests = ''
 
 try {
-  await executePlaywrightTool(
+  await session.execute(
     'browser_navigate',
-    { url: `${origin}/` },
-    { source: 'playwright-mcp-smoke' }
+    { url: expectedUrl }
   )
 
-  snapshot = await executePlaywrightTool(
+  snapshot = await session.execute(
     'browser_snapshot',
-    { depth: 8 },
-    { source: 'playwright-mcp-smoke' }
+    { depth: 8 }
   )
 
-  if (!snapshot.trim()) {
+  if (
+    !snapshot.trim() ||
+    /about:blank/i.test(snapshot)
+  ) {
     throw new Error(
-      'Playwright-Snapshot ist leer'
+      'Playwright-Snapshot ist leer oder about:blank'
     )
   }
 
-  await executePlaywrightTool(
+  if (!snapshot.includes(`Page URL: ${expectedUrl}`)) {
+    throw new Error(
+      `Playwright-Snapshot enthält nicht die erwartete URL: ${expectedUrl}`
+    )
+  }
+
+  if (!/Page Title:\s*EchoLink\b/i.test(snapshot)) {
+    throw new Error(
+      'Playwright-Snapshot enthält nicht den Seitentitel EchoLink'
+    )
+  }
+
+  consoleMessages = await session.execute(
     'browser_console_messages',
-    { level: 'error' },
-    { source: 'playwright-mcp-smoke' }
+    { level: 'error' }
   )
 
-  await executePlaywrightTool(
+  networkRequests = await session.execute(
     'browser_network_requests',
-    {},
-    { source: 'playwright-mcp-smoke' }
+    {}
   )
 } finally {
-  await executePlaywrightTool(
-    'browser_close',
-    {},
-    { source: 'playwright-mcp-smoke' }
-  ).catch(() => {})
+  await session.close()
 }
 
 console.log(JSON.stringify({
@@ -132,5 +145,7 @@ console.log(JSON.stringify({
   image: 'mcr.microsoft.com/playwright/mcp:v0.0.78',
   allowedOrigin: origin,
   toolCount: discovered.length,
-  snapshotCharacters: snapshot.length
+  snapshotCharacters: snapshot.length,
+  consoleCharacters: consoleMessages.length,
+  networkCharacters: networkRequests.length
 }))

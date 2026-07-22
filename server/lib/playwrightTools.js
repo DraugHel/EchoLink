@@ -540,6 +540,7 @@ export async function executePlaywrightTool(
     source = 'chat',
     env = process.env,
     connectFn = connectPlaywrightMcpClient,
+    getConnection,
     now = Date.now
   } = {}
 ) {
@@ -569,10 +570,133 @@ export async function executePlaywrightTool(
       signal,
       env,
       connectFn,
+      getConnection,
       source,
       now
     }
   )
 
   return resultText(result, env)
+}
+
+function playwrightSessionClosedError() {
+  const error = new Error(
+    'Playwright MCP session is closed'
+  )
+  error.name = 'PlaywrightMcpSessionClosedError'
+  return error
+}
+
+export function createPlaywrightToolSession({
+  signal,
+  source = 'chat',
+  env = process.env,
+  connectFn = connectPlaywrightMcpClient,
+  now = Date.now
+} = {}) {
+  let connection = null
+  let connectionPromise = null
+  let closed = false
+  let pageClosed = false
+  let queue = Promise.resolve()
+  let closePromise = null
+
+  const getConnection = async openConnection => {
+    if (closed) throw playwrightSessionClosedError()
+
+    if (!connectionPromise) {
+      connectionPromise = Promise.resolve()
+        .then(openConnection)
+        .then(value => {
+          connection = value
+          return value
+        })
+        .catch(error => {
+          connectionPromise = null
+          throw error
+        })
+    }
+
+    return connectionPromise
+  }
+
+  const execute = (toolName, rawArgs) => {
+    if (closed) {
+      return Promise.reject(
+        playwrightSessionClosedError()
+      )
+    }
+
+    const task = queue.then(async () => {
+      if (closed) throw playwrightSessionClosedError()
+
+      const result = await executePlaywrightTool(
+        toolName,
+        rawArgs,
+        {
+          signal,
+          source,
+          env,
+          connectFn,
+          getConnection,
+          now
+        }
+      )
+
+      if (toolName === 'browser_close') {
+        pageClosed = true
+      }
+
+      return result
+    })
+
+    queue = task.catch(() => {})
+    return task
+  }
+
+  const close = () => {
+    if (closePromise) return closePromise
+
+    closed = true
+    closePromise = (async () => {
+      await queue.catch(() => {})
+
+      const activeConnection = connection ||
+        await connectionPromise?.catch(() => null)
+
+      if (
+        activeConnection &&
+        !pageClosed &&
+        !signal?.aborted
+      ) {
+        try {
+          await executePlaywrightTool(
+            'browser_close',
+            {},
+            {
+              signal,
+              source,
+              env,
+              connectFn,
+              getConnection: async () =>
+                activeConnection,
+              now
+            }
+          )
+          pageClosed = true
+        } catch {}
+      }
+
+      await activeConnection?.close?.().catch(() => {})
+      connection = null
+      connectionPromise = null
+    })()
+
+    return closePromise
+  }
+
+  return Object.freeze({
+    execute,
+    close
+  })
 }
