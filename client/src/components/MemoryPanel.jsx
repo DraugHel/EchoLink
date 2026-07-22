@@ -328,6 +328,9 @@ export default function MemoryPanel({
   const [itemFilter, setItemFilter] =
     useState('active')
 
+  const [itemSort, setItemSort] =
+    useState('created-desc')
+
   const [itemsLoading, setItemsLoading] =
     useState(true)
 
@@ -434,14 +437,26 @@ export default function MemoryPanel({
   }, [itemFilter])
 
   const visibleItems =
-    useMemo(
-      () =>
-        items.filter(
-          item =>
-            item.type !== 'legacy'
-        ),
-      [items]
-    )
+    useMemo(() => {
+      const filtered = items.filter(
+        item => item.type !== 'legacy'
+      )
+
+      return filtered.sort((a, b) => {
+        if (itemSort === 'created-asc') {
+          return (Number(a.createdAt) || 0) -
+            (Number(b.createdAt) || 0)
+        }
+
+        if (itemSort === 'importance-desc') {
+          return (Number(b.importance) || 0) -
+            (Number(a.importance) || 0)
+        }
+
+        return (Number(b.createdAt) || 0) -
+          (Number(a.createdAt) || 0)
+      })
+    }, [items, itemSort])
 
   async function createItem() {
     setActionId('create')
@@ -850,6 +865,28 @@ export default function MemoryPanel({
                   </option>
                 </select>
 
+                <select
+                  value={itemSort}
+                  onChange={event =>
+                    setItemSort(event.target.value)
+                  }
+                  aria-label="Sortierung"
+                  style={{
+                    ...fieldStyle(),
+                    width: 'auto'
+                  }}
+                >
+                  <option value="created-desc">
+                    Neueste zuerst
+                  </option>
+                  <option value="created-asc">
+                    Älteste zuerst
+                  </option>
+                  <option value="importance-desc">
+                    Wichtigste zuerst
+                  </option>
+                </select>
+
                 <button
                   type="button"
                   onClick={loadItems}
@@ -1048,6 +1085,12 @@ export default function MemoryPanel({
                               fontSize: 9
                             }}
                           >
+                            <span>
+                              Erstellt: {
+                                dateText(item.createdAt)
+                              }
+                            </span>
+
                             <span>
                               Wichtigkeit: {
                                 item.importance
