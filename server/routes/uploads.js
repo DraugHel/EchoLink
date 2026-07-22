@@ -3,8 +3,21 @@ import { requireAuth } from '../middleware/auth.js'
 import multer from 'multer'
 import path from 'path'
 import fs from 'fs'
+import crypto from 'node:crypto'
 import { fileURLToPath } from 'url'
 import db from '../db.js'
+import {
+  getUploadKind,
+  isImage,
+  isSafeStoredUploadFilename,
+  MAX_UPLOAD_FILE_BYTES,
+  MAX_UPLOAD_FILES,
+  MAX_UPLOAD_IMAGE_PIXELS,
+  uploadAccepted,
+  uploadExtension,
+  uploadResponseHeaders,
+  validateUploadOriginalName
+} from '../lib/uploadPolicy.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const UPLOAD_DIR = path.join(__dirname, '..', '..', 'data', 'uploads')
@@ -12,95 +25,250 @@ fs.mkdirSync(UPLOAD_DIR, { recursive: true })
 
 const router = Router()
 
-const IMAGE_TYPES = /^image\/(jpeg|jpg|png|gif|webp)$/i
-const TEXT_EXTS = new Set([
-  '.zip', '.tar', '.gz', '.7z', '.rar',
-  '.docx', '.xlsx', '.xls', '.pptx',
-  '.txt', '.md', '.csv', '.json', '.xml', '.html', '.css', '.js', '.jsx', '.ts', '.tsx',
-  '.py', '.rb', '.go', '.rs', '.java', '.c', '.cpp', '.h', '.hpp', '.sh', '.bash',
-  '.yml', '.yaml', '.toml', '.ini', '.conf', '.log', '.sql', '.php', '.swift', '.kt'
-])
+function uploadError(
+  message,
+  statusCode = 400
+) {
+  const error = new Error(message)
+  error.statusCode = statusCode
+  error.expose = true
+  return error
+}
+
+function trackedUploadPaths(req) {
+  if (!req.echolinkUploadPaths) {
+    req.echolinkUploadPaths = new Set()
+  }
+
+  return req.echolinkUploadPaths
+}
+
+function trackUploadPath(req, filepath) {
+  trackedUploadPaths(req).add(filepath)
+  return filepath
+}
+
+function cleanupTrackedUploads(req) {
+  const tracked = req.echolinkUploadPaths
+
+  if (!(tracked instanceof Set)) return
+
+  for (const filepath of tracked) {
+    try {
+      if (fs.existsSync(filepath)) {
+        fs.unlinkSync(filepath)
+      }
+    } catch {}
+  }
+
+  tracked.clear()
+}
 
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     const userDir = path.join(UPLOAD_DIR, String(req.session.userId))
     fs.mkdirSync(userDir, { recursive: true })
+    req.echolinkUploadDirectory = userDir
     cb(null, userDir)
   },
   filename: (req, file, cb) => {
-    const ext = path.extname(file.originalname).toLowerCase()
-    const name = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}${ext}`
+    const ext = uploadExtension(file.originalname)
+    const nonce = crypto.randomBytes(12)
+      .toString('hex')
+    const name = `${Date.now()}_${nonce}${ext}`
+
+    trackUploadPath(
+      req,
+      path.join(
+        req.echolinkUploadDirectory,
+        name
+      )
+    )
+
     cb(null, name)
   }
 })
 
 const upload = multer({
   storage,
-  limits: { fileSize: 100 * 1024 * 1024 }, // 100 MB
+  limits: {
+    fileSize: MAX_UPLOAD_FILE_BYTES,
+    files: MAX_UPLOAD_FILES,
+    fields: 0,
+    parts: MAX_UPLOAD_FILES,
+    fieldNameSize: 32,
+    headerPairs: 100
+  },
   fileFilter: (req, file, cb) => {
-    const ext = path.extname(file.originalname).toLowerCase()
-    if (IMAGE_TYPES.test(file.mimetype) || TEXT_EXTS.has(ext) || ext === '.pdf') {
-      cb(null, true)
-    } else {
-      cb(new Error('Unsupported file type'))
+    if (
+      uploadAccepted(
+        file.originalname,
+        file.mimetype
+      )
+    ) {
+      return cb(null, true)
     }
+
+    cb(uploadError(
+      'Dateityp oder Bild-MIME-Typ wird nicht unterstützt',
+      415
+    ))
   }
 })
 
-function isImage(filename) {
-  const ext = path.extname(filename).toLowerCase()
-  return ['.jpg', '.jpeg', '.png', '.gif', '.webp'].includes(ext)
+function normalizeMulterError(error) {
+  if (error?.statusCode) return error
+
+  if (!(error instanceof multer.MulterError)) {
+    return uploadError(
+      'Upload konnte nicht verarbeitet werden'
+    )
+  }
+
+  if (error.code === 'LIMIT_FILE_SIZE') {
+    return uploadError(
+      'Datei ist zu groß (maximal 25 MiB)',
+      413
+    )
+  }
+
+  if (
+    error.code === 'LIMIT_FILE_COUNT' ||
+    error.code === 'LIMIT_PART_COUNT'
+  ) {
+    return uploadError(
+      `Maximal ${MAX_UPLOAD_FILES} Dateien pro Upload`,
+      413
+    )
+  }
+
+  return uploadError(
+    'Ungültige Upload-Anfrage'
+  )
 }
 
-function getFileKind(filename) {
-  const ext = path.extname(filename).toLowerCase()
-  if (isImage(filename)) return 'image'
-  if (ext === '.pdf') return 'pdf'
-  if (['.zip', '.tar', '.gz', '.7z', '.rar'].includes(ext)) return 'archive'
-  if (['.docx', '.xlsx', '.xls', '.pptx'].includes(ext)) return 'text'
-  return 'text'
+function receiveUploadFiles(req, res, next) {
+  const receive = upload.array(
+    'files',
+    MAX_UPLOAD_FILES
+  )
+
+  const cleanupIfUncommitted = () => {
+    if (!req.echolinkUploadCommitted) {
+      cleanupTrackedUploads(req)
+    }
+  }
+
+  req.once('aborted', cleanupIfUncommitted)
+  res.once('close', cleanupIfUncommitted)
+
+  receive(req, res, error => {
+    if (!error) return next()
+
+    cleanupTrackedUploads(req)
+    next(normalizeMulterError(error))
+  })
 }
 
 // Upload — accepts images and files together
 // Images are resized to max 1024px / JPEG 80% on upload to keep payloads small
-router.post('/', requireAuth, upload.array('files', 5), async (req, res) => {
-  const files = []
-  for (const f of req.files) {
-    let filename = f.filename
-    let size = f.size
-    if (isImage(f.originalname)) {
-      try {
-        const sharp = (await import('sharp')).default
-        const filepath = path.join(UPLOAD_DIR, String(req.session.userId), f.filename)
-        const jpegName = f.filename.replace(/\.[^.]+$/, '') + '.jpg'
-        const jpegPath = path.join(UPLOAD_DIR, String(req.session.userId), jpegName)
-        await sharp(filepath)
-          .resize({ width: 1024, height: 1024, fit: 'inside', withoutEnlargement: true })
-          .jpeg({ quality: 80 })
-          .toFile(jpegPath)
-        fs.unlinkSync(filepath) // remove original
-        filename = jpegName
-        size = fs.statSync(jpegPath).size
-      } catch (err) {
-        console.error('Image resize failed, keeping original:', err.message)
+router.post(
+  '/',
+  requireAuth,
+  receiveUploadFiles,
+  async (req, res, next) => {
+    try {
+      if (!Array.isArray(req.files) || !req.files.length) {
+        throw uploadError('Keine Datei empfangen')
       }
+
+      const files = []
+
+      for (const f of req.files) {
+        const originalName =
+          validateUploadOriginalName(
+            f.originalname
+          )
+        let filename = f.filename
+        let size = f.size
+
+        if (isImage(originalName)) {
+          const sharp =
+            (await import('sharp')).default
+          const filepath = path.join(
+            UPLOAD_DIR,
+            String(req.session.userId),
+            f.filename
+          )
+          const jpegName =
+            f.filename.replace(/\.[^.]+$/, '') +
+            '.jpg'
+          const jpegPath = trackUploadPath(
+            req,
+            path.join(
+              UPLOAD_DIR,
+              String(req.session.userId),
+              jpegName
+            )
+          )
+
+          await sharp(filepath, {
+            failOn: 'warning',
+            limitInputPixels:
+              MAX_UPLOAD_IMAGE_PIXELS,
+            sequentialRead: true
+          })
+            .resize({
+              width: 1024,
+              height: 1024,
+              fit: 'inside',
+              withoutEnlargement: true
+            })
+            .jpeg({ quality: 80 })
+            .toFile(jpegPath)
+
+          fs.unlinkSync(filepath)
+          filename = jpegName
+          size = fs.statSync(jpegPath).size
+        }
+
+        files.push({
+          filename,
+          originalName,
+          size,
+          kind: getUploadKind(originalName)
+        })
+      }
+
+      req.echolinkUploadCommitted = true
+      res.json({ files })
+    } catch (error) {
+      cleanupTrackedUploads(req)
+
+      if (!error?.statusCode) {
+        error.statusCode = 400
+        error.expose = true
+        error.message =
+          'Datei konnte nicht sicher verarbeitet werden'
+      }
+
+      next(error)
     }
-    files.push({
-      filename,
-      originalName: f.originalname,
-      size,
-      kind: getFileKind(f.originalname)
-    })
   }
-  res.json({ files })
-})
+)
 
 // Serve a file (auth required, scoped to user)
 router.get('/:filename', requireAuth, (req, res) => {
   const filename = req.params.filename
-  if (!/^[a-z0-9_.-]+$/i.test(filename) || filename.includes('..')) return res.status(400).end()
+
+  if (!isSafeStoredUploadFilename(filename)) {
+    return res.status(400).end()
+  }
+
   const filepath = path.join(UPLOAD_DIR, String(req.session.userId), filename)
   if (!fs.existsSync(filepath)) return res.status(404).end()
+
+  res.set(uploadResponseHeaders(filename))
   res.sendFile(filepath)
 })
 
