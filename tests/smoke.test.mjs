@@ -47,6 +47,10 @@ const files = {
   terminalRunner: path.join(
     root,
     'scripts/run-terminal-operation.js'
+  ),
+  redditReader: path.join(
+    root,
+    'server/lib/redditReader.js'
   )
 }
 

@@ -1,6 +1,11 @@
 import * as cheerio from 'cheerio'
 import dns from 'node:dns/promises'
 import net from 'node:net'
+import {
+  isRedditThreadUrl,
+  readRedditThread,
+  redditReaderEnabled
+} from './redditReader.js'
 
 const URL_REGEX = /https?:\/\/[^\s)>\]]+/g
 const MAX_URLS = 3
@@ -128,7 +133,20 @@ export function extractUrls(text) {
   return [...new Set(matches)].slice(0, MAX_URLS)
 }
 
-export async function fetchUrlContent(url) {
+export async function fetchUrlContent(
+  url,
+  {
+    env = process.env,
+    redditFn = readRedditThread
+  } = {}
+) {
+  if (
+    redditReaderEnabled(env) &&
+    isRedditThreadUrl(url)
+  ) {
+    return redditFn(url, { env })
+  }
+
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
 
@@ -172,6 +190,13 @@ export async function fetchUrlContent(url) {
   }
 }
 
-export async function fetchAllUrls(urls) {
-  return Promise.all(urls.map(fetchUrlContent))
+export async function fetchAllUrls(
+  urls,
+  options
+) {
+  return Promise.all(
+    urls.map(url =>
+      fetchUrlContent(url, options)
+    )
+  )
 }

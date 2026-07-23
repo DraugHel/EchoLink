@@ -1,6 +1,6 @@
 # EchoLink — Code Map
 
-> Lebendige Karte des Projekts. Stand: 2026-07-21. Bei größeren Umbauten aktualisieren.
+> Lebendige Karte des Projekts. Stand: 2026-07-23. Bei größeren Umbauten aktualisieren.
 > Zeilenzahlen sind Richtwerte — sie veralten. Muster und Verantwortlichkeiten bleiben.
 
 ## Überblick
@@ -32,7 +32,8 @@ Läuft unter PM2 als `echolink` auf 127.0.0.1:3000 (siehe ecosystem.config.cjs).
 - **Env**: `.env` via server/loadEnv.js (MUSS erster Import in index.js/worker.js bleiben).
   PM2-env hat Vorrang vor .env. Wichtigste Vars: SESSION_SECRET, ECHO_API_KEY,
   BRIEFING_CONVERSATION_ID, DEFAULT_MODEL, SEARXNG_URL, FIRECRAWL_URL, ZAI_API_KEY,
-  MOONSHOT_API_KEY, ANTHROPIC_API_KEY, GOOGLE_*, VAPID_*, MEMORY_DEBUG, TRUST_PROXY.
+  MOONSHOT_API_KEY, ANTHROPIC_API_KEY, GOOGLE_*, REDDIT_*, VAPID_*, MEMORY_DEBUG,
+  TRUST_PROXY.
 
 ## Backend — Kern
 
@@ -86,9 +87,10 @@ Browser-Vollreload sind die Checkpoints absichtlich weg. Test: `tests/chatCheckp
 5. System-Prompt zusammenbauen: convo.system_prompt + RULES.md (immer!) + Memory +
    Skills-Index (SKILLS_DIR=/root/echolink/skills, description-Zeilen) + urlContext + Zeit
 6. Tool-Loop (MAX_TOOL_ITERATIONS=25): Modell streamt, tool_calls werden ausgeführt:
-   - web_search / firecrawl_scrape → direkt (lib/webSearch.js); bei Fortsetzung wird ein
-     flüchtiger Checkpoint-Cache aus dem Request verwendet, identische Suchanfrage/URL läuft
-     nicht erneut
+   - web_search / firecrawl_scrape → `readOnlyWebRuntime.js`; konfigurierte Reddit-Threads
+     werden vor MCP/Firecrawl über den read-only OAuth-Reader geladen. Bei Fortsetzung wird
+     ein flüchtiger Checkpoint-Cache aus dem Request verwendet, identische Suchanfrage/URL
+     läuft nicht erneut
    - terminal → Auto-Approve-Allowlist (SAFE_PATTERNS, UNSAFE_META-Regex blockt
      Shell-Metazeichen) ODER actionRequest ans Frontend. Jeder Lauf wird dauerhaft in
      `chat_terminal_operations` protokolliert; freigegebene Befehle laufen über den
@@ -150,12 +152,17 @@ Tests: `tests/terminalOperations.test.mjs`.
   Gmail + Task. Einzige Stelle, an der Tools registriert werden.
 - **webSearch.js**: web_search (SearXNG :8080, 10s Timeout, 5 Results), firecrawl_scrape
   (Firecrawl :3002), TERMINAL_TOOL-Definition. linkedAbortController(Timeout+extern).
+- **redditReader.js**: opt-in Reddit-OAuth-Reader für kanonische `/comments/`-, `redd.it`-
+  und `/s/`-Share-Links. App-only Token wird gecacht und bei 401 einmal erneuert; feste
+  Reddit-Endpunkte, `read`-Scope, eindeutiger User-Agent, Rate-Limit-/Timeout-Behandlung.
+  Post und maximal 100 Kommentare werden begrenzt und als untrusted User-Content markiert.
 - **calendarTools.js**: list/get/create. create geht als Approval-Preview raus.
 - **calendarExtraTools.js** (~764 Z.): update/delete/find_free_time + Preview-Formatierung.
 - **gmailTools.js** (~1015 Z.): search/read/thread/drafts/attachments/extract/download-link/
   send+delete (beide approval-pflichtig).
 - **taskTools.js**: create/list/update/delete/run_task_now für scheduled_tasks.
-- **fetchUrl.js**: extractUrls + fetchAllUrls (Auto-Fetch von URLs aus User-Text).
+- **fetchUrl.js**: extractUrls + fetchAllUrls (Auto-Fetch von URLs aus User-Text);
+  aktive Reddit-Thread-Links gehen zuerst über redditReader.js.
 - **images.js / utils/image.js**: sharp-Resize (sharp = "der Vorfall"; in package.json!).
 
 ## Backend — Tasks & Agenten

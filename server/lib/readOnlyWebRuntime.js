@@ -12,6 +12,11 @@ import {
 } from './mcpRegistry.js'
 import { connectMcpWebClient } from './mcpWebClient.js'
 import { assertPublicHttpUrl } from '../mcp/publicUrl.js'
+import {
+  isRedditThreadUrl,
+  readRedditThread,
+  redditReaderEnabled
+} from './redditReader.js'
 
 const MCP_WEB_SERVER = 'mcp-web'
 
@@ -324,6 +329,8 @@ export async function executeFirecrawlScrape(
     scrapeFn = firecrawlScrape,
     connectFn = connectMcpWebClient,
     publicUrlCheck = assertPublicHttpUrl,
+    redditFn = readRedditThread,
+    redditUrlCheck = isRedditThreadUrl,
     now = Date.now
   } = {}
 ) {
@@ -341,6 +348,28 @@ export async function executeFirecrawlScrape(
   }
 
   assertNotAborted(signal)
+
+  if (
+    redditReaderEnabled(env) &&
+    redditUrlCheck(url)
+  ) {
+    const result = await redditFn(
+      url,
+      { signal, env }
+    )
+    assertNotAborted(signal)
+
+    return {
+      text: result?.error
+        ? `Reddit error: ${result.error}`
+        : `Content from ${
+            result.url || url
+          }:\n\n${String(result.content || '')}`,
+      error: Boolean(result?.error),
+      backend: 'reddit-oauth',
+      fallback: false
+    }
+  }
 
   return useMcpOrFallback({
     toolName: 'firecrawl_scrape',

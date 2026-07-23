@@ -67,6 +67,24 @@ module.exports = {
 }
 ```
 
+### Reddit-Threads lesen
+
+Für Reddit-Links von Hosting-IP-Adressen nutzt EchoLink optional die offizielle
+read-only OAuth-API statt HTML-Scraping. Lege unter
+`https://www.reddit.com/prefs/apps` eine App vom Typ `script` an und ergänze:
+
+```bash
+REDDIT_READER_MODE=active
+REDDIT_CLIENT_ID=deine-client-id
+REDDIT_CLIENT_SECRET=dein-client-secret
+REDDIT_USER_AGENT=linux:echolink:v1.0 (by /u/dein_reddit_name)
+```
+
+Die Werte gehören ausschließlich in `.env`; niemals committen. EchoLink erkennt
+kanonische Thread-Links, `redd.it` und Reddit-Share-Links automatisch. Der Reader
+fordert nur den Scope `read` an, begrenzt den Kommentarbaum und behandelt alle
+Reddit-Inhalte als nicht vertrauenswürdige Nutzerdaten.
+
 ---
 
 ## User-Management

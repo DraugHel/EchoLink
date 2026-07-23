@@ -105,7 +105,7 @@ export const FIRECRAWL_TOOL = {
   type: 'function',
   function: {
     name: 'firecrawl_scrape',
-    description: 'Fetch and read the full content of a specific webpage or URL. Use this when you need to read an article, documentation, or any webpage in detail — especially after a web search returns relevant URLs.',
+    description: 'Fetch and read the full content of a specific webpage or URL. Reddit thread links are read through the configured read-only Reddit OAuth API; other pages use the web scraper. Use this when you need to read an article, documentation, Reddit discussion, or any webpage in detail.',
     parameters: {
       type: 'object',
       properties: {
