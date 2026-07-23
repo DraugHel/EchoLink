@@ -69,8 +69,9 @@ Migrationen: defensive try/catch ALTER TABLEs beim Boot.
 ### Phase 2A — Sitzungs-Checkpoints (Webrecherche fortsetzen)
 `server/lib/chatCheckpoints.js` normalisiert, begrenzt und dedupliziert abgeschlossene
 `web_search`- und `firecrawl_scrape`-Resultate. Der Chat-SSE-Stream liefert sie als
-`checkpoint` im bestehenden `tool`-Event; `Chat.jsx` hält sie ausschließlich im
-`chatRun`-React-State. Nach serverseitigem Stop zeigt `ChatAgentCockpit` **„Fortsetzen
+`checkpoint` im bestehenden `tool`-Event; `Chat.jsx` hält sie im laufenden
+`chatRun`-React-State und reicht neu empfangene Checkpoints auch bei automatischen
+SSE-Reconnects weiter. Nach serverseitigem Stop zeigt `ChatAgentCockpit` **„Fortsetzen
 ab X Checkpoints“** und sendet denselben Prompt mit `resumeCheckpoints`. `chat.js`
 verwendet diese im Prompt-Kontext und in einem pro Lauf aufgebauten Cache, damit identische
 Recherche nicht erneut extern ausgeführt wird. Keine DB-Tabelle, keine geplante Task; bei
@@ -89,7 +90,9 @@ Browser-Vollreload sind die Checkpoints absichtlich weg. Test: `tests/chatCheckp
      flüchtiger Checkpoint-Cache aus dem Request verwendet, identische Suchanfrage/URL läuft
      nicht erneut
    - terminal → Auto-Approve-Allowlist (SAFE_PATTERNS, UNSAFE_META-Regex blockt
-     Shell-Metazeichen) ODER actionRequest ans Frontend (pendingTerminalActions Map)
+     Shell-Metazeichen) ODER actionRequest ans Frontend. Jeder Lauf wird dauerhaft in
+     `chat_terminal_operations` protokolliert; freigegebene Befehle laufen über den
+     abgekoppelten Runner `scripts/run-terminal-operation.js`
    - calendar/gmail-Write-Tools → actionRequest mit Preview (pendingCalendarActions /
      pendingGmailActions Maps), Ausführung erst nach Approve-Endpoint
 7. Token-Streaming durchreichen; am Ende usage + context in `done`
@@ -117,6 +120,16 @@ Continuation-Kontext. Keine DB und keine Task: Checkpoints leben nur im React-Ru
 werden beim Fortsetzen als `resumeCheckpoints` im POST-Body übergeben. Der Server injiziert
 die Resultate in den temporären Modellkontext und gibt bei gleichen Tool-Argumenten den
 Cache zurück, statt die externe Suche/Scrape erneut auszuführen. Vollständiges Reload leert sie.
+
+### server/lib/terminalOperations.js
+Durabler Handoff für Terminal-Tools. Operationen sind über `request_id` und, sofern vorhanden,
+`tool_call_id` an den Chat-Lauf gebunden. SQLite erzwingt den Übergang `queued → running`
+atomar, damit ein wiederholtes Approve, ein Reconnect oder die Startup-Recovery denselben
+Befehl nicht doppelt ausführt. Freigegebene Befehle laufen in einem detached Node-Prozess und
+überleben dadurch `pm2 restart echolink` sowie `npm run deploy`. Ergebnis und Status werden
+vor der Modellfortsetzung gespeichert; beim Reconnect wartet der SSE-Stream mit Heartbeats
+und injiziert anschließend ein ausdrückliches „bereits ausgeführt, nicht wiederholen“-Ledger.
+Tests: `tests/terminalOperations.test.mjs`.
 
 ## Backend — Provider (server/providers/)
 

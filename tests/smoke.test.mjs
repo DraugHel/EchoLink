@@ -39,6 +39,14 @@ const files = {
   playwrightSmoke: path.join(
     root,
     'scripts/mcp-playwright-smoke.js'
+  ),
+  terminalOperations: path.join(
+    root,
+    'server/lib/terminalOperations.js'
+  ),
+  terminalRunner: path.join(
+    root,
+    'scripts/run-terminal-operation.js'
   )
 }
 

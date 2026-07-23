@@ -4,7 +4,12 @@ import { fileURLToPath } from 'url'
 import fs from 'fs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const DB_PATH = path.join(__dirname, '..', 'data', 'echolink.db')
+const configuredDbPath = String(
+  process.env.ECHOLINK_DB_PATH || ''
+).trim()
+const DB_PATH = configuredDbPath
+  ? path.resolve(configuredDbPath)
+  : path.join(__dirname, '..', 'data', 'echolink.db')
 
 fs.mkdirSync(path.dirname(DB_PATH), { recursive: true })
 

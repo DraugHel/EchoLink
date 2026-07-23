@@ -57,7 +57,6 @@ import { OLLAMA_URL, streamOllama } from '../providers/ollama.js'
 import { OPENAI_KEY, ZAI_KEY, KIMI_KEY, streamZai, streamKimi, splitSystemTimeNote } from '../providers/openai-compatible.js'
 import { ANTHROPIC_KEY, streamAnthropic } from '../providers/anthropic.js'
 import { streamResponses } from '../providers/openai-responses.js'
-import { exec } from 'child_process'
 import {
   abortChatRequest,
   assertAbortSignalActive,
@@ -68,6 +67,20 @@ import {
   registerChatRequest,
   unregisterChatRequest
 } from '../lib/chatCancellation.js'
+import {
+  approveTerminalOperation,
+  createTerminalOperation,
+  denyTerminalOperation,
+  executeTerminalOperation,
+  formatTerminalContinuationContext,
+  formatTerminalOperationResult,
+  getTerminalOperation,
+  listPendingTerminalActions,
+  listTerminalOperationsForRequest,
+  recoverQueuedTerminalOperations,
+  spawnTerminalOperationRunner,
+  waitForTerminalOperation
+} from '../lib/terminalOperations.js'
 import { resizeImageBuffer } from '../utils/image.js'
 import fs from 'fs'
 import path from 'path'
@@ -77,6 +90,32 @@ const router = Router()
 const pendingTerminalActions = new Map()
 const pendingCalendarActions = new Map()
 const pendingGmailActions = new Map()
+
+setImmediate(() => {
+  try {
+    const recovered = recoverQueuedTerminalOperations()
+    if (recovered > 0) {
+      console.log(JSON.stringify({
+        level: 'info',
+        event: 'terminal_operations_recovered',
+        count: recovered
+      }))
+    }
+  } catch (error) {
+    console.error(JSON.stringify({
+      level: 'error',
+      event: 'terminal_operations_recovery_failed',
+      error: error?.message || String(error)
+    }))
+  }
+})
+
+function prepareChatSseResponse(res) {
+  if (res.headersSent) return
+  res.setHeader('Content-Type', 'text/event-stream')
+  res.setHeader('Cache-Control', 'no-cache')
+  res.setHeader('Connection', 'keep-alive')
+}
 
 function gmailActionCard(
   toolName,
@@ -175,16 +214,6 @@ function segIsSafe(seg) {
 
 const SENSITIVE_PATH = /(^|[\s'"/=])(\.env|\.git-credentials|id_rsa|id_ed25519|\.pem|\.key|credentials|secrets?|\.aws|\.ssh|shadow|\.hermes|\.openclaw|auto-approve\.json|echolink\.db|\.npmrc)/i
 
-function redactSecrets(text) {
-  if (!text) return text
-  return text
-    .replace(/sk-ant-[A-Za-z0-9_-]{16,}/g, 'sk-ant-***REDACTED***')
-    .replace(/sk-[A-Za-z0-9_-]{16,}/g, 'sk-***REDACTED***')
-    .replace(/ghp_[A-Za-z0-9]{20,}/g, 'ghp_***REDACTED***')
-    .replace(/[0-9a-f]{32}\.[A-Za-z0-9]{16}/g, '***REDACTED-KEY***')
-    .replace(/(API_KEY|TOKEN|SECRET|PASSWORD|PASSWD)(\s*[=:]\s*)\S+/gi, '$1$2***REDACTED***')
-}
-
 function looksLikeExfil(url) {
   if (!url || typeof url !== 'string') return true
   if (SENSITIVE_PATH.test(url)) return true
@@ -212,26 +241,6 @@ function isSafeCommand(cmd) {
   if (SENSITIVE_PATH.test(c)) return false
   // Ok, wenn JEDES Segment mit einem freigegebenen Command beginnt
   return masked.split('|').every(segIsSafe)
-}
-
-const stripAnsi = s => s.replace(/\x1B\[[0-9;]*[mGKHF]/g, '').replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '')
-
-// Command ausfuehren + Terminal-Message in DB (gleiche Bubble wie beim Approve-Flow)
-function runCommand(command, conversationId) {
-  return new Promise((resolve) => {
-    exec(command, { timeout: 60000, cwd: '/root' }, (err, stdout, stderr) => {
-      const output = stripAnsi((stdout || '').slice(0, 4000))
-      const errOutput = stripAnsi((stderr || '').slice(0, 1000))
-      const result = redactSecrets(err
-        ? `Exit code ${err.code}:\n${errOutput}${output}`
-        : output || '(no output)')
-      if (conversationId) {
-        db.prepare('INSERT INTO messages (conversation_id, role, content) VALUES (?, ?, ?)')
-          .run(conversationId, 'assistant', '**Terminal:** `' + command + '`\n```\n' + result + '\n```')
-      }
-      resolve(result)
-    })
-  })
 }
 
 const CHAT_LIMITS = {
@@ -330,7 +339,8 @@ async function executeTool(
   conversationId,
   abortSignal,
   checkpointCache = new Map(),
-  playwrightSession
+  playwrightSession,
+  requestContext = {}
 ) {
   assertAbortSignalActive(abortSignal)
   const name = toolCall.function?.name
@@ -384,23 +394,50 @@ async function executeTool(
   if (name === 'terminal') {
     const command = args.command
     const description = args.description || command
+    const operation = createTerminalOperation({
+      userId: requestContext.userId,
+      conversationId,
+      requestId: requestContext.requestId,
+      toolCallId: toolCall.id,
+      command,
+      description,
+      requiresApproval: !isSafeCommand(command)
+    })
+
     // Harmlose read-only Commands laufen ohne Approval durch
     if (isSafeCommand(command)) {
       res.write(`data: ${JSON.stringify({ tool: 'terminal', status: 'running', query: command })}\n\n`)
-      const result = await runCommand(command, conversationId)
+      const completed = operation.status === 'queued'
+        ? await executeTerminalOperation(operation.id)
+        : operation.status === 'running'
+          ? await waitForTerminalOperation(operation.id)
+          : operation
+      const result = formatTerminalOperationResult(completed)
       res.write(`data: ${JSON.stringify({ tool: 'terminal', status: 'done', query: command })}\n\n`)
       return result
     }
+
+    if (operation.status !== 'awaiting_approval') {
+      const completed = await waitForTerminalOperation(operation.id)
+      return formatTerminalOperationResult(completed)
+    }
+
     // Pause and ask for approval
     return new Promise((resolve) => {
-      const actionId = crypto.randomUUID()
-      pendingTerminalActions.set(actionId, { command, conversationId, resolve })
+      const actionId = operation.action_id
+      pendingTerminalActions.set(actionId, {
+        operationId: operation.id,
+        command,
+        conversationId,
+        resolve
+      })
       setTimeout(() => {
         if (pendingTerminalActions.has(actionId)) {
           pendingTerminalActions.delete(actionId)
-          resolve('__TERMINAL_DONE__')
+          const expired = getTerminalOperation(operation.id)
+          resolve(formatTerminalOperationResult(expired))
         }
-      }, 5 * 60 * 1000)
+      }, 5 * 60 * 1000 + 250)
       res.write(`data: ${JSON.stringify({
         actionRequest: true,
         actionId,
@@ -992,12 +1029,107 @@ router.post('/:conversationId', requireAuth, async (req, res) => {
   const resumeCheckpoints = normalizeChatCheckpoints(
     suppliedResumeCheckpoints
   )
-  const checkpointCache = new Map(
-    resumeCheckpoints.map(checkpoint => [checkpoint.key, checkpoint])
-  )
   if (!content?.trim() && (!attachments || attachments.length === 0)) {
     return res.status(400).json({ error: 'Empty message' })
   }
+
+  let terminalHandoffOperations =
+    listTerminalOperationsForRequest({
+      userId: req.session.userId,
+      conversationId: convo.id,
+      requestId
+    })
+
+  const activeTerminalHandoffs = terminalHandoffOperations.filter(
+    operation =>
+      operation.status === 'awaiting_approval' ||
+      operation.status === 'queued' ||
+      operation.status === 'running'
+  )
+
+  if (activeTerminalHandoffs.length > 0) {
+    prepareChatSseResponse(res)
+    const waitController = new AbortController()
+    const abortWait = () => waitController.abort()
+    req.once('aborted', abortWait)
+    res.once('close', abortWait)
+
+    for (const operation of activeTerminalHandoffs) {
+      if (operation.status === 'awaiting_approval') {
+        res.write(`data: ${JSON.stringify({
+          actionRequest: true,
+          actionId: operation.action_id,
+          description:
+            operation.description || operation.command,
+          command: operation.command,
+          reason: approvalReason(operation.command),
+          type: 'shell',
+          source: 'chat',
+          restored: true
+        })}\n\n`)
+      } else {
+        res.write(`data: ${JSON.stringify({
+          tool: 'terminal',
+          status: 'running',
+          query: operation.command,
+          restored: true
+        })}\n\n`)
+      }
+    }
+
+    const heartbeat = setInterval(() => {
+      if (!res.writableEnded) {
+        res.write(': terminal-handoff\n\n')
+      }
+    }, 15_000)
+
+    // A reconnect after PM2/deploy uses the same request ID. Wait for every
+    // already-started operation instead of asking the model to begin again.
+    try {
+      for (const operation of activeTerminalHandoffs) {
+        await waitForTerminalOperation(operation.id, {
+          signal: waitController.signal
+        })
+      }
+    } catch (error) {
+      if (error?.name !== 'AbortError') {
+        console.error(JSON.stringify({
+          level: 'error',
+          event: 'terminal_handoff_wait_failed',
+          requestId,
+          error: error?.message || String(error)
+        }))
+        res.write(`data: ${JSON.stringify({
+          error:
+            'Terminal-Handoff konnte nicht sicher abgeschlossen werden. Der Befehl wird nicht erneut ausgeführt.'
+        })}\n\n`)
+      }
+
+      clearInterval(heartbeat)
+      req.off('aborted', abortWait)
+      res.off('close', abortWait)
+      return res.end()
+    }
+
+    clearInterval(heartbeat)
+    req.off('aborted', abortWait)
+    res.off('close', abortWait)
+  }
+
+  // Refresh after the wait so the model receives authoritative final states.
+  terminalHandoffOperations =
+    listTerminalOperationsForRequest({
+      userId: req.session.userId,
+      conversationId: convo.id,
+      requestId
+    })
+  const terminalHandoffContext =
+    formatTerminalContinuationContext(
+      terminalHandoffOperations
+    )
+  const checkpointCache = new Map(
+    resumeCheckpoints.map(checkpoint => [checkpoint.key, checkpoint])
+  )
 
   // Extract URLs from user message for auto-fetch
   let urlContext = ''
@@ -1636,14 +1768,21 @@ Use these as background context. If these memories fully answer the request, ans
   const checkpointContext = formatChatCheckpointContext(
     resumeCheckpoints
   )
-  if (checkpointContext && ollamaMessages.length > 0) {
-    const last = ollamaMessages[ollamaMessages.length - 1]
-    if (last.role === 'user') last.content = last.content + checkpointContext
+  const continuationContext =
+    checkpointContext + terminalHandoffContext
+  if (continuationContext && ollamaMessages.length > 0) {
+    const lastUser = [...ollamaMessages]
+      .reverse()
+      .find(message => message.role === 'user')
+
+    if (lastUser) {
+      lastUser.content = lastUser.content + continuationContext
+    } else if (ollamaMessages[0]?.role === 'system') {
+      ollamaMessages[0].content += continuationContext
+    }
   }
 
-  res.setHeader('Content-Type', 'text/event-stream')
-  res.setHeader('Cache-Control', 'no-cache')
-  res.setHeader('Connection', 'keep-alive')
+  prepareChatSseResponse(res)
 
   // Explicit registry makes cancellation work even when a reverse
   // proxy keeps the original streaming connection alive.
@@ -1735,7 +1874,11 @@ Use these as background context. If these memories fully answer the request, ans
             convo.id,
             abortController.signal,
             checkpointCache,
-            playwrightSession
+            playwrightSession,
+            {
+              userId: req.session.userId,
+              requestId
+            }
           )
           assertChatRequestActive(activeRequest)
           if (result === '__TERMINAL_DONE__') {
@@ -1976,10 +2119,14 @@ router.post(
       }
     }
 
-    const entry =
-      pendingTerminalActions.get(actionId)
+    const entry = pendingTerminalActions.get(actionId)
+    const approval = approveTerminalOperation(
+      actionId,
+      req.session.userId
+    )
+    const operation = approval.operation
 
-    if (!entry) {
+    if (!operation) {
       return res.status(404).json({
         error: 'Action not found or expired'
       })
@@ -1987,67 +2134,33 @@ router.post(
 
     pendingTerminalActions.delete(actionId)
 
-    const {
-      command,
-      conversationId,
-      resolve
-    } = entry
+    // The detached runner stays alive when this PM2 process restarts itself.
+    // Repeated approval requests are idempotent: the SQLite claim allows the
+    // command to transition from queued to running exactly once.
+    if (operation.status === 'queued') {
+      spawnTerminalOperationRunner(operation.id)
+    }
 
-    exec(
-      command,
-      {
-        timeout: 60000,
-        cwd: '/root'
-      },
-      (err, stdout, stderr) => {
-        const stripAnsi = value =>
-          value
-            .replace(
-              /\x1B\[[0-9;]*[mGKHF]/g,
-              ''
-            )
-            .replace(
-              /[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g,
-              ''
-            )
-
-        const output = stripAnsi(
-          (stdout || '').slice(0, 4000)
-        )
-
-        const errOutput = stripAnsi(
-          (stderr || '').slice(0, 1000)
-        )
-
-        const result = err
-          ? `Exit code ${err.code}:\n${errOutput}${output}`
-          : output || '(no output)'
-
-        if (conversationId) {
-          db.prepare(`
-            INSERT INTO messages (
-              conversation_id,
-              role,
-              content
-            )
-            VALUES (?, 'assistant', ?)
-          `).run(
-            conversationId,
-            '**Terminal:** `' +
-              command +
-              '`\n```\n' +
-              result +
-              '\n```'
+    if (entry) {
+      waitForTerminalOperation(operation.id)
+        .then(completed => {
+          entry.resolve(
+            formatTerminalOperationResult(completed)
           )
-        }
-
-        resolve(result)
-      }
-    )
+        })
+        .catch(error => {
+          entry.resolve(
+            `Terminal runner error: ${error.message}`
+          )
+        })
+    }
 
     res.json({
       success: true,
-      type: 'shell'
+      type: 'shell',
+      operationId: operation.id,
+      status: operation.status,
+      alreadyApproved: !approval.shouldStart
     })
   }
 )
@@ -2092,24 +2205,27 @@ router.post(
       })
     }
 
-    const entry =
-      pendingTerminalActions.get(actionId)
+    const entry = pendingTerminalActions.get(actionId)
+    const denial = denyTerminalOperation(
+      actionId,
+      req.session.userId
+    )
 
-    if (!entry) {
+    if (!denial.operation) {
       return res.status(404).json({
         error: 'Action not found or expired'
       })
     }
 
     pendingTerminalActions.delete(actionId)
-    entry.resolve(
-      'Terminal action denied by user'
-    )
+    entry?.resolve('Terminal action denied by user')
 
     res.json({
       success: true,
       denied: true,
-      type: 'shell'
+      type: 'shell',
+      operationId: denial.operation.id,
+      alreadyHandled: !denial.changed
     })
   }
 )
@@ -2138,15 +2254,16 @@ router.get(
     }
 
     const terminalActions =
-      [...pendingTerminalActions.entries()]
-        .filter(([, entry]) =>
-          Number(entry.conversationId) ===
-          conversationId
-        )
-        .map(([actionId, entry]) => ({
-          actionId,
-          description: entry.command,
-          command: entry.command,
+      listPendingTerminalActions({
+        userId: req.session.userId,
+        conversationId
+      })
+        .map(operation => ({
+          actionId: operation.action_id,
+          description:
+            operation.description || operation.command,
+          command: operation.command,
+          reason: approvalReason(operation.command),
           type: 'shell',
           source: 'chat'
         }))

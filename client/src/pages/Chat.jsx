@@ -1272,6 +1272,9 @@ export default function Chat({ user, onLogout }) {
     setStreaming(true)
 
     let assistantContent = ''
+    let continuationCheckpoints = Array.isArray(resumeCheckpoints)
+      ? [...resumeCheckpoints]
+      : []
 
     abortControllerRef.current = new AbortController()
     activeChatRequestRef.current = {
@@ -1292,7 +1295,7 @@ export default function Chat({ user, onLogout }) {
           content,
           attachments: attachmentsToSend,
           skipSave: skipSave || isRetry,
-          resumeCheckpoints,
+          resumeCheckpoints: continuationCheckpoints,
           requestId
         }),
         signal: abortControllerRef.current.signal
@@ -1317,6 +1320,20 @@ export default function Chat({ user, onLogout }) {
         if (!json) return
 
         if (json.checkpoint) {
+          const checkpointKey = String(
+            json.checkpoint.key || ''
+          )
+          if (
+            !continuationCheckpoints.some(checkpoint =>
+              String(checkpoint?.key || '') === checkpointKey
+            )
+          ) {
+            continuationCheckpoints = [
+              ...continuationCheckpoints,
+              json.checkpoint
+            ]
+          }
+
           ensureTrackedChatRun(current =>
             chatRunState.addChatRunCheckpoint(
               current,
