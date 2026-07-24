@@ -92,6 +92,9 @@ test('Provider lassen sich importieren und exportieren Stream-Funktionen', async
   assert.equal(typeof compatible.splitSystemTimeNote, 'function')
   assert.equal(typeof responses.streamResponses, 'function')
   assert.equal(typeof responses.supportsReasoningConfig, 'function')
+  assert.equal(typeof responses.supportsPromptCacheConfig, 'function')
+  assert.equal(typeof responses.buildPromptCacheKey, 'function')
+  assert.equal(typeof responses.normalizeResponsesUsage, 'function')
 })
 
 test('OpenAI Reasoning-Regel ist explizit statt substring-basiert', async () => {

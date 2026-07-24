@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { OPENAI_KEY } from './openai-compatible.js'
 import { ALL_TOOLS } from '../lib/toolRegistry.js'
 import { imgMediaType } from '../lib/images.js'
@@ -19,15 +20,84 @@ export function supportsReasoningConfig(model) {
   return !OPENAI_MODELS_WITHOUT_REASONING_CONFIG.has(model)
 }
 
+export function supportsPromptCacheConfig(model) {
+  return /^gpt-5\.6(?:-|$)/.test(String(model || ''))
+}
+
+export function buildPromptCacheKey(
+  model,
+  instructions,
+  tools
+) {
+  const digest = createHash('sha256')
+    .update(JSON.stringify({
+      model: String(model || ''),
+      instructions: String(instructions || ''),
+      tools: tools || []
+    }))
+    .digest('hex')
+    .slice(0, 24)
+
+  return `echolink:${model}:${digest}`
+}
+
+export function normalizeResponsesUsage(usage) {
+  if (!usage) return null
+
+  const inputDetails =
+    usage.input_tokens_details || {}
+  const cacheObserved =
+    Object.prototype.hasOwnProperty.call(
+      inputDetails,
+      'cached_tokens'
+    ) ||
+    Object.prototype.hasOwnProperty.call(
+      inputDetails,
+      'cache_write_tokens'
+    )
+
+  return {
+    promptTokens: usage.input_tokens || 0,
+    completionTokens: usage.output_tokens || 0,
+    totalTokens:
+      usage.total_tokens ||
+      (
+        (usage.input_tokens || 0) +
+        (usage.output_tokens || 0)
+      ),
+    cachedTokens: inputDetails.cached_tokens || 0,
+    cacheWriteTokens:
+      inputDetails.cache_write_tokens || 0,
+    cacheObserved
+  }
+}
+
 // Internes Format -> Responses-API-Input. Assistant-Messages mit _raw
 // (Items aus vorheriger Responses-Iteration, inkl. Reasoning) gehen verbatim zurueck —
 // nur so bleibt die Denkkette ueber Tool-Calls hinweg erhalten.
-function toResponsesInput(messages) {
+export function toResponsesInput(messages) {
   let instructions = ''
   const input = []
   let pendingCallIds = []
+  let hasPrimarySystem = false
   for (const m of messages) {
-    if (m.role === 'system') { instructions += (instructions ? '\n\n' : '') + m.content; continue }
+    if (m.role === 'system') {
+      if (!hasPrimarySystem) {
+        instructions = m.content || ''
+        hasPrimarySystem = true
+      } else {
+        // Nur der erste System-Prompt ist der stabile, global geltende
+        // Prefix. Spaetere Laufzeit-Hinweise bleiben an ihrer Position.
+        input.push({
+          role: 'developer',
+          content: [{
+            type: 'input_text',
+            text: m.content || ''
+          }]
+        })
+      }
+      continue
+    }
     if (m.role === 'assistant' && m._raw) {
       pendingCallIds = m._raw.filter(it => it.type === 'function_call').map(it => it.call_id)
       // Invariante: _raw ist read-only — Kopie an der Grenze (siehe toAnthropic)
@@ -80,14 +150,29 @@ function toResponsesInput(messages) {
 export async function streamResponses(model, messages, options, res, abortSignal) {
   if (!OPENAI_KEY) throw new Error('API-Key fuer OpenAI fehlt in der .env')
   const { instructions, input } = toResponsesInput(messages)
+  const tools = (options?.tools ?? ALL_TOOLS).map(t => ({
+    type: 'function',
+    name: t.function.name,
+    description: t.function.description,
+    parameters: t.function.parameters
+  }))
   const body = {
     model, stream: true, store: false,
     include: ['reasoning.encrypted_content'],
     input,
     ...(instructions ? { instructions } : {}),
-    tools: (options?.tools ?? ALL_TOOLS).map(t => ({
-      type: 'function', name: t.function.name, description: t.function.description, parameters: t.function.parameters
-    })),
+    tools,
+    ...(supportsPromptCacheConfig(model) ? {
+      prompt_cache_key: buildPromptCacheKey(
+        model,
+        instructions,
+        tools
+      ),
+      prompt_cache_options: {
+        mode: 'implicit',
+        ttl: '30m'
+      }
+    } : {}),
     // Nur explizit bekannte Instant-Modelle erhalten keinen reasoning-Parameter.
     ...(supportsReasoningConfig(model) ? { reasoning: {
       summary: 'detailed',
@@ -143,11 +228,7 @@ export async function streamResponses(model, messages, options, res, abortSignal
     try { args = it.arguments ? JSON.parse(it.arguments) : {} } catch {}
     return { id: it.call_id, function: { name: it.name, arguments: args } }
   })
-  const tokenUsage = usage ? {
-    promptTokens: usage.input_tokens || 0,
-    completionTokens: usage.output_tokens || 0,
-    totalTokens: usage.total_tokens || ((usage.input_tokens || 0) + (usage.output_tokens || 0))
-  } : null
+  const tokenUsage = normalizeResponsesUsage(usage)
   return { fullContent, fullThinking, toolCalls, tokenUsage, rawOutput }
 }
 // ===================== Ende Responses API =====================

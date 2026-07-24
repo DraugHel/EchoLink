@@ -433,6 +433,36 @@ function Message({ role, content, streaming, images, think, toolStatus, actionRe
                   usage.context_omitted_messages
                 )
 
+                const promptTokens = Number(
+                  usage.prompt_tokens
+                )
+
+                const cachedTokens = Number(
+                  usage.cached_tokens
+                )
+
+                const cacheWriteTokens = Number(
+                  usage.cache_write_tokens
+                )
+
+                const cacheObserved =
+                  Boolean(usage.cache_observed)
+
+                const cachePercent =
+                  cacheObserved &&
+                  Number.isFinite(promptTokens) &&
+                  promptTokens > 0
+                    ? Math.min(
+                        100,
+                        Math.max(
+                          0,
+                          cachedTokens /
+                            promptTokens *
+                            100
+                        )
+                      )
+                    : 0
+
                 const hasContext =
                   Number.isFinite(contextEstimate) &&
                   Number.isFinite(contextBudget) &&
@@ -487,6 +517,16 @@ function Message({ role, content, streaming, images, think, toolStatus, actionRe
                           usage.total_tokens
                         )} tok
                       </span>
+
+                      {cacheObserved && (
+                        <span>
+                          Cache{' '}
+                          {cachePercent
+                            .toFixed(1)
+                            .replace('.', ',')}
+                          %
+                        </span>
+                      )}
 
                       {hasContext && (
                         <span>
@@ -583,6 +623,26 @@ function Message({ role, content, streaming, images, think, toolStatus, actionRe
                           )}{' '}
                           gesamt)
                         </div>
+
+                        {cacheObserved && (
+                          <div>
+                            Prompt-Cache:{' '}
+                            {formatUsageNumber(
+                              cachedTokens
+                            )}{' '}
+                            gelesen
+                            {' · '}
+                            {formatUsageNumber(
+                              cacheWriteTokens
+                            )}{' '}
+                            geschrieben
+                            {' · '}
+                            {cachePercent
+                              .toFixed(1)
+                              .replace('.', ',')}
+                            % des Inputs gecacht
+                          </div>
+                        )}
 
                         {hasContext && (
                           <>

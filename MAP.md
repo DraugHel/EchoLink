@@ -1,6 +1,6 @@
 # EchoLink — Code Map
 
-> Lebendige Karte des Projekts. Stand: 2026-07-23. Bei größeren Umbauten aktualisieren.
+> Lebendige Karte des Projekts. Stand: 2026-07-24. Bei größeren Umbauten aktualisieren.
 > Zeilenzahlen sind Richtwerte — sie veralten. Muster und Verantwortlichkeiten bleiben.
 
 ## Überblick
@@ -84,8 +84,11 @@ Browser-Vollreload sind die Checkpoints absichtlich weg. Test: `tests/chatCheckp
 2. URLs in User-Message extrahieren → fetchAllUrls (lib/fetchUrl.js) → urlContext
 3. User-Message speichern (außer skipSave/regenerate)
 4. Memory-Kontext: selectMemoryItemsForContext + formatMemoryItemsForPrompt (lib/memoryItems.js)
-5. System-Prompt zusammenbauen: convo.system_prompt + RULES.md (immer!) + Memory +
-   Skills-Index (SKILLS_DIR=/root/echolink/skills, description-Zeilen) + urlContext + Zeit
+5. Stabilen System-Prompt aus convo.system_prompt + RULES.md (immer!) + Skills-Index
+   (SKILLS_DIR=/root/echolink/skills, description-Zeilen) und Calendar-Policy bauen.
+   Wechselnde Memory-Auswahl und aktuelle Zeit werden als vertrauenswürdiger
+   Laufzeitkontext an die letzte User-Nachricht gehängt, damit sie den Provider-Cache-Prefix
+   nicht bei jedem Turn invalidieren
 6. Tool-Loop (MAX_TOOL_ITERATIONS=25): Modell streamt, tool_calls werden ausgeführt:
    - web_search / firecrawl_scrape → `readOnlyWebRuntime.js`; konfigurierte Reddit-Threads
      werden vor MCP/Firecrawl über den read-only OAuth-Reader geladen. Bei Fortsetzung wird
@@ -97,7 +100,9 @@ Browser-Vollreload sind die Checkpoints absichtlich weg. Test: `tests/chatCheckp
      abgekoppelten Runner `scripts/run-terminal-operation.js`
    - calendar/gmail-Write-Tools → actionRequest mit Preview (pendingCalendarActions /
      pendingGmailActions Maps), Ausführung erst nach Approve-Endpoint
-7. Token-Streaming durchreichen; am Ende usage + context in `done`
+7. Token-Streaming durchreichen; Usage über alle Tool-Iterationen summieren und am Ende
+   zusammen mit context in `done` liefern. GPT-5.6 speichert zusätzlich Cache-Read/Write-
+   Tokens; `/api/chat/stats` liefert user-scoped 24h-/7d-/Gesamtwerte
 8. Memory-Update: alle 10 Messages oder bei force (import memory.js → extractMemory)
 
 **SSE-Protokoll** (`data: {json}\n\n`, HEILIGE Felder — nie umbenennen):
@@ -107,7 +112,8 @@ Browser-Vollreload sind die Checkpoints absichtlich weg. Test: `tests/chatCheckp
 
 Weitere Endpunkte: `POST /:conversationId/cancel` (requestId-basiert, lib/chatCancellation.js),
 `POST /models/list` (Z. ~2196 — Aggregat aus Ollama + konfigurierten Cloud-Providern;
-einmal durch Refactoring gebrochen, vorsicht), `GET /stats` (Token-Usage), `POST /allowlist`
+einmal durch Refactoring gebrochen, vorsicht), `GET /stats` (user-scoped Token-Usage und
+Prompt-Cache-Telemetrie), `POST /allowlist`
 (Terminal-Freigaben), `GET|POST /memory` (Chat-bezogene Memory-Views).
 
 ### server/lib/chatCancellation.js (~120 Z.)
@@ -141,7 +147,11 @@ Tests: `tests/terminalOperations.test.mjs`.
   Chat-Completions; toOpenAI() konvertiert internes Format (tool_calls-Ids werden
   generiert call_gen_N_M); splitSystemTimeNote Hilfsfunktion.
 - **anthropic.js** (~245 Z.): streamAnthropic, Messages-API, System getrennt.
-- **openai-responses.js** (~153 Z.): streamResponses, OpenAI Responses-API.
+- **openai-responses.js** (~235 Z.): streamResponses, OpenAI Responses-API. GPT-5.6 nutzt
+  einen gehashten stabilen `prompt_cache_key`, implizites Caching mit 30-Minuten-TTL und
+  übernimmt `cached_tokens`/`cache_write_tokens` aus der API-Usage. Nur der erste
+  System-Block wird zu `instructions`; spätere System-Hinweise bleiben als geordneter
+  Developer-Input an ihrer Position.
 - **ollamaVision.js / openaiVision.js**: Bild→Text für Uploads/Shift-Imports/PDFs.
 - Modell→Provider-Routing: Präfixe `claude*`=Anthropic, `zai/…`, `kimi/…`, sonst Ollama.
   In chat.js UND agentRunner.js (providerFor) doppelt — bei neuen Providern BEIDE anfassen.

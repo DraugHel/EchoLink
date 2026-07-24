@@ -880,10 +880,24 @@ export default function Chat({ user, onLogout }) {
   // Server-Puls: PM2-Apps, Disk, Load — alle 30s
   useEffect(() => {
     let alive = true
-    const load = () => api.get('/api/system/status')
-      .then(d => {
+    const load = () => Promise.allSettled([
+      api.get('/api/system/status'),
+      api.get('/api/chat/stats')
+    ])
+      .then(([systemResult, statsResult]) => {
         if (!alive) return
-        setSysStatus(d)
+        if (systemResult.status !== 'fulfilled') {
+          return
+        }
+        setSysStatus({
+          ...systemResult.value,
+          ...(statsResult.status === 'fulfilled'
+            ? {
+                promptCache:
+                  statsResult.value.prompt_cache
+              }
+            : {})
+        })
         setSysStatusUpdatedAt(Date.now())
       })
       .catch(() => {})
@@ -1378,7 +1392,16 @@ export default function Chat({ user, onLogout }) {
           const normalized = json.tokens ? {
             prompt_tokens: json.tokens.promptTokens,
             completion_tokens: json.tokens.completionTokens,
-            total_tokens: json.tokens.totalTokens
+            total_tokens: json.tokens.totalTokens,
+            ...(json.tokens.cacheObserved
+              ? {
+                  cached_tokens:
+                    json.tokens.cachedTokens || 0,
+                  cache_write_tokens:
+                    json.tokens.cacheWriteTokens || 0,
+                  cache_observed: true
+                }
+              : {})
           } : null
 
           const contextUsage = json.context ? {

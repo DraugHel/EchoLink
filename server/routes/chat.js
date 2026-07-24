@@ -117,6 +117,42 @@ function prepareChatSseResponse(res) {
   res.setHeader('Connection', 'keep-alive')
 }
 
+export function mergeTokenUsage(total, current) {
+  if (!current) return total
+
+  const previous = total || {
+    promptTokens: 0,
+    completionTokens: 0,
+    totalTokens: 0,
+    cachedTokens: 0,
+    cacheWriteTokens: 0,
+    cacheObserved: false
+  }
+
+  return {
+    promptTokens:
+      previous.promptTokens +
+      (current.promptTokens || 0),
+    completionTokens:
+      previous.completionTokens +
+      (current.completionTokens || 0),
+    totalTokens:
+      previous.totalTokens +
+      (current.totalTokens || 0),
+    cachedTokens:
+      previous.cachedTokens +
+      (current.cachedTokens || 0),
+    cacheWriteTokens:
+      previous.cacheWriteTokens +
+      (current.cacheWriteTokens || 0),
+    cacheObserved:
+      Boolean(
+        previous.cacheObserved ||
+        current.cacheObserved
+      )
+  }
+}
+
 function gmailActionCard(
   toolName,
   action
@@ -1227,16 +1263,12 @@ const selectedMemoryItems =
       systemContent = systemContent ? `${systemContent}\n\n${skillsNote}` : skillsNote
     }
   }
-  if (structuredMemory) {
-    const structuredBlock =
-      `[Relevant structured memories selected for this request:
+  const structuredRuntimeBlock =
+    structuredMemory
+      ? `[Relevant structured memories selected for this request:
 ${structuredMemory}
 Use these as background context. If these memories fully answer the request, answer directly and do not call tools merely to verify them. Do not mention memory IDs or metadata unless the user explicitly asks.]`
-
-    systemContent = systemContent
-      ? `${systemContent}\n\n${structuredBlock}`
-      : structuredBlock
-  }
+      : ''
 
 
   const calendarToolPolicy = `[Calendar tool policy:
@@ -1633,23 +1665,33 @@ Use these as background context. If these memories fully answer the request, ans
     'Trust this — do not rely on your training ' +
     'data for the current date.'
 
-  if (systemContent) {
-    ollamaMessages.push({
-      role: 'system',
-      content:
-        systemContent + '\n\n' + timeNote
-    })
-  } else {
-    ollamaMessages.push({
-      role: 'system',
-      content: timeNote
-    })
+  ollamaMessages.push({
+    role: 'system',
+    content: systemContent
+  })
+
+  const requestHistory =
+    fullHistory.map(message => ({ ...message }))
+  const latestUserMessage =
+    [...requestHistory]
+      .reverse()
+      .find(message => message.role === 'user')
+  const runtimeContext = [
+    structuredRuntimeBlock,
+    `[${timeNote}]`
+  ].filter(Boolean).join('\n\n')
+
+  if (latestUserMessage && runtimeContext) {
+    latestUserMessage.content =
+      `${latestUserMessage.content || ''}` +
+      `\n\n[Trusted runtime context for this request:\n` +
+      `${runtimeContext}\n]`
   }
 
   const rawContextPlan = trimContextMessages(
     [
       ...ollamaMessages,
-      ...fullHistory
+      ...requestHistory
     ],
     preprocessingBudgetTokens,
     contextMinRecentMessages
@@ -1818,6 +1860,7 @@ Use these as background context. If these memories fully answer the request, ans
 
   let allContent = ''
   let accThinking = ''
+  let aggregateTokenUsage = null
   try {
     let iterations = 0
     let workingMessages = [...ollamaMessages]
@@ -1848,6 +1891,11 @@ Use these as background context. If these memories fully answer the request, ans
         res,
         abortController.signal
       )
+      aggregateTokenUsage =
+        mergeTokenUsage(
+          aggregateTokenUsage,
+          tokenUsage
+        )
       assertChatRequestActive(activeRequest)
       if (fullContent) allContent += (allContent ? '\n\n' : '') + fullContent
       if (fullThinking) accThinking += (accThinking ? '\n\n' : '') + fullThinking
@@ -1915,10 +1963,22 @@ Use these as background context. If these memories fully answer the request, ans
         !isChatRequestCancelled(activeRequest)
       ) {
         db.prepare('INSERT INTO messages (conversation_id, role, content, think, usage) VALUES (?, ?, ?, ?, ?)')
-          .run(convo.id, 'assistant', cleanResponse, allThinking || '', tokenUsage ? JSON.stringify({
-            prompt_tokens: tokenUsage.promptTokens,
-            completion_tokens: tokenUsage.completionTokens,
-            total_tokens: tokenUsage.totalTokens,
+          .run(convo.id, 'assistant', cleanResponse, allThinking || '', aggregateTokenUsage ? JSON.stringify({
+            prompt_tokens:
+              aggregateTokenUsage.promptTokens,
+            completion_tokens:
+              aggregateTokenUsage.completionTokens,
+            total_tokens:
+              aggregateTokenUsage.totalTokens,
+            ...(aggregateTokenUsage.cacheObserved
+              ? {
+                  cached_tokens:
+                    aggregateTokenUsage.cachedTokens,
+                  cache_write_tokens:
+                    aggregateTokenUsage.cacheWriteTokens,
+                  cache_observed: true
+                }
+              : {}),
             context_budget_tokens:
               contextMeta.budgetTokens,
             context_estimated_input_tokens:
@@ -1941,8 +2001,8 @@ Use these as background context. If these memories fully answer the request, ans
           JSON.stringify({
             done: true,
             context: contextMeta,
-            ...(tokenUsage
-              ? { tokens: tokenUsage }
+            ...(aggregateTokenUsage
+              ? { tokens: aggregateTokenUsage }
               : {})
           }) +
           '\n\n'
@@ -2355,14 +2415,110 @@ router.get('/memory', requireAuth, (req, res) => {
   res.json({ memory })
 })
 
-// Get token usage stats
+function readUsageStats(userId, sinceSeconds = null) {
+  const sinceClause = sinceSeconds == null
+    ? ''
+    : 'AND m.created_at >= unixepoch() - ?'
+  const params = sinceSeconds == null
+    ? [userId]
+    : [userId, sinceSeconds]
+
+  const row = db.prepare(`
+    SELECT
+      COALESCE(SUM(
+        json_extract(m.usage, '$.total_tokens')
+      ), 0) AS total_tokens,
+      COALESCE(SUM(
+        json_extract(m.usage, '$.completion_tokens')
+      ), 0) AS completion_tokens,
+      COALESCE(SUM(
+        json_extract(m.usage, '$.prompt_tokens')
+      ), 0) AS prompt_tokens,
+      COALESCE(SUM(
+        json_extract(m.usage, '$.cached_tokens')
+      ), 0) AS cached_tokens,
+      COALESCE(SUM(
+        json_extract(m.usage, '$.cache_write_tokens')
+      ), 0) AS cache_write_tokens,
+      COALESCE(SUM(
+        CASE
+          WHEN json_extract(
+            m.usage,
+            '$.cache_observed'
+          ) = 1
+          THEN 1
+          ELSE 0
+        END
+      ), 0) AS cache_observed_requests,
+      COALESCE(SUM(
+        CASE
+          WHEN json_extract(
+            m.usage,
+            '$.cached_tokens'
+          ) > 0
+          THEN 1
+          ELSE 0
+        END
+      ), 0) AS cache_hit_requests
+    FROM messages m
+    JOIN conversations c
+      ON c.id = m.conversation_id
+    WHERE c.user_id = ?
+      AND m.usage IS NOT NULL
+      AND m.usage != ''
+      AND json_valid(m.usage)
+      ${sinceClause}
+  `).get(...params)
+
+  const summary = {
+    total_tokens: Number(row?.total_tokens) || 0,
+    completion_tokens:
+      Number(row?.completion_tokens) || 0,
+    prompt_tokens:
+      Number(row?.prompt_tokens) || 0,
+    cached_tokens:
+      Number(row?.cached_tokens) || 0,
+    cache_write_tokens:
+      Number(row?.cache_write_tokens) || 0,
+    cache_observed_requests:
+      Number(row?.cache_observed_requests) || 0,
+    cache_hit_requests:
+      Number(row?.cache_hit_requests) || 0
+  }
+
+  summary.input_cache_percent =
+    summary.prompt_tokens > 0
+      ? summary.cached_tokens /
+        summary.prompt_tokens *
+        100
+      : 0
+  summary.request_hit_percent =
+    summary.cache_observed_requests > 0
+      ? summary.cache_hit_requests /
+        summary.cache_observed_requests *
+        100
+      : 0
+
+  return summary
+}
+
+// Get user-scoped token and prompt-cache usage stats.
 router.get('/stats', requireAuth, (req, res) => {
-  const row = db.prepare(`SELECT
-    SUM(CASE WHEN json_extract(usage, '$.total_tokens') IS NOT NULL THEN json_extract(usage, '$.total_tokens') ELSE 0 END) as total_tokens,
-    SUM(CASE WHEN json_extract(usage, '$.completion_tokens') IS NOT NULL THEN json_extract(usage, '$.completion_tokens') ELSE 0 END) as completion_tokens,
-    SUM(CASE WHEN json_extract(usage, '$.prompt_tokens') IS NOT NULL THEN json_extract(usage, '$.prompt_tokens') ELSE 0 END) as prompt_tokens
-  FROM messages WHERE usage IS NOT NULL AND usage != ''`).get()
-  res.json(row || {})
+  const allTime =
+    readUsageStats(req.session.userId)
+  const last24h =
+    readUsageStats(req.session.userId, 86400)
+  const last7d =
+    readUsageStats(req.session.userId, 604800)
+
+  res.json({
+    ...allTime,
+    prompt_cache: {
+      all_time: allTime,
+      last_24h: last24h,
+      last_7d: last7d
+    }
+  })
 })
 
 // List available models from Ollama

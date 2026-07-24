@@ -42,6 +42,18 @@ function booleanLabel(value) {
   return value ? 'Ja' : 'Nein'
 }
 
+function formatCount(value) {
+  const number = Number(value)
+  if (!Number.isFinite(number)) return '–'
+  return Math.round(number).toLocaleString('de-DE')
+}
+
+function formatPercent(value) {
+  const number = Number(value)
+  if (!Number.isFinite(number)) return '–'
+  return `${number.toFixed(1).replace('.', ',')} %`
+}
+
 function Metric({
   label,
   value,
@@ -115,6 +127,14 @@ export default function SystemStatusPanel({
     Number(status?.cpu) >= 95 ||
     databaseWarning ||
     fullWarning
+
+  const cache24h =
+    status?.promptCache?.last_24h
+  const cache7d =
+    status?.promptCache?.last_7d
+  const cacheObserved =
+    Number(cache24h?.cache_observed_requests) > 0 ||
+    Number(cache7d?.cache_observed_requests) > 0
 
   return (
     <div
@@ -256,6 +276,73 @@ export default function SystemStatusPanel({
               )
             })}
           </div>
+
+          <div style={styles.sectionTitle}>
+            GPT-5.6 Prompt-Cache
+          </div>
+
+          {!cacheObserved ? (
+            <div
+              style={{
+                ...styles.emptyState,
+                marginBottom: 22
+              }}
+            >
+              Noch keine GPT-5.6 Cache-Daten.
+              Nach dem nächsten passenden Chat erscheinen
+              hier Reads, Writes und Trefferquoten.
+            </div>
+          ) : (
+            <div style={styles.cacheGrid}>
+              {[
+                ['Letzte 24 Stunden', cache24h],
+                ['Letzte 7 Tage', cache7d]
+              ].map(([label, summary]) => (
+                <article
+                  key={label}
+                  style={styles.cacheCard}
+                >
+                  <strong style={styles.cacheTitle}>
+                    {label}
+                  </strong>
+
+                  <div style={styles.mcpMetricGrid}>
+                    <Metric
+                      label="Input gecacht"
+                      value={formatPercent(
+                        summary?.input_cache_percent
+                      )}
+                      detail={
+                        `${formatCount(
+                          summary?.cached_tokens
+                        )} Tokens gelesen`
+                      }
+                    />
+                    <Metric
+                      label="Cache geschrieben"
+                      value={formatCount(
+                        summary?.cache_write_tokens
+                      )}
+                      detail="Tokens"
+                    />
+                    <Metric
+                      label="Requests mit Treffer"
+                      value={
+                        `${formatCount(
+                          summary?.cache_hit_requests
+                        )}/${formatCount(
+                          summary?.cache_observed_requests
+                        )}`
+                      }
+                      detail={formatPercent(
+                        summary?.request_hit_percent
+                      )}
+                    />
+                  </div>
+                </article>
+              ))}
+            </div>
+          )}
 
           <div style={styles.sectionTitle}>
             MCP-Server
@@ -559,6 +646,25 @@ const styles = {
     display: 'grid',
     gap: 9,
     marginBottom: 22
+  },
+  cacheGrid: {
+    display: 'grid',
+    gridTemplateColumns:
+      'repeat(auto-fit, minmax(240px, 1fr))',
+    gap: 9,
+    marginBottom: 22
+  },
+  cacheCard: {
+    display: 'grid',
+    gap: 9,
+    padding: 11,
+    border: '1px solid var(--border)',
+    borderRadius: 11,
+    background: 'var(--bg3)'
+  },
+  cacheTitle: {
+    color: 'var(--text1)',
+    fontSize: 12
   },
   mcpCard: {
     minWidth: 0,
