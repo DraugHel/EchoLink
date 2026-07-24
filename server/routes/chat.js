@@ -1672,21 +1672,10 @@ Use these as background context. If these memories fully answer the request, ans
 
   const requestHistory =
     fullHistory.map(message => ({ ...message }))
-  const latestUserMessage =
-    [...requestHistory]
-      .reverse()
-      .find(message => message.role === 'user')
   const runtimeContext = [
     structuredRuntimeBlock,
     `[${timeNote}]`
   ].filter(Boolean).join('\n\n')
-
-  if (latestUserMessage && runtimeContext) {
-    latestUserMessage.content =
-      `${latestUserMessage.content || ''}` +
-      `\n\n[Trusted runtime context for this request:\n` +
-      `${runtimeContext}\n]`
-  }
 
   const rawContextPlan = trimContextMessages(
     [
@@ -1802,9 +1791,26 @@ Use these as background context. If these memories fully answer the request, ans
     })
   )
 
+  const currentUserMessage =
+    [...ollamaMessages]
+      .reverse()
+      .find(message => message.role === 'user')
+
+  // Everything stored in the conversation (including restored
+  // attachments) remains byte-identical between turns. GPT-5.6 can
+  // therefore place an explicit cache breakpoint exactly here.
+  // Request-only URL, checkpoint and runtime context is appended
+  // afterwards so it never invalidates the reusable prefix.
+  if (currentUserMessage) {
+    currentUserMessage._promptCacheStableContent =
+      currentUserMessage.content || ''
+  }
+
   if (urlContext && ollamaMessages.length > 0) {
-    const last = ollamaMessages[ollamaMessages.length - 1]
-    if (last.role === 'user') last.content = last.content + urlContext
+    if (currentUserMessage) {
+      currentUserMessage.content =
+        currentUserMessage.content + urlContext
+    }
   }
 
   const checkpointContext = formatChatCheckpointContext(
@@ -1813,15 +1819,19 @@ Use these as background context. If these memories fully answer the request, ans
   const continuationContext =
     checkpointContext + terminalHandoffContext
   if (continuationContext && ollamaMessages.length > 0) {
-    const lastUser = [...ollamaMessages]
-      .reverse()
-      .find(message => message.role === 'user')
-
-    if (lastUser) {
-      lastUser.content = lastUser.content + continuationContext
+    if (currentUserMessage) {
+      currentUserMessage.content =
+        currentUserMessage.content + continuationContext
     } else if (ollamaMessages[0]?.role === 'system') {
       ollamaMessages[0].content += continuationContext
     }
+  }
+
+  if (currentUserMessage && runtimeContext) {
+    currentUserMessage.content =
+      `${currentUserMessage.content || ''}` +
+      `\n\n[Trusted runtime context for this request:\n` +
+      `${runtimeContext}\n]`
   }
 
   prepareChatSseResponse(res)

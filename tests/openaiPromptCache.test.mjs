@@ -42,6 +42,76 @@ test('Responses trennt stabilen System-Prefix von späterem Laufzeitkontext', ()
   )
 })
 
+test('Responses setzt explizite Breakpoints vor variablem Laufzeitkontext', () => {
+  const converted = toResponsesInput(
+    [
+      {
+        role: 'system',
+        content: 'Stabile Regeln'
+      },
+      {
+        role: 'user',
+        content: 'Erste Frage'
+      },
+      {
+        role: 'assistant',
+        content: 'Erste Antwort'
+      },
+      {
+        role: 'user',
+        content:
+          'Aktuelle Frage\n\n[Dynamische Uhrzeit]',
+        _promptCacheStableContent:
+          'Aktuelle Frage'
+      }
+    ],
+    {
+      explicitPromptCache: true
+    }
+  )
+
+  assert.deepEqual(
+    converted.input[0].content[0]
+      .prompt_cache_breakpoint,
+    {
+      mode: 'explicit'
+    }
+  )
+  assert.deepEqual(
+    converted.input[2].content,
+    [
+      {
+        type: 'input_text',
+        text: 'Aktuelle Frage',
+        prompt_cache_breakpoint: {
+          mode: 'explicit'
+        }
+      },
+      {
+        type: 'input_text',
+        text: '\n\n[Dynamische Uhrzeit]'
+      }
+    ]
+  )
+})
+
+test('Andere Modelle erhalten keine GPT-5.6-Breakpoints', () => {
+  const converted = toResponsesInput([
+    {
+      role: 'user',
+      content: 'Hallo'
+    }
+  ])
+
+  assert.equal(
+    Object.prototype.hasOwnProperty.call(
+      converted.input[0].content[0],
+      'prompt_cache_breakpoint'
+    ),
+    false
+  )
+})
+
 test('GPT-5.6 erhält einen stabilen, promptabhängigen Cache-Key', () => {
   const tools = [{
     type: 'function',
@@ -156,12 +226,20 @@ test('Chat und UI verdrahten Cache-Telemetrie', async () => {
 
   assert.match(providerSource, /prompt_cache_key/)
   assert.match(providerSource, /prompt_cache_options/)
-  assert.match(providerSource, /mode: 'implicit'/)
+  assert.match(providerSource, /mode: 'explicit'/)
+  assert.match(
+    providerSource,
+    /prompt_cache_breakpoint/
+  )
   assert.match(providerSource, /ttl: '30m'/)
 
   assert.match(
     chatSource,
     /Trusted runtime context for this request/
+  )
+  assert.match(
+    chatSource,
+    /_promptCacheStableContent/
   )
   assert.match(chatSource, /mergeTokenUsage/)
   assert.match(chatSource, /cache_write_tokens/)

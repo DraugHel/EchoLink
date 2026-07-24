@@ -75,7 +75,22 @@ export function normalizeResponsesUsage(usage) {
 // Internes Format -> Responses-API-Input. Assistant-Messages mit _raw
 // (Items aus vorheriger Responses-Iteration, inkl. Reasoning) gehen verbatim zurueck —
 // nur so bleibt die Denkkette ueber Tool-Calls hinweg erhalten.
-export function toResponsesInput(messages) {
+function addExplicitPromptCacheBreakpoint(parts) {
+  if (!parts.length) return parts
+
+  const lastPart = parts[parts.length - 1]
+  lastPart.prompt_cache_breakpoint = {
+    mode: 'explicit'
+  }
+  return parts
+}
+
+export function toResponsesInput(
+  messages,
+  {
+    explicitPromptCache = false
+  } = {}
+) {
   let instructions = ''
   const input = []
   let pendingCallIds = []
@@ -136,12 +151,68 @@ export function toResponsesInput(messages) {
     }
     if (m.images?.length) {
       const parts = m.images.map(b64 => ({ type: 'input_image', image_url: `data:${imgMediaType(b64)};base64,${b64}` }))
-      if (m.content) parts.push({ type: 'input_text', text: m.content })
+      const hasStableContent =
+        Object.prototype.hasOwnProperty.call(
+          m,
+          '_promptCacheStableContent'
+        )
+      const stableContent = hasStableContent
+        ? String(m._promptCacheStableContent || '')
+        : String(m.content || '')
+      if (stableContent) {
+        parts.push({
+          type: 'input_text',
+          text: stableContent
+        })
+      }
+      if (explicitPromptCache) {
+        addExplicitPromptCacheBreakpoint(parts)
+      }
+      if (
+        hasStableContent &&
+        stableContent !== String(m.content || '')
+      ) {
+        parts.push({
+          type: 'input_text',
+          text: String(m.content || '').slice(
+            stableContent.length
+          )
+        })
+      }
       input.push({ role: 'user', content: parts })
     } else if (m.role === 'assistant') {
       input.push({ role: 'assistant', content: [{ type: 'output_text', text: m.content || '' }] })
     } else {
-      input.push({ role: 'user', content: [{ type: 'input_text', text: m.content || '' }] })
+      const hasStableContent =
+        Object.prototype.hasOwnProperty.call(
+          m,
+          '_promptCacheStableContent'
+        )
+      const stableContent = hasStableContent
+        ? String(m._promptCacheStableContent || '')
+        : String(m.content || '')
+      const parts = [{
+        type: 'input_text',
+        text: stableContent
+      }]
+
+      if (explicitPromptCache) {
+        addExplicitPromptCacheBreakpoint(parts)
+      }
+
+      if (
+        hasStableContent &&
+        stableContent !== String(m.content || '')
+      ) {
+        parts.push({
+          type: 'input_text',
+          text: String(m.content || '').slice(
+            stableContent.length
+          )
+        })
+      }
+
+      input.push({ role: 'user', content: parts })
     }
   }
   return { instructions, input }
@@ -149,7 +220,14 @@ export function toResponsesInput(messages) {
 
 export async function streamResponses(model, messages, options, res, abortSignal) {
   if (!OPENAI_KEY) throw new Error('API-Key fuer OpenAI fehlt in der .env')
-  const { instructions, input } = toResponsesInput(messages)
+  const explicitPromptCache =
+    supportsPromptCacheConfig(model)
+  const { instructions, input } = toResponsesInput(
+    messages,
+    {
+      explicitPromptCache
+    }
+  )
   const tools = (options?.tools ?? ALL_TOOLS).map(t => ({
     type: 'function',
     name: t.function.name,
@@ -169,7 +247,7 @@ export async function streamResponses(model, messages, options, res, abortSignal
         tools
       ),
       prompt_cache_options: {
-        mode: 'implicit',
+        mode: 'explicit',
         ttl: '30m'
       }
     } : {}),
