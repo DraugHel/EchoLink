@@ -1,0 +1,142 @@
+# EchoLink Editor Engine (E3)
+
+## Architecture baseline
+
+**Status:** accepted for E3 V1
+
+**Decision date:** 2026-07-27
+
+**Source baseline:** `4511411b8e60cc20be2ee5fdfad3a76f17e74a8e`
+
+This directory is the normative architecture baseline for E3. It turns the
+external `EchoLink_E3_Masterplan.md` and the step-0 audit into repository-local
+decisions. An accepted ADR authorizes later implementation planning; it does
+not by itself authorize a server, user, container, database, apply, deploy, or
+other runtime change.
+
+## V1 objective
+
+E3 V1 creates an isolated edit session from an exact Git commit, permits only
+deterministic editor operations, freezes and validates the resulting patch,
+records an auditable approval, and exports a reproducible patch package.
+
+E3 V1 does not write to the production repository. Productive apply, deploy,
+PM2 control, Git push, and automated post-apply undo remain disabled.
+
+## Architecture at a glance
+
+```mermaid
+flowchart TD
+    UI["EchoLink UI / agent tools"] --> CP["E3 control plane"]
+    CP --> DB["editor.db"]
+    CP --> WM["Workspace manager"]
+    WM --> MR["Dedicated Git mirror"]
+    WM --> EW["Unprivileged editor worker"]
+    EW --> WS["Session workspace"]
+    CP --> VB["Fixed-profile validator broker"]
+    VB --> VS["Ephemeral validation snapshot"]
+    CP --> AS["Immutable artifact store"]
+```
+
+The existing root-owned EchoLink process may orchestrate E3, but it must not
+become a free-form file or shell execution path. The editor worker owns only
+its assigned workspace. It receives no production secrets, Docker socket,
+Docker group membership, PM2 control, deploy rights, push credentials, or
+write access to `/root/echolink`.
+
+## Decision index
+
+| ADR | Decision | Status |
+|---|---|---|
+| [ADR-001](adr/001-trust-boundaries.md) | Trust boundaries and process identities | accepted |
+| [ADR-002](adr/002-workspaces.md) | Mirror, worktree, and workspace model | accepted |
+| [ADR-003](adr/003-session-state.md) | Session state machine and invariants | accepted |
+| [ADR-004](adr/004-persistence-artifacts.md) | Metadata database and artifacts | accepted |
+| [ADR-005](adr/005-file-operations.md) | File operations and path safety | accepted |
+| [ADR-006](adr/006-validation-sandbox.md) | Validation broker, containers, and network | accepted |
+| [ADR-007](adr/007-apply-undo.md) | Review, approval, export, apply, and undo | accepted |
+| [ADR-008](adr/008-recovery-retention-monitoring.md) | Recovery, reaper, quotas, and monitoring | accepted |
+
+`Accepted` means the decision is the default for V1. A later incompatible
+change requires a superseding ADR. Features explicitly marked `deferred`
+remain outside the implementation scope until their own security gate passes.
+
+## Binding invariants
+
+1. The edit and validation workers cannot write to `/root/echolink`.
+2. Every session is bound to one full base commit SHA.
+3. Mutations occur only through registered, schema-validated E3 operations.
+4. Agent-provided shell commands are never executed.
+5. Paths are relative, normalized, contained, and checked without following
+   symlinks.
+6. `.git`, production `.env`, secrets, databases, backups, uploads,
+   dependencies, and generated output are forbidden mutation targets.
+7. Validation receives an environment allowlist without production secrets.
+8. Database tests use newly created synthetic data only.
+9. Test servers never bind the production port.
+10. UI validation can reach only its isolated test application.
+11. Approval binds the base SHA, patch SHA-256, validation-manifest SHA-256,
+    and policy/profile versions.
+12. Any mutation after review freeze invalidates validation and approval.
+13. Session, workspace, mirror, apply, cleanup, and port concurrency is
+    controlled by leases plus fencing tokens.
+14. Every policy or validation error fails closed.
+15. V1 does not push, deploy, restart PM2, or productively apply.
+16. Logs are structured, redacted, bounded, and stored as hashed artifacts.
+17. Completion requires durable artifacts, a final event, and confirmed
+    workspace cleanup or quarantine.
+
+The [threat model](threat-model.md) maps every invariant to an enforcement
+point and a planned negative test.
+
+## Normative priorities
+
+When documents disagree, use this order:
+
+1. a newer accepted or superseding ADR
+2. this architecture baseline
+3. the threat model
+4. the external E3 master plan
+5. older planning notes
+
+Security invariants always fail closed. An implementation cannot silently
+weaken an invariant because a host feature is unavailable.
+
+## Phase gates
+
+| Phase | Permitted outcome | Gate |
+|---|---|---|
+| Step 1 | documentation only | all invariants mapped to enforcement and tests |
+| Step 2 | pure state-machine code | no filesystem, shell, network, or database access |
+| Steps 3–7 | metadata, read-only workspaces, deterministic edits, artifacts | negative path and concurrency tests pass |
+| Steps 8–10 | isolated validation | broker and network isolation pass adversarial tests |
+| Steps 11–14 | review and pilot export | approval hash binding and recovery pass fault injection |
+| Step 15+ | guarded productive apply | separate explicit approval and operational readiness review |
+
+## Explicit non-goals for V1
+
+- semantic or AST-based editing
+- dependency installation inside a session
+- arbitrary commands or arbitrary validator arguments
+- access to production services or data from validation
+- direct editing of generated assets or dependencies
+- multi-agent concurrent mutation of one workspace
+- automatic merge conflict resolution
+- productive apply, deploy, push, PM2 restart, or hard reset
+- automatic Docker pruning
+- claiming crash-atomic multi-file production replacement
+
+## Terminology
+
+- **Control plane:** authenticated orchestration, policy, state, and audit.
+- **Workspace manager:** trusted owner of mirror and worktree lifecycle.
+- **Editor worker:** unprivileged process that performs registered operations
+  in exactly one assigned workspace.
+- **Validator broker:** minimal privileged launcher for fixed container
+  profiles; it is not a general command runner.
+- **Validation snapshot:** frozen copy of the approved candidate used for
+  executing untrusted project code.
+- **Artifact:** immutable, size-bounded bytes addressed by SHA-256.
+- **Lease:** time-bounded ownership record.
+- **Fencing token:** monotonically increasing token required for every later
+  state-changing write.
