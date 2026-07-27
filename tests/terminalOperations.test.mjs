@@ -92,8 +92,10 @@ test('freigegebene Terminal-Operation wird auch bei Doppelstart exakt einmal aus
   assert.equal(firstApproval.shouldStart, true)
   assert.equal(secondApproval.shouldStart, false)
 
+  let executionCwd = ''
   const execFn = (_command, _options, callback) => {
     executions += 1
+    executionCwd = _options.cwd
     setTimeout(() => callback(null, 'restarted\n', ''), 20)
   }
 
@@ -109,6 +111,7 @@ test('freigegebene Terminal-Operation wird auch bei Doppelstart exakt einmal aus
   ])
 
   assert.equal(executions, 1)
+  assert.equal(path.resolve(executionCwd), projectRoot)
   assert.equal(first.status, 'succeeded')
   assert.equal(second.status, 'succeeded')
   assert.equal(first.result, 'restarted\n')
@@ -249,7 +252,13 @@ test('echter detached Runner übernimmt die Operation über eine neue DB-Verbind
       }
     )
 
-    assert.equal(completed.status, 'succeeded')
+    assert.equal(
+      completed.status,
+      'succeeded',
+      completed.result ||
+        completed.error ||
+        'Detached terminal runner failed without diagnostics'
+    )
     assert.equal(completed.result, 'detached-ok\n')
     assert.equal(
       database.prepare(`

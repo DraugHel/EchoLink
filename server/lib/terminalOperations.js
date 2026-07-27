@@ -16,6 +16,10 @@ const TERMINAL_STATUSES = new Set([
   'expired'
 ])
 
+const projectRoot = fileURLToPath(
+  new URL('../..', import.meta.url)
+)
+
 const runnerPath = fileURLToPath(
   new URL('../../scripts/run-terminal-operation.js', import.meta.url)
 )
@@ -502,7 +506,7 @@ export async function executeTerminalOperation(
   {
     database = db,
     execFn = execChildProcess,
-    cwd = '/root'
+    cwd = projectRoot
   } = {}
 ) {
   const startedAt = nowMs()
@@ -595,7 +599,7 @@ export function spawnTerminalOperationRunner(
     nodePath,
     [runnerPath, operationId],
     {
-      cwd: fileURLToPath(new URL('../..', import.meta.url)),
+      cwd: projectRoot,
       detached: true,
       stdio: 'ignore',
       env
