@@ -137,19 +137,58 @@ function Message({ role, content, streaming, images, think, toolStatus, actionRe
   // Timestamp nur zeigen, wenn >5 min seit der vorherigen Message vergangen sind
   const showTime = !prevCreatedAt || !createdAt || (createdAt - prevCreatedAt > 300)
 
-  function handleApprove(actionId, actionRequest) {
-    setActionStates(prev => ({ ...prev, [actionId]: 'approved' }))
-    if (onApprove) onApprove(actionId, actionRequest)
+  async function handleApprove(actionId, actionRequest) {
+    try {
+      if (onApprove) {
+        await onApprove(actionId, actionRequest)
+      }
+      setActionStates(prev => ({
+        ...prev,
+        [actionId]: 'approved'
+      }))
+    } catch {
+      setActionStates(prev => {
+        const next = { ...prev }
+        delete next[actionId]
+        return next
+      })
+    }
   }
 
-  function handleAlways(actionId, actionRequest) {
-    setActionStates(prev => ({ ...prev, [actionId]: 'approved' }))
-    if (onAlwaysAllow) onAlwaysAllow(actionId, actionRequest)
+  async function handleAlways(actionId, actionRequest) {
+    try {
+      if (onAlwaysAllow) {
+        await onAlwaysAllow(actionId, actionRequest)
+      }
+      setActionStates(prev => ({
+        ...prev,
+        [actionId]: 'approved'
+      }))
+    } catch {
+      setActionStates(prev => {
+        const next = { ...prev }
+        delete next[actionId]
+        return next
+      })
+    }
   }
 
-  function handleDeny(actionId, actionRequest) {
-    setActionStates(prev => ({ ...prev, [actionId]: 'denied' }))
-    if (onDeny) onDeny(actionId, actionRequest)
+  async function handleDeny(actionId, actionRequest) {
+    try {
+      if (onDeny) {
+        await onDeny(actionId, actionRequest)
+      }
+      setActionStates(prev => ({
+        ...prev,
+        [actionId]: 'denied'
+      }))
+    } catch {
+      setActionStates(prev => {
+        const next = { ...prev }
+        delete next[actionId]
+        return next
+      })
+    }
   }
 
   return (

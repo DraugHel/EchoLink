@@ -77,6 +77,7 @@ import {
   getTerminalOperation,
   listPendingTerminalActions,
   listTerminalOperationsForRequest,
+  reconcileRunningTerminalOperations,
   recoverQueuedTerminalOperations,
   spawnTerminalOperationRunner,
   waitForTerminalOperation
@@ -94,11 +95,26 @@ const pendingGmailActions = new Map()
 setImmediate(() => {
   try {
     const recovered = recoverQueuedTerminalOperations()
+    const reconciliation =
+      reconcileRunningTerminalOperations()
     if (recovered > 0) {
       console.log(JSON.stringify({
         level: 'info',
         event: 'terminal_operations_recovered',
         count: recovered
+      }))
+    }
+    if (
+      reconciliation.orphaned > 0 ||
+      reconciliation.ambiguous > 0
+    ) {
+      console.log(JSON.stringify({
+        level:
+          reconciliation.ambiguous > 0
+            ? 'warn'
+            : 'info',
+        event: 'terminal_operations_reconciled',
+        ...reconciliation
       }))
     }
   } catch (error) {
@@ -109,6 +125,34 @@ setImmediate(() => {
     }))
   }
 })
+
+const terminalReconciliationTimer = setInterval(() => {
+  try {
+    const reconciliation =
+      reconcileRunningTerminalOperations()
+
+    if (
+      reconciliation.orphaned > 0 ||
+      reconciliation.ambiguous > 0
+    ) {
+      console.log(JSON.stringify({
+        level:
+          reconciliation.ambiguous > 0
+            ? 'warn'
+            : 'info',
+        event: 'terminal_operations_reconciled',
+        ...reconciliation
+      }))
+    }
+  } catch (error) {
+    console.error(JSON.stringify({
+      level: 'error',
+      event: 'terminal_operations_reconciliation_failed',
+      error: error?.message || String(error)
+    }))
+  }
+}, 15_000)
+terminalReconciliationTimer.unref?.()
 
 function prepareChatSseResponse(res) {
   if (res.headersSent) return
@@ -2194,7 +2238,7 @@ router.post(
       actionId,
       req.session.userId
     )
-    const operation = approval.operation
+    let operation = approval.operation
 
     if (!operation) {
       return res.status(404).json({
@@ -2204,11 +2248,15 @@ router.post(
 
     pendingTerminalActions.delete(actionId)
 
-    // The detached runner stays alive when this PM2 process restarts itself.
-    // Repeated approval requests are idempotent: the SQLite claim allows the
-    // command to transition from queued to running exactly once.
-    if (operation.status === 'queued') {
+    // Self-disruptive commands are handed to the host service manager before
+    // PM2 can terminate this process tree. Repeated approval requests are
+    // idempotent and may start the queued operation at most once.
+    if (
+      approval.shouldStart &&
+      operation.status === 'queued'
+    ) {
       spawnTerminalOperationRunner(operation.id)
+      operation = getTerminalOperation(operation.id)
     }
 
     if (entry) {

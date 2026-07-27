@@ -8,6 +8,13 @@ import { useTheme } from '../components/ThemePicker.jsx'
 import CorsnFace from '../components/CorsnFace.jsx'
 import LunaMiniHud from '../components/LunaMiniHud.jsx'
 import TerminalTimeline from '../components/TerminalTimeline.jsx'
+import {
+  MAX_CHAT_RECONNECT_RETRIES,
+  chatReconnectDelayMs,
+  chatReconnectingContent,
+  clearChatReconnectContent,
+  resolveChatActionRequests
+} from '../lib/chatReconnect.js'
 
 // EchoLink UI Phase 3.1: lazy tool panels
 const SettingsPanel = lazy(
@@ -1296,9 +1303,9 @@ export default function Chat({ user, onLogout }) {
       conversationId
     }
 
-    // SSE stream with auto-reconnect (max 3 retries, exponential backoff)
+    // SSE stream with bounded exponential reconnect.
     const endpoint = `/api/chat/${conversationId}`
-    const maxRetries = 3
+    const maxRetries = MAX_CHAT_RECONNECT_RETRIES
     let retryCount = 0
 
     const streamAttempt = async (isRetry) => {
@@ -1323,6 +1330,22 @@ export default function Chat({ user, onLogout }) {
         const error = new Error('Streaming-Antwort enthaelt keinen Body')
         error.retryable = true
         throw error
+      }
+
+      if (isRetry) {
+        setMessages(prev => prev.map(message =>
+          message.id === assistantId
+            ? {
+                ...message,
+                content:
+                  clearChatReconnectContent(
+                    message.content ||
+                    assistantContent
+                  ),
+                streaming: true
+              }
+            : message
+        ))
       }
 
       const reader = response.body.getReader()
@@ -1534,18 +1557,29 @@ export default function Chat({ user, onLogout }) {
         while (retryCount < maxRetries && streamGenerationRef.current === myGeneration) {
           retryCount++
           setMessages(prev => prev.map(m =>
-            m.id === assistantId ? { ...m, content: assistantContent + `\n\n_Reconnecting… (${retryCount}/${maxRetries})_`, streaming: true } : m
+            m.id === assistantId
+              ? {
+                  ...m,
+                  content: chatReconnectingContent(
+                    assistantContent,
+                    retryCount,
+                    maxRetries
+                  ),
+                  streaming: true
+                }
+              : m
           ))
-          await new Promise(r => setTimeout(r, 1000 * Math.pow(2, retryCount - 1)))
+          await new Promise(resolve =>
+            setTimeout(
+              resolve,
+              chatReconnectDelayMs(retryCount)
+            )
+          )
           if (streamGenerationRef.current !== myGeneration) break
           try {
             abortControllerRef.current = new AbortController()
             await streamAttempt(true)
             completeTrackedChatRun()
-            // Reconnect succeeded — restore content without the reconnecting text
-            setMessages(prev => prev.map(m =>
-              m.id === assistantId ? { ...m, content: assistantContent, streaming: true } : m
-            ))
             break
           } catch (retryErr) {
             if (retryErr.name === 'AbortError') {
@@ -1601,10 +1635,20 @@ export default function Chat({ user, onLogout }) {
   async function handleActionApprove(actionId, actionRequest) {
     try {
       const endpoint = '/api/chat/action/' + actionId + '/approve'
-      await fetch(endpoint, {
+      const response = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' }
       })
+      if (!response.ok) {
+        throw await readResponseError(response)
+      }
+      setMessages(prev => prev.map(message => ({
+        ...message,
+        actionRequests: resolveChatActionRequests(
+          message.actionRequests,
+          actionId
+        )
+      })))
       const chatRunState = chatRunStateRef.current
       if (chatRunState) {
         setChatRun(current =>
@@ -1613,6 +1657,7 @@ export default function Chat({ user, onLogout }) {
       }
     } catch (err) {
       console.error('Approve error:', err)
+      throw err
     }
   }
 
@@ -1626,16 +1671,26 @@ export default function Chat({ user, onLogout }) {
         await api.post('/api/chat/allowlist', { prefix })
       }
     } catch (err) { console.error('Allowlist error:', err) }
-    handleActionApprove(actionId, actionRequest)
+    return handleActionApprove(actionId, actionRequest)
   }
 
   async function handleActionDeny(actionId, actionRequest) {
     try {
       const endpoint = '/api/chat/action/' + actionId + '/deny'
-      await fetch(endpoint, {
+      const response = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' }
       })
+      if (!response.ok) {
+        throw await readResponseError(response)
+      }
+      setMessages(prev => prev.map(message => ({
+        ...message,
+        actionRequests: resolveChatActionRequests(
+          message.actionRequests,
+          actionId
+        )
+      })))
       const chatRunState = chatRunStateRef.current
       if (chatRunState) {
         setChatRun(current =>
@@ -1644,6 +1699,7 @@ export default function Chat({ user, onLogout }) {
       }
     } catch (err) {
       console.error('Deny error:', err)
+      throw err
     }
   }
 

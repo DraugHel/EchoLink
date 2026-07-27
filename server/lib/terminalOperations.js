@@ -1,4 +1,8 @@
-import { exec as execChildProcess, spawn } from 'node:child_process'
+import {
+  exec as execChildProcess,
+  spawn,
+  spawnSync
+} from 'node:child_process'
 import crypto from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 
@@ -7,6 +11,11 @@ import db from '../db.js'
 const APPROVAL_TTL_MS = 5 * 60 * 1000
 const DEFAULT_TIMEOUT_MS = 60 * 1000
 const SELF_DISRUPTIVE_TIMEOUT_MS = 8 * 60 * 1000
+const RUNNER_HEARTBEAT_MS = 5_000
+const RUNNER_ORPHAN_GRACE_MS = 15_000
+const SYSTEMD_TIMEOUT_BUFFER_MS = 30_000
+const SYSTEMD_RUN_PATH = '/usr/bin/systemd-run'
+const SYSTEMCTL_PATH = '/usr/bin/systemctl'
 const MAX_COMMAND_LENGTH = 20_000
 const MAX_RESULT_LENGTH = 12_000
 const TERMINAL_STATUSES = new Set([
@@ -96,6 +105,9 @@ export function ensureTerminalOperationSchema(database = db) {
       error TEXT NOT NULL DEFAULT '',
       exit_code INTEGER,
       runner_pid INTEGER,
+      runner_kind TEXT NOT NULL DEFAULT '',
+      runner_ref TEXT NOT NULL DEFAULT '',
+      heartbeat_at INTEGER,
       message_id INTEGER,
       created_at INTEGER NOT NULL,
       expires_at INTEGER,
@@ -131,6 +143,23 @@ export function ensureTerminalOperationSchema(database = db) {
       WHERE tool_call_id IS NOT NULL AND tool_call_id <> '';
   `)
 
+  for (const [column, definition] of [
+    ['runner_kind', "TEXT NOT NULL DEFAULT ''"],
+    ['runner_ref', "TEXT NOT NULL DEFAULT ''"],
+    ['heartbeat_at', 'INTEGER']
+  ]) {
+    try {
+      database.exec(`
+        ALTER TABLE chat_terminal_operations
+        ADD COLUMN ${column} ${definition}
+      `)
+    } catch (error) {
+      if (!String(error.message).includes('duplicate column name')) {
+        throw error
+      }
+    }
+  }
+
   try {
     database.exec(`
       ALTER TABLE messages
@@ -146,6 +175,9 @@ export function ensureTerminalOperationSchema(database = db) {
     CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_terminal_operation
       ON messages(source_terminal_operation_id)
       WHERE source_terminal_operation_id IS NOT NULL;
+
+    CREATE INDEX IF NOT EXISTS idx_chat_terminal_operations_status
+      ON chat_terminal_operations(status, started_at);
   `)
 }
 
@@ -406,7 +438,7 @@ function finishTerminalOperation(
   const safeError = sanitizeTerminalOutput(error, 2_000)
 
   const finish = database.transaction(() => {
-    database.prepare(`
+    const update = database.prepare(`
       UPDATE chat_terminal_operations
       SET
         status = ?,
@@ -423,6 +455,8 @@ function finishTerminalOperation(
       finishedAt,
       operation.id
     )
+
+    if (update.changes !== 1) return false
 
     database.prepare(`
       INSERT OR IGNORE INTO messages (
@@ -461,10 +495,193 @@ function finishTerminalOperation(
       SET updated_at = unixepoch()
       WHERE id = ?
     `).run(operation.conversation_id)
+
+    return true
   })
 
   finish()
   return getTerminalOperation(operation.id, database)
+}
+
+function runnerProcessState(pid) {
+  if (!Number.isInteger(Number(pid)) || Number(pid) <= 0) {
+    return false
+  }
+
+  try {
+    process.kill(Number(pid), 0)
+    return true
+  } catch (error) {
+    if (error?.code === 'ESRCH') return false
+    if (error?.code === 'EPERM') return true
+    return null
+  }
+}
+
+function systemdUnitState(
+  operation,
+  {
+    spawnSyncFn = spawnSync,
+    systemctlPath = SYSTEMCTL_PATH
+  } = {}
+) {
+  if (!operation.runner_ref) return null
+
+  const result = spawnSyncFn(
+    systemctlPath,
+    [
+      'show',
+      operation.runner_ref,
+      '--property=LoadState',
+      '--property=ActiveState',
+      '--property=SubState',
+      '--property=MainPID'
+    ],
+    {
+      encoding: 'utf8',
+      timeout: 2_000,
+      maxBuffer: 64 * 1024
+    }
+  )
+
+  if (result?.error) return null
+
+  const properties = Object.fromEntries(
+    String(result?.stdout || '')
+      .split(/\r?\n/)
+      .map(line => line.split('=', 2))
+      .filter(parts => parts.length === 2)
+  )
+
+  if (properties.LoadState === 'not-found') return false
+
+  if (
+    ['active', 'activating', 'reloading', 'deactivating']
+      .includes(properties.ActiveState)
+  ) {
+    return true
+  }
+
+  if (
+    ['inactive', 'failed'].includes(properties.ActiveState)
+  ) {
+    return false
+  }
+
+  return result?.status === 0
+    ? runnerProcessState(operation.runner_pid)
+    : null
+}
+
+function terminalRunnerState(operation) {
+  if (operation.runner_kind === 'systemd') {
+    return systemdUnitState(operation)
+  }
+
+  return runnerProcessState(operation.runner_pid)
+}
+
+function reconcileRunningTerminalOperation(
+  operation,
+  {
+    database = db,
+    currentTime = nowMs(),
+    runnerStateFn = terminalRunnerState
+  } = {}
+) {
+  if (!operation || operation.status !== 'running') {
+    return {
+      state: 'ignored',
+      operation
+    }
+  }
+
+  const lastEvidenceAt = Math.max(
+    Number(operation.started_at) || 0,
+    Number(operation.heartbeat_at) || 0
+  )
+
+  if (
+    lastEvidenceAt > 0 &&
+    currentTime - lastEvidenceAt < RUNNER_ORPHAN_GRACE_MS
+  ) {
+    return {
+      state: 'grace',
+      operation
+    }
+  }
+
+  const runnerState = runnerStateFn(operation)
+  if (runnerState === true) {
+    return {
+      state: 'alive',
+      operation
+    }
+  }
+
+  if (runnerState === null) {
+    return {
+      state: 'ambiguous',
+      operation
+    }
+  }
+
+  const result =
+    'Terminal runner disappeared before completion was recorded. ' +
+    'The command was not retried automatically. ' +
+    'Its real-world effects require manual verification.'
+
+  return {
+    state: 'orphaned',
+    operation: finishTerminalOperation(
+      operation,
+      {
+        status: 'failed',
+        result,
+        error:
+          'Terminal runner is no longer alive; automatic retry is forbidden.'
+      },
+      database
+    )
+  }
+}
+
+export function reconcileRunningTerminalOperations({
+  database = db,
+  currentTime = nowMs(),
+  runnerStateFn = terminalRunnerState
+} = {}) {
+  const running = database.prepare(`
+    SELECT *
+    FROM chat_terminal_operations
+    WHERE status = 'running'
+    ORDER BY started_at ASC, rowid ASC
+  `).all()
+
+  const summary = {
+    checked: running.length,
+    alive: 0,
+    grace: 0,
+    orphaned: 0,
+    ambiguous: 0
+  }
+
+  for (const operation of running) {
+    const result = reconcileRunningTerminalOperation(
+      operation,
+      {
+        database,
+        currentTime,
+        runnerStateFn
+      }
+    )
+
+    if (result.state in summary) {
+      summary[result.state] += 1
+    }
+  }
+
+  return summary
 }
 
 export async function waitForTerminalOperation(
@@ -479,22 +696,34 @@ export async function waitForTerminalOperation(
   const first = getTerminalOperation(operationId, database)
   if (!first) throw new Error('Terminal operation not found')
 
-  const deadline = nowMs() + (
-    Number.isFinite(timeoutMs)
-      ? timeoutMs
-      : first.timeout_ms + 30_000
-  )
+  const deadline = Number.isFinite(timeoutMs)
+    ? nowMs() + timeoutMs
+    : (
+        Number(first.started_at) ||
+        Number(first.approved_at) ||
+        Number(first.created_at) ||
+        nowMs()
+      ) + first.timeout_ms + SYSTEMD_TIMEOUT_BUFFER_MS
 
-  while (nowMs() <= deadline) {
+  while (true) {
     if (signal?.aborted) {
       const error = new Error('Terminal operation wait aborted')
       error.name = 'AbortError'
       throw error
     }
 
-    const operation = getTerminalOperation(operationId, database)
+    let operation = getTerminalOperation(operationId, database)
     if (!operation) throw new Error('Terminal operation not found')
+
+    if (operation.status === 'running') {
+      operation = reconcileRunningTerminalOperation(
+        operation,
+        { database }
+      ).operation
+    }
+
     if (TERMINAL_STATUSES.has(operation.status)) return operation
+    if (nowMs() > deadline) break
     await sleep(pollMs)
   }
 
@@ -506,21 +735,55 @@ export async function executeTerminalOperation(
   {
     database = db,
     execFn = execChildProcess,
-    cwd = projectRoot
+    cwd = projectRoot,
+    runnerPid = process.pid
   } = {}
 ) {
   const startedAt = nowMs()
   const claim = database.prepare(`
     UPDATE chat_terminal_operations
-    SET status = 'running', started_at = ?
+    SET
+      status = 'running',
+      started_at = ?,
+      runner_pid = ?,
+      runner_kind = CASE
+        WHEN runner_kind = '' THEN 'process'
+        ELSE runner_kind
+      END,
+      heartbeat_at = ?
     WHERE id = ? AND status = 'queued'
-  `).run(startedAt, operationId)
+  `).run(
+    startedAt,
+    Number(runnerPid) || null,
+    startedAt,
+    operationId
+  )
 
   if (claim.changes !== 1) {
     return waitForTerminalOperation(operationId, { database })
   }
 
   const operation = getTerminalOperation(operationId, database)
+  const heartbeatStatement = database.prepare(`
+    UPDATE chat_terminal_operations
+    SET heartbeat_at = ?
+    WHERE
+      id = ?
+      AND status = 'running'
+      AND runner_pid = ?
+  `)
+  const heartbeat = setInterval(() => {
+    try {
+      heartbeatStatement.run(
+        nowMs(),
+        operationId,
+        Number(runnerPid) || null
+      )
+    } catch {
+      // Reconciliation will handle an unavailable or dead runner.
+    }
+  }, RUNNER_HEARTBEAT_MS)
+  heartbeat.unref?.()
 
   try {
     const { error, stdout, stderr } = await runExec(
@@ -578,7 +841,171 @@ export async function executeTerminalOperation(
       },
       database
     )
+  } finally {
+    clearInterval(heartbeat)
   }
+}
+
+export function terminalOperationUnitName(operationId) {
+  const value = String(operationId || '').trim().toLowerCase()
+
+  if (
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
+      .test(value)
+  ) {
+    throw new Error('Invalid terminal operation ID for systemd unit')
+  }
+
+  return `echolink-terminal-${value}`
+}
+
+function failTerminalRunnerLaunch(
+  operation,
+  error,
+  database = db
+) {
+  const startedAt = nowMs()
+  const claim = database.prepare(`
+    UPDATE chat_terminal_operations
+    SET
+      status = 'running',
+      started_at = ?,
+      heartbeat_at = ?
+    WHERE id = ? AND status = 'queued'
+  `).run(startedAt, startedAt, operation.id)
+
+  if (claim.changes !== 1) {
+    return getTerminalOperation(operation.id, database)
+  }
+
+  const claimed = getTerminalOperation(operation.id, database)
+  return finishTerminalOperation(
+    claimed,
+    {
+      status: 'failed',
+      result:
+        'The trusted terminal runner could not be started. ' +
+        'The command was not executed and no fallback runner was used.',
+      error: error?.message || String(error)
+    },
+    database
+  )
+}
+
+function launchSystemdTerminalOperation(
+  operation,
+  {
+    database = db,
+    spawnSyncFn = spawnSync,
+    systemdStateFn = systemdUnitState,
+    systemdRunPath = SYSTEMD_RUN_PATH,
+    nodePath = process.execPath,
+    env = process.env
+  } = {}
+) {
+  const unitName = terminalOperationUnitName(operation.id)
+  const runtimeSeconds = Math.ceil(
+    (
+      Number(operation.timeout_ms) +
+      SYSTEMD_TIMEOUT_BUFFER_MS
+    ) / 1_000
+  )
+
+  if (
+    operation.runner_kind === 'systemd' &&
+    operation.runner_ref === unitName
+  ) {
+    const existingState = systemdStateFn(operation)
+    if (existingState === true || existingState === null) {
+      return Number(operation.runner_pid) || null
+    }
+
+    failTerminalRunnerLaunch(
+      operation,
+      new Error(
+        'The previous systemd runner is no longer active. ' +
+        'The command was not retried automatically.'
+      ),
+      database
+    )
+    return null
+  }
+
+  const launchAttemptAt = nowMs()
+  database.prepare(`
+    UPDATE chat_terminal_operations
+    SET
+      runner_kind = 'systemd',
+      runner_ref = ?,
+      runner_pid = NULL,
+      heartbeat_at = ?
+    WHERE id = ? AND status = 'queued'
+  `).run(unitName, launchAttemptAt, operation.id)
+
+  const serviceEnvironment = [
+    'HOME',
+    'PM2_HOME',
+    'PATH',
+    'LANG',
+    'LC_ALL',
+    'ECHOLINK_DB_PATH'
+  ]
+    .filter(key => String(env[key] || '').trim())
+    .map(key => `--setenv=${key}=${env[key]}`)
+
+  const args = [
+    '--quiet',
+    '--collect',
+    `--unit=${unitName}`,
+    '--service-type=exec',
+    '--property=KillMode=control-group',
+    `--property=RuntimeMaxSec=${runtimeSeconds}s`,
+    '--property=TimeoutStopSec=10s',
+    '--property=UMask=0022',
+    `--working-directory=${projectRoot}`,
+    ...serviceEnvironment,
+    nodePath,
+    runnerPath,
+    operation.id
+  ]
+
+  const launched = spawnSyncFn(
+    systemdRunPath,
+    args,
+    {
+      cwd: projectRoot,
+      env,
+      encoding: 'utf8',
+      timeout: 10_000,
+      maxBuffer: 64 * 1024
+    }
+  )
+
+  if (launched?.error || launched?.status !== 0) {
+    const storedOperation = getTerminalOperation(
+      operation.id,
+      database
+    )
+    if (systemdStateFn(storedOperation) === true) {
+      return Number(storedOperation.runner_pid) || null
+    }
+
+    const detail = sanitizeTerminalOutput(
+      launched?.stderr ||
+      launched?.stdout ||
+      launched?.error?.message ||
+      `systemd-run exited with ${launched?.status ?? 'unknown status'}`,
+      2_000
+    )
+    failTerminalRunnerLaunch(
+      operation,
+      new Error(`systemd runner launch failed: ${detail}`),
+      database
+    )
+    return null
+  }
+
+  return Number(launched.pid) || null
 }
 
 export function spawnTerminalOperationRunner(
@@ -586,6 +1013,9 @@ export function spawnTerminalOperationRunner(
   {
     database = db,
     spawnFn = spawn,
+    spawnSyncFn = spawnSync,
+    systemdStateFn = systemdUnitState,
+    systemdRunPath = SYSTEMD_RUN_PATH,
     nodePath = process.execPath,
     env = process.env
   } = {}
@@ -593,6 +1023,20 @@ export function spawnTerminalOperationRunner(
   const operation = getTerminalOperation(operationId, database)
   if (!operation || operation.status !== 'queued') {
     return null
+  }
+
+  if (isSelfDisruptiveTerminalCommand(operation.command)) {
+    return launchSystemdTerminalOperation(
+      operation,
+      {
+        database,
+        spawnSyncFn,
+        systemdStateFn,
+        systemdRunPath,
+        nodePath,
+        env
+      }
+    )
   }
 
   const child = spawnFn(
@@ -608,7 +1052,10 @@ export function spawnTerminalOperationRunner(
 
   database.prepare(`
     UPDATE chat_terminal_operations
-    SET runner_pid = ?
+    SET
+      runner_pid = ?,
+      runner_kind = 'process',
+      runner_ref = ''
     WHERE id = ? AND status = 'queued'
   `).run(child.pid || null, operationId)
 

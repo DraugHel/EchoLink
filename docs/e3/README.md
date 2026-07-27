@@ -89,6 +89,13 @@ remain outside the implementation scope until their own security gate passes.
 The [threat model](threat-model.md) maps every invariant to an enforcement
 point and a planned negative test.
 
+## Operational incident notes
+
+These notes document failures in the existing EchoLink operational path. They
+are non-normative for E3 and do not expand E3 V1 permissions:
+
+- [2026-07-27: PM2 self-deploy runner orphan](incidents/2026-07-27-pm2-self-deploy-runner.md)
+
 ## Normative priorities
 
 When documents disagree, use this order:
