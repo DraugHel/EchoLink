@@ -54,21 +54,40 @@ export function redactTerminalSecrets(text) {
 }
 
 export function sanitizeTerminalOutput(value, maxLength = MAX_RESULT_LENGTH) {
-  return redactTerminalSecrets(
+  const sanitized = redactTerminalSecrets(
     String(value || '')
       .replace(/\x1B\[[0-9;]*[mGKHF]/g, '')
       .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '')
-  ).slice(0, maxLength)
+  )
+  const limit = Math.max(0, Number(maxLength) || 0)
+
+  if (sanitized.length <= limit) return sanitized
+  if (limit === 0) return ''
+
+  const marker = '\n\n… [output middle truncated] …\n\n'
+  if (limit <= marker.length) {
+    return sanitized.slice(-limit)
+  }
+
+  const available = limit - marker.length
+  const headLength = Math.floor(available / 3)
+  const tailLength = available - headLength
+
+  return (
+    sanitized.slice(0, headLength) +
+    marker +
+    sanitized.slice(-tailLength)
+  )
 }
 
 export function isSelfDisruptiveTerminalCommand(command) {
   const value = String(command || '').toLowerCase()
 
   return (
-    /(?:^|[;&|]\s*)(?:sudo\s+)?pm2\s+(?:restart|reload|resurrect|start|stop|delete|kill)\b/.test(value) ||
-    /(?:^|[;&|]\s*)npm\s+(?:run\s+)?deploy\b/.test(value) ||
-    /(?:^|[;&|]\s*)(?:bash|sh)\s+[^\n;&|]*deploy\.sh\b/.test(value) ||
-    /(?:^|[;&|]\s*)(?:sudo\s+)?systemctl\s+(?:restart|reload|stop|start)\s+[^\n;&|]*echolink\b/.test(value)
+    /\bpm2\b[^\n]{0,240}\b(?:restart|reload|resurrect|start|stop|delete|kill)\b/.test(value) ||
+    /\bnpm\b[^\n]{0,240}\b(?:run\s+)?deploy\b/.test(value) ||
+    /\bdeploy\.sh\b/.test(value) ||
+    /\bsystemctl\b[^\n]{0,240}\b(?:restart|reload|stop|start)\b[^\n]{0,240}\becholink\b/.test(value)
   )
 }
 

@@ -15,6 +15,11 @@ import {
   clearChatReconnectContent,
   resolveChatActionRequests
 } from '../lib/chatReconnect.js'
+import {
+  getLunaToolKind,
+  getLunaToolText,
+  normalizeLunaToolStatus
+} from '../lib/lunaToolPresence.js'
 
 // EchoLink UI Phase 3.1: lazy tool panels
 const SettingsPanel = lazy(
@@ -323,83 +328,6 @@ function metricColor(value, warning, critical) {
 }
 
 
-// EchoLink Phase 5.1: Luna Presence Mode
-function normalizeLunaToolStatus(value) {
-  if (!value) return ''
-
-  if (typeof value === 'string') {
-    return value.trim()
-  }
-
-  if (Array.isArray(value)) {
-    return value
-      .map(normalizeLunaToolStatus)
-      .filter(Boolean)
-      .join(', ')
-  }
-
-  if (typeof value === 'object') {
-    const preferred =
-      value.message ||
-      value.label ||
-      value.description ||
-      value.status ||
-      value.tool ||
-      value.name
-
-    return normalizeLunaToolStatus(preferred)
-  }
-
-  return String(value).trim()
-}
-
-function getLunaToolText(value) {
-  const raw = normalizeLunaToolStatus(value)
-
-  if (!raw) return ''
-
-  const compact = raw
-    .replace(/\s+/g, ' ')
-    .trim()
-
-  if (/gmail|e-?mail|mailbox/i.test(compact)) {
-    return 'Luna durchsucht Gmail …'
-  }
-
-  if (/calendar|kalender|termin/i.test(compact)) {
-    return 'Luna schaut in den Kalender …'
-  }
-
-  if (/web|search|suche|searx|browse/i.test(compact)) {
-    return 'Luna durchsucht das Web …'
-  }
-
-  if (/terminal|shell|command|befehl|exec/i.test(compact)) {
-    return 'Luna führt einen Befehl aus …'
-  }
-
-  if (/upload|attachment|anhang|datei|file/i.test(compact)) {
-    return 'Luna liest eine Datei …'
-  }
-
-  if (/memory|gedächtnis|gedaechtnis|erinner/i.test(compact)) {
-    return 'Luna schaut ins Gedächtnis …'
-  }
-
-  if (/task|aufgabe|scheduler/i.test(compact)) {
-    return 'Luna arbeitet an einer Aufgabe …'
-  }
-
-  if (/tool|werkzeug/i.test(compact)) {
-    return 'Luna benutzt ein Werkzeug …'
-  }
-
-  return compact.toLowerCase().startsWith('luna')
-    ? compact
-    : `Luna arbeitet: ${compact}`
-}
-
-
 function formatLunaToolEvent(event) {
   const rawName = String(event?.tool || '').trim()
 
@@ -436,23 +364,6 @@ function formatLunaToolEvent(event) {
   }`
 }
 
-
-// EchoLink Phase 5.2: Luna Reactions
-function getLunaToolKind(value) {
-  const raw = normalizeLunaToolStatus(value)
-
-  if (!raw) return ''
-
-  if (/gmail|e-?mail|mailbox/i.test(raw)) return 'gmail'
-  if (/calendar|kalender|termin/i.test(raw)) return 'calendar'
-  if (/terminal|shell|command|befehl|exec/i.test(raw)) return 'terminal'
-  if (/upload|attachment|anhang|datei|file/i.test(raw)) return 'file'
-  if (/memory|gedächtnis|gedaechtnis|erinner/i.test(raw)) return 'memory'
-  if (/task|aufgabe|scheduler/i.test(raw)) return 'task'
-  if (/web|search|suche|searx|browse/i.test(raw)) return 'web'
-
-  return 'tool'
-}
 
 function getLunaPresenceSymbol(kind) {
   const symbols = {

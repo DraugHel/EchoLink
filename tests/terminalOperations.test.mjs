@@ -20,6 +20,7 @@ import {
   getTerminalOperation,
   isSelfDisruptiveTerminalCommand,
   reconcileRunningTerminalOperations,
+  sanitizeTerminalOutput,
   spawnTerminalOperationRunner,
   terminalOperationUnitName,
   waitForTerminalOperation
@@ -561,9 +562,40 @@ test('Restart- und Deploy-Kommandos bekommen das längere Handoff-Zeitfenster', 
     true
   )
   assert.equal(
+    isSelfDisruptiveTerminalCommand(
+      "bash -lc 'pm2 restart echolink && pm2 status'"
+    ),
+    true
+  )
+  const heredocDeploy =
+    "bash <<'RUNNER'\nnpm run deploy\nRUNNER"
+  assert.equal(
+    isSelfDisruptiveTerminalCommand(heredocDeploy),
+    true
+  )
+  assert.equal(
+    isSelfDisruptiveTerminalCommand(
+      "bash -lc 'cd /root/echolink && bash scripts/deploy.sh'"
+    ),
+    true
+  )
+  assert.equal(
     isSelfDisruptiveTerminalCommand('pm2 status'),
     false
   )
+})
+
+test('lange Terminalausgabe bewahrt Anfang und Abschluss', () => {
+  const output =
+    'BEGIN\n' +
+    'x'.repeat(400) +
+    '\nDEPLOY_SUCCESS'
+  const sanitized = sanitizeTerminalOutput(output, 120)
+
+  assert.equal(sanitized.length, 120)
+  assert.match(sanitized, /^BEGIN/)
+  assert.match(sanitized, /output middle truncated/)
+  assert.match(sanitized, /DEPLOY_SUCCESS$/)
 })
 
 test('verwaiste laufende Operation wird fehlgeschlagen markiert und nie automatisch wiederholt', () => {
