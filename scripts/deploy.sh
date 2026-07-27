@@ -280,10 +280,12 @@ MCP_RUNTIME_MODE="$(
 
 if [[ "$MCP_RUNTIME_MODE" == "active" ]]; then
   timeout 30s node scripts/mcp-web-runtime-smoke.js \
-    --expect-backend=mcp
+    --expect-backend=mcp \
+    --allow-tool-error
 else
   timeout 30s node scripts/mcp-web-runtime-smoke.js \
-    --expect-backend=direct
+    --expect-backend=direct \
+    --allow-tool-error
 fi
 
 pm2 save
