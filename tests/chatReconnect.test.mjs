@@ -5,6 +5,7 @@ import {
   MAX_CHAT_RECONNECT_RETRIES,
   chatReconnectDelayMs,
   chatReconnectingContent,
+  chatStreamApplicationError,
   clearChatReconnectContent,
   resolveChatActionRequests
 } from '../client/src/lib/chatReconnect.js'
@@ -46,6 +47,18 @@ test('Reconnect-Hinweis verschwindet direkt nach erfolgreichem Verbindungsaufbau
     clearChatReconnectContent(reconnecting),
     /Reconnecting/
   )
+})
+
+test('Providerfehler startet keinen automatischen Chat-Retry', () => {
+  const error = chatStreamApplicationError(
+    'OpenAI Responses stream error'
+  )
+
+  assert.equal(
+    error.message,
+    'OpenAI Responses stream error'
+  )
+  assert.equal(error.retryable, false)
 })
 
 test('erledigte Freigabe wird aus dem sichtbaren Pending-State entfernt', () => {

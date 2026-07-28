@@ -12,6 +12,7 @@ import {
   MAX_CHAT_RECONNECT_RETRIES,
   chatReconnectDelayMs,
   chatReconnectingContent,
+  chatStreamApplicationError,
   clearChatReconnectContent,
   resolveChatActionRequests
 } from '../lib/chatReconnect.js'
@@ -1393,7 +1394,7 @@ export default function Chat({ user, onLogout }) {
           }))
         }
         if (json.error) {
-          throw new Error(json.error)
+          throw chatStreamApplicationError(json.error)
         }
         if (json.actionRequest) {
           ensureTrackedChatRun(current =>

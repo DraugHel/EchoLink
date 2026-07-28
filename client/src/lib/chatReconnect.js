@@ -30,6 +30,22 @@ export function clearChatReconnectContent(content) {
   )
 }
 
+export function chatStreamApplicationError(value) {
+  const message =
+    typeof value === 'string'
+      ? value.trim()
+      : String(value?.message || '').trim()
+  const error = new Error(
+    message || 'Chat stream failed'
+  )
+
+  // The server completed the HTTP/SSE transport and deliberately emitted an
+  // application/provider error. Reposting the chat request would start a new
+  // model run rather than resume the failed one.
+  error.retryable = false
+  return error
+}
+
 export function resolveChatActionRequests(
   actionRequests,
   actionId
