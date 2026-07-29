@@ -1,6 +1,6 @@
 # EchoLink — Code Map
 
-> Lebendige Karte des Projekts. Stand: 2026-07-24. Bei größeren Umbauten aktualisieren.
+> Lebendige Karte des Projekts. Stand: 2026-07-28. Bei größeren Umbauten aktualisieren.
 > Zeilenzahlen sind Richtwerte — sie veralten. Muster und Verantwortlichkeiten bleiben.
 
 ## Überblick
@@ -61,6 +61,21 @@ Tabellen:
 - Shift-System: `shift_imports`, `shift_import_items`, `shift_import_pages`,
   `shift_calendar_events`, `shift_sync_runs`, `shift_sync_actions`, `shift_settings`
 Migrationen: defensive try/catch ALTER TABLEs beim Boot.
+
+### server/e3/core/
+Reine Domänenlogik der EchoLink Editor Engine, noch ohne Runtime-Anbindung:
+- **contracts.js**: kanonische Sessionzustände, Commands, Eventtypen,
+  Fehlercodes und Validatoren für UUID, vollständigen Git-SHA, SHA-256,
+  Version und Fencing-Token.
+- **sessionState.js**: eingefrorene Session-Erzeugung und zentrale
+  V1-Zustandsmaschine. Jede Transition prüft Session-ID, erwartete Version,
+  Lease-Owner und Fencing-Token. Review-, Approval- und Exportnachweise sind
+  hashgebunden; Mutation oder Reopen invalidiert sie. Produktiver Apply und
+  Revert sind reserviert, aber fail-closed deaktiviert.
+
+Kein Modul unter `server/e3/core/` greift auf Dateisystem, SQLite, Netzwerk,
+Prozesse, Shell, Workspace oder UI zu. Persistenz und Idempotency-Keys folgen
+erst in E3 Schritt 3. Test: `tests/e3SessionState.test.mjs`.
 
 ### server/middleware/auth.js
 `requireAuth` (Session) + `requireApiKey` (Header gegen ECHO_API_KEY, für /api/external).
@@ -280,8 +295,10 @@ Pipeline: Foto/PDF des Dienstplans → Vision-OCR → Prüf-UI → Google-Calend
 
 ## Tests (tests/)
 
-node:test, 7 Dateien: smoke, scheduler, chatCancellation, chatRunState, memorySyntax,
-taskCleanup, taskRunState. `npm test`. Kein Client-Testsetup.
+`node:test` ohne separates Framework; `npm test` führt alle
+`tests/*.test.mjs` aus. E3 Core Contracts und Zustandsmaschine werden
+tabellengetrieben in `tests/e3SessionState.test.mjs` geprüft. Kein separates
+Client-Testsetup.
 
 ## Skills (skills/)
 

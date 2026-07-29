@@ -14,6 +14,24 @@ decisions. An accepted ADR authorizes later implementation planning; it does
 not by itself authorize a server, user, container, database, apply, deploy, or
 other runtime change.
 
+## Implementation progress
+
+| Step | Source baseline | Result |
+|---|---|---|
+| 1 – ADR package | `4511411b8e60cc20be2ee5fdfad3a76f17e74a8e` | accepted architecture and threat model |
+| 2 – Core contracts | `175fddb628ff2fbfc6f5f3842226fbf078567f92` | pure session contracts and state machine |
+
+Step 2 lives in `server/e3/core/`. It defines the complete V1 and reserved
+status sets, commands, event and failure codes, immutable session
+construction, guarded transitions, version and fencing checks, frozen
+candidate hashes, approval binding, invalidation, recovery targets, and
+export completion evidence.
+
+The Step-2 module has no filesystem, database, network, process, workspace,
+shell, route, or UI integration. Durable transactions, append-only event
+storage, and request-ID replay are Step-3 responsibilities. Reserved
+productive apply and revert commands fail closed in V1.
+
 ## V1 objective
 
 E3 V1 creates an isolated edit session from an exact Git commit, permits only
