@@ -20,6 +20,7 @@ other runtime change.
 |---|---|---|
 | 1 – ADR package | `4511411b8e60cc20be2ee5fdfad3a76f17e74a8e` | accepted architecture and threat model |
 | 2 – Core contracts | `175fddb628ff2fbfc6f5f3842226fbf078567f92` | pure session contracts and state machine |
+| 3 – Persistence | `61a301c851e55cd1bd22cda6e68477b8c84acf3b` | isolated SQLite schema, migrations, repository, events, leases, and idempotency |
 
 Step 2 lives in `server/e3/core/`. It defines the complete V1 and reserved
 status sets, commands, event and failure codes, immutable session
@@ -28,9 +29,21 @@ candidate hashes, approval binding, invalidation, recovery targets, and
 export completion evidence.
 
 The Step-2 module has no filesystem, database, network, process, workspace,
-shell, route, or UI integration. Durable transactions, append-only event
-storage, and request-ID replay are Step-3 responsibilities. Reserved
-productive apply and revert commands fail closed in V1.
+shell, route, or UI integration. Reserved productive apply and revert
+commands fail closed in V1.
+
+Step 3 lives in `server/e3/persistence/`. It defines an isolated `editor.db`
+with immutable checksummed migrations, verified WAL/foreign-key/durability
+pragmas, startup `quick_check`, optimistic versions, append-only events,
+request-ID replay, operation journaling, artifact and validation metadata,
+and fenced leases. Session transitions, events, operation records,
+candidate invalidation, and idempotency results use SQLite transactions.
+
+No Step-3 module is imported by the application server or worker. Merely
+starting or deploying EchoLink therefore does not create `editor.db`, change
+the existing application database, expose a route, start a process, or enable
+productive apply. Artifact byte publication, workspace access, validation,
+and runtime wiring remain later gated steps.
 
 ## V1 objective
 

@@ -74,8 +74,27 @@ Reine Domänenlogik der EchoLink Editor Engine, noch ohne Runtime-Anbindung:
   Revert sind reserviert, aber fail-closed deaktiviert.
 
 Kein Modul unter `server/e3/core/` greift auf Dateisystem, SQLite, Netzwerk,
-Prozesse, Shell, Workspace oder UI zu. Persistenz und Idempotency-Keys folgen
-erst in E3 Schritt 3. Test: `tests/e3SessionState.test.mjs`.
+Prozesse, Shell, Workspace oder UI zu. Test:
+`tests/e3SessionState.test.mjs`.
+
+### server/e3/persistence/
+Isolierte Persistenzschicht der Editor Engine, noch ohne Runtime-Anbindung:
+- **database.js**: öffnet ausschließlich auf expliziten Aufruf eine separate
+  `editor.db`, erzwingt und verifiziert WAL, Foreign Keys, 5-s-Busy-Timeout
+  und `synchronous=FULL`, führt checksummierte Migrationen unter exklusivem
+  Lock aus und prüft die DB mit `quick_check`.
+- **migrations/**: nummerierte, unveränderliche Schemahistorie. Migration 001
+  erzeugt Sessions, Operationen, append-only Events, Validierungsläufe,
+  Artefaktmetadaten, Leases und Idempotency-Keys mit Domänen-Constraints.
+- **editorRepository.js**: transaktionale Session-Erzeugung und Transitionen,
+  optimistische Versionen, Request-ID-Replay, atomare Operationsjournale und
+  Kandidateninvalidierung sowie Fencing-geschützte Lease-Claims.
+- **errors.js**: stabile Fehlercodes der Persistenzgrenze.
+
+Die Persistenzmodule werden weder von `server/index.js` noch `server/worker.js`
+importiert und verändern daher beim normalen Start weder die bestehende
+Anwendungsdatenbank noch den Runtime-Betrieb. Test:
+`tests/e3Persistence.test.mjs`.
 
 ### server/middleware/auth.js
 `requireAuth` (Session) + `requireApiKey` (Header gegen ECHO_API_KEY, für /api/external).

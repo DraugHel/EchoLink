@@ -102,6 +102,60 @@ export const E3_EVENT_TYPE = Object.freeze({
 
 export const E3_EVENT_TYPES = enumValues(E3_EVENT_TYPE)
 
+export const E3_OPERATION_TYPE = Object.freeze({
+  CREATE_FILE: 'create_file',
+  REPLACE_EXACT: 'replace_exact',
+  INSERT_BEFORE: 'insert_before',
+  INSERT_AFTER: 'insert_after',
+  RENAME_FILE: 'rename_file',
+  MOVE_FILE: 'move_file',
+  DELETE_FILE: 'delete_file'
+})
+
+export const E3_OPERATION_TYPES =
+  enumValues(E3_OPERATION_TYPE)
+
+export const E3_ARTIFACT_TYPE = Object.freeze({
+  CANDIDATE_MANIFEST: 'candidate_manifest',
+  FORWARD_PATCH: 'forward_patch',
+  REVERSE_PATCH: 'reverse_patch',
+  UNIFIED_DIFF: 'unified_diff',
+  DIFF_STAT: 'diff_stat',
+  VALIDATION_MANIFEST: 'validation_manifest',
+  VALIDATION_LOG: 'validation_log',
+  SCREENSHOT: 'screenshot',
+  REVIEW_SUMMARY: 'review_summary',
+  EXPORT_PACKAGE: 'export_package'
+})
+
+export const E3_ARTIFACT_TYPES =
+  enumValues(E3_ARTIFACT_TYPE)
+
+export const E3_VALIDATION_STATUS = Object.freeze({
+  QUEUED: 'QUEUED',
+  RUNNING: 'RUNNING',
+  SUCCEEDED: 'SUCCEEDED',
+  FAILED: 'FAILED',
+  CANCELLED: 'CANCELLED',
+  TIMED_OUT: 'TIMED_OUT'
+})
+
+export const E3_VALIDATION_STATUSES =
+  enumValues(E3_VALIDATION_STATUS)
+
+export const E3_LEASE_RESOURCE_TYPE = Object.freeze({
+  SESSION: 'session',
+  WORKSPACE: 'workspace',
+  MIRROR_UPDATE: 'mirror_update',
+  VALIDATION_RUN: 'validation_run',
+  PORT: 'port',
+  CLEANUP: 'cleanup',
+  APPLY: 'apply'
+})
+
+export const E3_LEASE_RESOURCE_TYPES =
+  enumValues(E3_LEASE_RESOURCE_TYPE)
+
 export const E3_FAILURE_CODE = Object.freeze({
   INVALID_SESSION: 'INVALID_SESSION',
   INVALID_SESSION_ID: 'INVALID_SESSION_ID',

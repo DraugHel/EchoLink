@@ -2,16 +2,20 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 import {
+  E3_ARTIFACT_TYPES,
   E3DomainError,
   E3_EVENT_TYPES,
   E3_FAILURE_CODE,
   E3_FAILURE_CODES,
+  E3_LEASE_RESOURCE_TYPES,
+  E3_OPERATION_TYPES,
   E3_RESERVED_SESSION_COMMANDS,
   E3_RESERVED_SESSION_STATUSES,
   E3_SESSION_COMMAND,
   E3_SESSION_COMMANDS,
   E3_SESSION_STATUS,
   E3_SESSION_STATUSES,
+  E3_VALIDATION_STATUSES,
   isCanonicalSessionId,
   isFullGitCommit,
   isSha256
@@ -167,7 +171,11 @@ test('Core-Verträge sind vollständig, eindeutig und eingefroren', () => {
     E3_SESSION_STATUSES,
     E3_SESSION_COMMANDS,
     E3_EVENT_TYPES,
-    E3_FAILURE_CODES
+    E3_FAILURE_CODES,
+    E3_OPERATION_TYPES,
+    E3_ARTIFACT_TYPES,
+    E3_VALIDATION_STATUSES,
+    E3_LEASE_RESOURCE_TYPES
   ]) {
     assert.equal(new Set(values).size, values.length)
     assert.equal(Object.isFrozen(values), true)
