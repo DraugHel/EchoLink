@@ -1,6 +1,6 @@
 # EchoLink — Code Map
 
-> Lebendige Karte des Projekts. Stand: 2026-07-28. Bei größeren Umbauten aktualisieren.
+> Lebendige Karte des Projekts. Stand: 2026-07-29. Bei größeren Umbauten aktualisieren.
 > Zeilenzahlen sind Richtwerte — sie veralten. Muster und Verantwortlichkeiten bleiben.
 
 ## Überblick
@@ -86,6 +86,8 @@ Isolierte Persistenzschicht der Editor Engine, noch ohne Runtime-Anbindung:
 - **migrations/**: nummerierte, unveränderliche Schemahistorie. Migration 001
   erzeugt Sessions, Operationen, append-only Events, Validierungsläufe,
   Artefaktmetadaten, Leases und Idempotency-Keys mit Domänen-Constraints.
+  Migration 002 ergänzt die gefencte Workspace-Identität und ihren
+  Lebenszyklus.
 - **editorRepository.js**: transaktionale Session-Erzeugung und Transitionen,
   optimistische Versionen, Request-ID-Replay, atomare Operationsjournale und
   Kandidateninvalidierung sowie Fencing-geschützte Lease-Claims.
@@ -95,6 +97,28 @@ Die Persistenzmodule werden weder von `server/index.js` noch `server/worker.js`
 importiert und verändern daher beim normalen Start weder die bestehende
 Anwendungsdatenbank noch den Runtime-Betrieb. Test:
 `tests/e3Persistence.test.mjs`.
+
+### server/e3/workspaces/
+Read-only Workspace Manager der Editor Engine, weiterhin ohne
+Runtime-Anbindung:
+- **workspaceManager.js**: erzeugt, prüft und entfernt genau einen
+  sessiongebundenen Workspace unter aktuellem Lease und Fencing-Token.
+- **workspaceGit.js**: verwendet ausschließlich `/usr/bin/git` ohne Shell,
+  Credentials oder gespeicherte Remotes; verwaltet einen dedizierten Bare-
+  Mirror und exakte detached Worktrees aus dem vertrauenswürdigen lokalen
+  `main`.
+- **paths.js / managerLock.js**: kanonische UUID-Pfade, erneut geprüfte
+  Manager-Verzeichnisse und atomare Mirror-/Workspace-Locks.
+- **workspaceManifest.js / treeScanner.js**: atomar publiziertes, SHA-256-
+  gebundenes Manager-Manifest sowie begrenzte Größen-/Eintragsprüfung ohne
+  Symlinks zu verfolgen.
+- **workspaceRepository.js**: transaktionale Workspace-Metadaten und
+  wiederaufnehmbarer `READY → REMOVING → REMOVED`-Cleanup.
+
+Das Feature ist standardmäßig deaktiviert (`E3_WORKSPACE_ENABLED` muss exakt
+`true` sein), wird weder von `server/index.js` noch `server/worker.js`
+importiert und exponiert noch keine Dateioperation oder Prozess-API. Tests:
+`tests/e3WorkspaceManager.test.mjs`.
 
 ### server/middleware/auth.js
 `requireAuth` (Session) + `requireApiKey` (Header gegen ECHO_API_KEY, für /api/external).

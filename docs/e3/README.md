@@ -21,6 +21,7 @@ other runtime change.
 | 1 – ADR package | `4511411b8e60cc20be2ee5fdfad3a76f17e74a8e` | accepted architecture and threat model |
 | 2 – Core contracts | `175fddb628ff2fbfc6f5f3842226fbf078567f92` | pure session contracts and state machine |
 | 3 – Persistence | `61a301c851e55cd1bd22cda6e68477b8c84acf3b` | isolated SQLite schema, migrations, repository, events, leases, and idempotency |
+| 4 – Read-only workspaces | `e6b474eac35e0a6a2f51545e908e767e6e4f901c` | dedicated bare mirror, exact detached worktrees, manifests, fenced lifecycle, and safe cleanup |
 
 Step 2 lives in `server/e3/core/`. It defines the complete V1 and reserved
 status sets, commands, event and failure codes, immutable session
@@ -44,6 +45,26 @@ starting or deploying EchoLink therefore does not create `editor.db`, change
 the existing application database, expose a route, start a process, or enable
 productive apply. Artifact byte publication, workspace access, validation,
 and runtime wiring remain later gated steps.
+
+Step 4 lives in `server/e3/workspaces/` and adds migration 002 for workspace
+metadata. The manager accepts only a full commit reachable from the trusted
+local `main`, fetches it into a credential-free dedicated bare mirror, and
+creates a detached worktree below a canonical session UUID. A manager-owned,
+hash-bound manifest records identity, fencing, age, logical size, entries,
+symlinks, and the absence of workers, processes, containers, and ports.
+
+Creation, inspection, and removal require the current workspace lease and
+fencing token. Atomic lock files serialize mirror and workspace lifecycle.
+Cleanup is limited to the exact registered worktree and empty manager-owned
+directories; it rejects path, manifest, mirror, symlink, and lease tampering.
+The manager never follows workspace symlinks and never recursively deletes a
+derived path.
+
+`E3_WORKSPACE_ENABLED` defaults to off. No Step-4 module is imported by the
+application server or worker, no route or editor operation is exposed, and no
+workspace, Git process, database migration, or cleanup runs during normal
+EchoLink startup or deploy. The production repository remains a read-only
+local fetch source and is covered by byte/status invariance tests.
 
 ## V1 objective
 

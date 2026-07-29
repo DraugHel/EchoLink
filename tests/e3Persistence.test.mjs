@@ -37,6 +37,9 @@ import {
   migration001
 } from '../server/e3/persistence/migrations/001-initial-schema.js'
 import {
+  migration002
+} from '../server/e3/persistence/migrations/002-workspaces.js'
+import {
   editorMigrationChecksum
 } from '../server/e3/persistence/migrations/index.js'
 
@@ -236,19 +239,28 @@ test('editor.db erzwingt Pragmas, Schema und Migrationchecksum', t => {
     'ok'
   )
 
-  const migration = database.prepare(`
+  const migrations = database.prepare(`
     SELECT version, name, checksum, applied_at
     FROM schema_migrations
-  `).get()
-  assert.deepEqual(migration, {
-    version: 1,
-    name: migration001.name,
-    checksum: editorMigrationChecksum(migration001),
-    applied_at: 1_700
-  })
+    ORDER BY version
+  `).all()
+  assert.deepEqual(migrations, [
+    {
+      version: 1,
+      name: migration001.name,
+      checksum: editorMigrationChecksum(migration001),
+      applied_at: 1_700
+    },
+    {
+      version: 2,
+      name: migration002.name,
+      checksum: editorMigrationChecksum(migration002),
+      applied_at: 1_700
+    }
+  ])
   assert.equal(database.pragma('user_version', {
     simple: true
-  }), 1)
+  }), 2)
 
   const tables = database.prepare(`
     SELECT name
@@ -263,7 +275,8 @@ test('editor.db erzwingt Pragmas, Schema und Migrationchecksum', t => {
     'editor_leases',
     'editor_operations',
     'editor_sessions',
-    'editor_validation_runs'
+    'editor_validation_runs',
+    'editor_workspaces'
   ])
 })
 
@@ -277,7 +290,7 @@ test('Migration rollbackt vollständig bei einem Teilfehler', t => {
   })
 
   const brokenMigration = Object.freeze({
-    version: 2,
+    version: 3,
     name: 'broken_test_migration',
     sql: `
       CREATE TABLE migration_must_rollback (id INTEGER);
@@ -288,7 +301,7 @@ test('Migration rollbackt vollständig bei einem Teilfehler', t => {
   assert.throws(
     () => openEditorDatabase({
       databasePath,
-      migrations: [migration001, brokenMigration],
+      migrations: [migration001, migration002, brokenMigration],
       now: () => 2_000
     }),
     expectPersistenceCode(E3_PERSISTENCE_ERROR.MIGRATION_FAILED)
@@ -301,7 +314,7 @@ test('Migration rollbackt vollständig bei einem Teilfehler', t => {
       SELECT COUNT(*) AS count
       FROM schema_migrations
     `).get().count,
-    1
+    2
   )
   assert.equal(
     database.prepare(`
@@ -313,7 +326,61 @@ test('Migration rollbackt vollständig bei einem Teilfehler', t => {
   )
   assert.equal(database.pragma('user_version', {
     simple: true
+  }), 2)
+})
+
+test('Bestehende Schema-Version 1 wird additiv auf 2 migriert', t => {
+  const directory = mkdtempSync(
+    join(tmpdir(), 'echolink-e3-v1-upgrade-')
+  )
+  const databasePath = join(directory, 'editor.db')
+  t.after(() => {
+    rmSync(directory, { recursive: true, force: true })
+  })
+
+  const versionOne = openEditorDatabase({
+    databasePath,
+    migrations: [migration001],
+    now: () => 1_000
+  })
+  assert.equal(versionOne.pragma('user_version', {
+    simple: true
   }), 1)
+  versionOne.close()
+
+  const upgraded = openEditorDatabase({
+    databasePath,
+    now: () => 2_000
+  })
+  t.after(() => upgraded.close())
+  assert.equal(upgraded.pragma('user_version', {
+    simple: true
+  }), 2)
+  assert.deepEqual(
+    upgraded.prepare(`
+      SELECT version, name
+      FROM schema_migrations
+      ORDER BY version
+    `).all(),
+    [
+      {
+        version: 1,
+        name: migration001.name
+      },
+      {
+        version: 2,
+        name: migration002.name
+      }
+    ]
+  )
+  assert.equal(
+    upgraded.prepare(`
+      SELECT COUNT(*) AS count
+      FROM sqlite_master
+      WHERE type = 'table' AND name = 'editor_workspaces'
+    `).get().count,
+    1
+  )
 })
 
 test('Unbekannte oder manipulierte Migration stoppt den Start', t => {
@@ -755,14 +822,14 @@ test('Migrationset akzeptiert keine Lücken', t => {
   const harness = createDatabaseHarness(t)
   const database = harness.open()
   const invalid = Object.freeze({
-    version: 3,
+    version: 4,
     name: 'skipped_version',
     sql: 'CREATE TABLE skipped_version (id INTEGER) STRICT;'
   })
 
   assert.throws(
     () => migrateEditorDatabase(database, {
-      migrations: [migration001, invalid]
+      migrations: [migration001, migration002, invalid]
     }),
     expectPersistenceCode(
       E3_PERSISTENCE_ERROR.INVALID_MIGRATION_SET
