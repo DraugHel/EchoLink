@@ -192,6 +192,9 @@ weaken an invariant because a host feature is unavailable.
 - Step 9: default-off validation broker lifecycle with manifest-verified
   read-only snapshots, a fixed hardened Docker invocation, bounded output,
   timeout handling, forced cleanup, and post-run candidate verification.
+- Step 10: fixed two-container UI validation on a per-run internal Docker
+  bridge with one application peer, one browser peer, an exact internal
+  origin, no published ports or Internet egress, and proven cleanup.
 
 Step 5 is a library boundary only. It is not imported by the existing server
 or worker, has no route or tool exposure, cannot target `/root/echolink`, and
@@ -242,9 +245,23 @@ The broker verifies the snapshot before and after execution. It force-removes
 its owned container after normal exit, timeout, or launch failure and accepts
 cleanup only when Docker explicitly confirms that the container no longer
 exists. Snapshot cleanup is also mandatory for success. The feature remains
-default-off and disconnected from the current runtime. The `playwright:ui`
-profile remains blocked until Step 10 supplies its isolated two-container
-network.
+default-off and disconnected from the current runtime.
+
+Step 10 upgrades the immutable profile set to V2 and admits
+`playwright:ui` only through `DockerUiValidationRuntime`. The broker creates a
+new `--internal` bridge for each run and attaches exactly one non-root
+application container and one non-root browser container. Both use
+digest-pinned images, read-only root filesystems, dropped capabilities,
+no-new-privileges, bounded resources, the same frozen snapshot, and no
+published host port. Only the browser receives the bounded output mount and
+the exact `http://e3-app:4173` origin.
+
+The application must remain alive through the browser run. Normal exit,
+failure, timeout, and partial launch all force removal of both owned
+containers followed by the network. Success is impossible unless Docker
+proves that both containers and the network are absent. This remains a
+library boundary: no existing server or worker imports it, no real container
+is started by tests or deploy, and productive apply remains disabled.
 
 ## Explicit non-goals for V1
 

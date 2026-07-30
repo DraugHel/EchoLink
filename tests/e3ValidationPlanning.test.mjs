@@ -4,7 +4,8 @@ import {
   E3_VALIDATION_DRIVER,
   E3_VALIDATION_NETWORK_MODE,
   E3_VALIDATION_PROFILE_ID,
-  E3_VALIDATION_RUNTIME
+  E3_VALIDATION_RUNTIME,
+  E3_VALIDATION_UI_NETWORK
 } from '../server/e3/validation/contracts.js'
 import {
   E3_VALIDATION_ERROR,
@@ -81,6 +82,48 @@ test('profile registry is immutable, complete and digest-bound', () => {
     first.profiles[E3_VALIDATION_PROFILE_ID.PLAYWRIGHT_UI]
       .networkMode,
     E3_VALIDATION_NETWORK_MODE.INTERNAL_PAIR
+  )
+  assert.deepEqual(
+    first.profiles[E3_VALIDATION_PROFILE_ID.PLAYWRIGHT_UI]
+      .internalPair,
+    {
+      applicationAlias: E3_VALIDATION_UI_NETWORK.applicationAlias,
+      applicationPort: E3_VALIDATION_UI_NETWORK.applicationPort,
+      testOrigin: E3_VALIDATION_UI_NETWORK.testOrigin,
+      application: {
+        role: 'application',
+        imageDigest: NODE_DIGEST,
+        entrypoint: [
+          '/usr/bin/node',
+          E3_VALIDATION_DRIVER,
+          'playwright:application'
+        ],
+        mounts: [
+          {
+            target: '/e3/input',
+            mode: 'read_only'
+          },
+          {
+            target: '/e3/tmp',
+            mode: 'tmpfs'
+          }
+        ],
+        user: { uid: 65532, gid: 65532 },
+        rootFilesystem: 'read_only',
+        capabilities: [],
+        noNewPrivileges: true,
+        limits: {
+          timeoutMs: 600_000,
+          memoryBytes: 2 * 1024 * 1024 * 1024,
+          cpuMillis: 4_000,
+          pids: 192,
+          openFiles: 1024,
+          stdoutBytes: 10 * 1024 * 1024,
+          stderrBytes: 10 * 1024 * 1024,
+          outputBytes: 64 * 1024 * 1024
+        }
+      }
+    }
   )
   assert.ok(Object.isFrozen(first))
   assert.ok(Object.isFrozen(first.profiles))
@@ -245,6 +288,27 @@ test('environment is rebuilt from an exact allowlist', () => {
       else process.env[key] = value
     }
   }
+})
+
+test('UI plan receives only the fixed internal origin', () => {
+  const profileRegistry = registry()
+  const ui = compile(
+    profileRegistry,
+    request(profileRegistry, {
+      profileId: E3_VALIDATION_PROFILE_ID.PLAYWRIGHT_UI
+    })
+  )
+  assert.equal(
+    ui.environment.E3_TEST_ORIGIN,
+    E3_VALIDATION_UI_NETWORK.testOrigin
+  )
+  assert.equal(
+    ui.profile.internalPair.applicationAlias,
+    E3_VALIDATION_UI_NETWORK.applicationAlias
+  )
+  assert.equal(ui.isolation.hostNetwork, false)
+  assert.equal(ui.isolation.internetEgress, false)
+  assert.equal(ui.isolation.networkMode, 'internal_pair')
 })
 
 function canonicalEnvironmentKeys(environment) {

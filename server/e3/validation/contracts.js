@@ -2,7 +2,7 @@ export const E3_VALIDATION_REQUEST_VERSION = 1
 export const E3_VALIDATION_BROKER_FEATURE_FLAG =
   'E3_VALIDATION_BROKER_ENABLED'
 export const E3_VALIDATION_PROFILE_SET_VERSION =
-  'e3-validation-profiles-v1'
+  'e3-validation-profiles-v2'
 export const E3_VALIDATION_DRIVER =
   '/opt/echolink/validation-driver.mjs'
 export const E3_VALIDATION_RUNTIME = Object.freeze({
@@ -28,6 +28,12 @@ export const E3_VALIDATION_PROFILE_IDS = Object.freeze(
 export const E3_VALIDATION_NETWORK_MODE = Object.freeze({
   NONE: 'none',
   INTERNAL_PAIR: 'internal_pair'
+})
+
+export const E3_VALIDATION_UI_NETWORK = Object.freeze({
+  applicationAlias: 'e3-app',
+  applicationPort: 4173,
+  testOrigin: 'http://e3-app:4173'
 })
 
 export const E3_VALIDATION_MOUNT = Object.freeze({

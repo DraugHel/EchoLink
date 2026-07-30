@@ -6,7 +6,8 @@ import {
   E3_VALIDATION_NETWORK_MODE,
   E3_VALIDATION_PROFILE_ID,
   E3_VALIDATION_PROFILE_SET_VERSION,
-  E3_VALIDATION_RUNTIME
+  E3_VALIDATION_RUNTIME,
+  E3_VALIDATION_UI_NETWORK
 } from './contracts.js'
 import {
   E3_VALIDATION_ERROR,
@@ -76,7 +77,8 @@ function profile({
   imageDigest,
   networkMode = E3_VALIDATION_NETWORK_MODE.NONE,
   resourceLimits,
-  role = 'validator'
+  role = 'validator',
+  internalPair
 }) {
   return Object.freeze({
     id,
@@ -95,6 +97,9 @@ function profile({
       E3_VALIDATION_MOUNT.TEMPORARY
     ]),
     networkMode,
+    ...(internalPair
+      ? { internalPair: Object.freeze(internalPair) }
+      : {}),
     user: Object.freeze({ uid: 65532, gid: 65532 }),
     rootFilesystem: 'read_only',
     capabilities: Object.freeze([]),
@@ -179,6 +184,38 @@ function buildProfiles(nodeImageDigest, playwrightImageDigest) {
       id: E3_VALIDATION_PROFILE_ID.PLAYWRIGHT_UI,
       imageDigest: playwright,
       networkMode: E3_VALIDATION_NETWORK_MODE.INTERNAL_PAIR,
+      role: 'browser',
+      internalPair: {
+        applicationAlias:
+          E3_VALIDATION_UI_NETWORK.applicationAlias,
+        applicationPort:
+          E3_VALIDATION_UI_NETWORK.applicationPort,
+        testOrigin: E3_VALIDATION_UI_NETWORK.testOrigin,
+        application: Object.freeze({
+          role: 'application',
+          imageDigest: node,
+          entrypoint: Object.freeze([
+            '/usr/bin/node',
+            E3_VALIDATION_DRIVER,
+            'playwright:application'
+          ]),
+          mounts: Object.freeze([
+            E3_VALIDATION_MOUNT.SNAPSHOT,
+            E3_VALIDATION_MOUNT.TEMPORARY
+          ]),
+          user: Object.freeze({ uid: 65532, gid: 65532 }),
+          rootFilesystem: 'read_only',
+          capabilities: Object.freeze([]),
+          noNewPrivileges: true,
+          limits: limits({
+            timeoutMs: 10 * 60_000,
+            memoryBytes: 2 * 1024 * 1024 * 1024,
+            cpuMillis: 4_000,
+            outputBytes: 64 * 1024 * 1024,
+            pids: 192
+          })
+        })
+      },
       resourceLimits: limits({
         timeoutMs: 10 * 60_000,
         memoryBytes: 3 * 1024 * 1024 * 1024,
@@ -208,6 +245,34 @@ function assertProfileSafety(profileDefinition) {
     validationError(
       E3_VALIDATION_ERROR.UNSAFE_PROFILE,
       'Validation profile violates the E3 sandbox baseline',
+      { profileId: profileDefinition.id }
+    )
+  }
+  if (
+    profileDefinition.networkMode ===
+      E3_VALIDATION_NETWORK_MODE.INTERNAL_PAIR &&
+    (
+      profileDefinition.internalPair?.applicationAlias !==
+        E3_VALIDATION_UI_NETWORK.applicationAlias ||
+      profileDefinition.internalPair?.applicationPort !==
+        E3_VALIDATION_UI_NETWORK.applicationPort ||
+      profileDefinition.internalPair?.testOrigin !==
+        E3_VALIDATION_UI_NETWORK.testOrigin ||
+      profileDefinition.internalPair?.application?.role !==
+        'application' ||
+      profileDefinition.internalPair?.application?.rootFilesystem !==
+        'read_only' ||
+      profileDefinition.internalPair?.application?.capabilities?.length !==
+        0 ||
+      profileDefinition.internalPair?.application?.noNewPrivileges !==
+        true ||
+      profileDefinition.internalPair?.application?.user?.uid === 0 ||
+      profileDefinition.internalPair?.application?.user?.gid === 0
+    )
+  ) {
+    validationError(
+      E3_VALIDATION_ERROR.UNSAFE_PROFILE,
+      'UI validation profile violates the internal-pair contract',
       { profileId: profileDefinition.id }
     )
   }

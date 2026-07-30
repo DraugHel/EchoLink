@@ -58,7 +58,8 @@ export function compileValidationPlan(rawRequest, {
     candidateManifestSha256:
       request.candidateManifestSha256,
     profileId: profile.id,
-    profileSha256: profile.sha256
+    profileSha256: profile.sha256,
+    testOrigin: profile.internalPair?.testOrigin
   })
   const unsignedPlan = {
     version: 1,

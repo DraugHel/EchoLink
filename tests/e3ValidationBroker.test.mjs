@@ -455,7 +455,8 @@ function brokerHarness({
   enabled = true,
   tamperAfterRuntime = false,
   cleanupFails = false,
-  candidateOverrides = {}
+  candidateOverrides = {},
+  profileId = E3_VALIDATION_PROFILE_ID.TEST_FULL
 } = {}) {
   const registry = profileRegistry()
   const state = {
@@ -475,6 +476,7 @@ function brokerHarness({
     ...candidateOverrides
   }
   const rawRequest = request(registry, {
+    profileId,
     candidateManifestSha256:
       candidate.candidateManifestSha256
   })
@@ -542,6 +544,21 @@ test('broker is default-off and binds both verification passes', () => {
   assert.equal(enabled.state.verified, 2)
   assert.equal(enabled.state.removed, 1)
   assert.ok(Object.isFrozen(result))
+})
+
+test('broker admits the fixed Step 10 internal UI pair', () => {
+  const ui = brokerHarness({
+    profileId: E3_VALIDATION_PROFILE_ID.PLAYWRIGHT_UI
+  })
+  const result = ui.broker.run(ui.rawRequest)
+  assert.equal(result.status, 'succeeded')
+  assert.equal(
+    result.profileId,
+    E3_VALIDATION_PROFILE_ID.PLAYWRIGHT_UI
+  )
+  assert.equal(ui.state.materialized, 1)
+  assert.equal(ui.state.verified, 2)
+  assert.equal(ui.state.removed, 1)
 })
 
 test('broker rejects stale identity, tampering and cleanup failure', () => {

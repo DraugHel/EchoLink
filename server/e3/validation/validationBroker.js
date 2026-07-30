@@ -4,10 +4,7 @@ import {
   assertSha256,
   freezeDomainValue
 } from '../core/contracts.js'
-import {
-  E3_VALIDATION_NETWORK_MODE,
-  validationBrokerFeatureEnabled
-} from './contracts.js'
+import { validationBrokerFeatureEnabled } from './contracts.js'
 import {
   E3_VALIDATION_ERROR,
   E3ValidationError
@@ -86,15 +83,6 @@ export class ValidationBroker {
       registry: this.registry,
       actualRuntimeVersion: this.actualRuntimeVersion
     })
-    if (
-      plan.isolation.networkMode !==
-      E3_VALIDATION_NETWORK_MODE.NONE
-    ) {
-      brokerError(
-        E3_VALIDATION_ERROR.UNSUPPORTED_NETWORK,
-        'Networked validation is reserved for Step 10'
-      )
-    }
     const expectedHandle = validationSnapshotHandle(
       plan.sessionId,
       plan.runId

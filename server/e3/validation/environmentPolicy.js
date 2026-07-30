@@ -1,4 +1,7 @@
 import {
+  E3_VALIDATION_UI_NETWORK
+} from './contracts.js'
+import {
   E3_VALIDATION_ERROR,
   E3ValidationError
 } from './errors.js'
@@ -22,11 +25,19 @@ const DYNAMIC_FIELDS = Object.freeze({
   E3_PROFILE_SHA256: 'profileSha256'
 })
 
+const OPTIONAL_FIELDS = Object.freeze({
+  E3_TEST_ORIGIN: 'testOrigin'
+})
+
 export function buildValidationEnvironment(values) {
-  const expected = new Set(Object.values(DYNAMIC_FIELDS))
+  const required = new Set(Object.values(DYNAMIC_FIELDS))
+  const accepted = new Set([
+    ...required,
+    ...Object.values(OPTIONAL_FIELDS)
+  ])
   const unknown = Object.keys(values)
-    .filter(key => !expected.has(key))
-  const missing = [...expected]
+    .filter(key => !accepted.has(key))
+  const missing = [...required]
     .filter(key => values[key] === undefined)
   if (unknown.length > 0 || missing.length > 0) {
     throw new E3ValidationError(
@@ -39,6 +50,15 @@ export function buildValidationEnvironment(values) {
   for (const [environmentKey, valueKey] of
     Object.entries(DYNAMIC_FIELDS)) {
     environment[environmentKey] = values[valueKey]
+  }
+  if (values.testOrigin !== undefined) {
+    if (values.testOrigin !== E3_VALIDATION_UI_NETWORK.testOrigin) {
+      throw new E3ValidationError(
+        E3_VALIDATION_ERROR.UNSAFE_PROFILE,
+        'UI validation origin is not the fixed internal origin'
+      )
+    }
+    environment.E3_TEST_ORIGIN = values.testOrigin
   }
   return Object.freeze(environment)
 }

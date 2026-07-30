@@ -1,6 +1,6 @@
 # EchoLink — Code Map
 
-> Lebendige Karte des Projekts. Stand: 2026-07-29. Bei größeren Umbauten aktualisieren.
+> Lebendige Karte des Projekts. Stand: 2026-07-30. Bei größeren Umbauten aktualisieren.
 > Zeilenzahlen sind Richtwerte — sie veralten. Muster und Verantwortlichkeiten bleiben.
 
 ## Überblick
@@ -178,7 +178,7 @@ produktives Apply.
 ### server/e3/validation/
 
 Fail-closed Zulassungsgrenze für isolierte Validierung, weiterhin ohne
-Runtime-Anbindung oder Containerstart:
+Anbindung an bestehenden Server oder Worker:
 - **contracts.js / errors.js**: versionierte Validierungsverträge, stabile
   Profil-IDs, Netzwerkmodi, Mountklassen, Runtime- und Ressourcenlimits.
 - **profileRegistry.js**: unveränderlicher Katalog aus acht festen Profilen.
@@ -215,11 +215,24 @@ Schritt-9-Lifecycle, weiterhin default-off und ohne Runtime-Anbindung:
   Container- und Snapshot-Abwesenheit müssen nach Cleanup bewiesen sein;
   mehrdeutige Docker-Fehler gelten nicht als erfolgreicher Cleanup.
 
-Schritt 9 exponiert weiterhin keine Route oder Agent-API und lässt das
-netzwerkgebundene UI-Profil für Schritt 10 gesperrt. Reale Container werden
-in den Tests nicht gestartet; der vollständige Lifecycle und die exakten
-Docker-Argumente werden mit einem kontrollierten Runtime-Adapter geprüft:
-`tests/e3ValidationBroker.test.mjs`.
+Schritt-10-UI-Isolation:
+- **dockerUiRuntime.js**: erstellt pro Lauf genau eine interne Docker-Bridge
+  ohne veröffentlichte Ports sowie einen non-root Anwendungs- und einen
+  non-root Browser-Container. Beide erhalten nur den eingefrorenen Snapshot;
+  ausschließlich der Browser erhält den begrenzten Output-Mount und den
+  exakten internen Ursprung `http://e3-app:4173`.
+- Profilset V2 bindet beide digestgepinnten Images, feste Entry-Points,
+  Rollen, Mountklassen und Ressourcenlimits. Hostnetwork, Host-Gateway,
+  Docker-Socket, produktive Mounts, beliebige Origins und allgemeiner Egress
+  bleiben ausgeschlossen.
+- Beide Container und das Netzwerk werden nach Erfolg, Fehler, Timeout oder
+  Teilstart zwangsweise entfernt. Mehrdeutiger Cleanup verhindert Erfolg.
+
+Schritt 10 exponiert weiterhin keine Route oder Agent-API. Reale Container
+werden in den Tests nicht gestartet; vollständige Lifecycle- und
+Argumentvektoren werden über kontrollierte Runtime-Adapter geprüft:
+`tests/e3ValidationBroker.test.mjs` und
+`tests/e3UiValidationRuntime.test.mjs`.
 
 ### server/middleware/auth.js
 `requireAuth` (Session) + `requireApiKey` (Header gegen ECHO_API_KEY, für /api/external).
