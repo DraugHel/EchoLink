@@ -194,8 +194,8 @@ function expectedEntries(manifest) {
   }))
 }
 
-function makeReadOnly(root) {
-  const visit = current => {
+function makeReadOnly(root, { keepRootWritable = false } = {}) {
+  const visit = (current, isRoot = false) => {
     const stat = fs.lstatSync(current)
     if (stat.isSymbolicLink()) {
       snapshotError(
@@ -207,12 +207,14 @@ function makeReadOnly(root) {
       for (const name of fs.readdirSync(current)) {
         visit(path.join(current, name))
       }
-      fs.chmodSync(current, 0o555)
+      if (!isRoot || !keepRootWritable) {
+        fs.chmodSync(current, 0o555)
+      }
       return
     }
     fs.chmodSync(current, stat.mode & 0o111 ? 0o555 : 0o444)
   }
-  visit(root)
+  visit(root, true)
 }
 
 function assertReadOnly(root) {
@@ -384,9 +386,33 @@ export class ValidationSnapshotMaterializer {
           'Materialized tree does not match the candidate manifest'
         )
       }
-      makeReadOnly(treePath)
-      assertReadOnly(treePath)
+      // Linux permits an unprivileged process to rename this directory only
+      // while its root remains writable. Seal every descendant first, move
+      // the still-private root, then seal and verify the published root.
+      makeReadOnly(treePath, { keepRootWritable: true })
       fs.renameSync(treePath, finalPath)
+      const publishedEntries = scanTree(finalPath)
+      if (
+        JSON.stringify(publishedEntries) !==
+        JSON.stringify(expectedEntries(manifest))
+      ) {
+        snapshotError(
+          E3_VALIDATION_ERROR.SNAPSHOT_TAMPERED,
+          'Published tree does not match the candidate manifest'
+        )
+      }
+      fs.chmodSync(finalPath, 0o555)
+      assertReadOnly(finalPath)
+      const sealedEntries = scanTree(finalPath)
+      if (
+        JSON.stringify(sealedEntries) !==
+        JSON.stringify(expectedEntries(manifest))
+      ) {
+        snapshotError(
+          E3_VALIDATION_ERROR.SNAPSHOT_TAMPERED,
+          'Sealed tree does not match the candidate manifest'
+        )
+      }
       makeRemovable(stageRoot)
       fs.rmSync(stageRoot, { recursive: true, force: true })
       return freezeDomainValue({

@@ -166,9 +166,27 @@ function materializeInput(fixture, overrides = {}) {
 
 test('candidate is materialized without Git metadata and sealed read-only', t => {
   const fixture = candidateFixture(t)
-  const snapshot = fixture.materializer.materialize(
-    materializeInput(fixture)
-  )
+  const originalRenameSync = fs.renameSync
+  let sourceModeAtPublication = null
+  fs.renameSync = (source, destination) => {
+    if (
+      path.basename(source) === 'tree' &&
+      destination.endsWith(`/${RUN_ID}`)
+    ) {
+      sourceModeAtPublication = fs.statSync(source).mode & 0o777
+    }
+    return originalRenameSync(source, destination)
+  }
+  let snapshot
+  try {
+    snapshot = fixture.materializer.materialize(
+      materializeInput(fixture)
+    )
+  } finally {
+    fs.renameSync = originalRenameSync
+  }
+  assert.notEqual(sourceModeAtPublication, null)
+  assert.notEqual(sourceModeAtPublication & 0o200, 0)
   assert.equal(
     snapshot.handle,
     validationSnapshotHandle(SESSION_ID, RUN_ID)
