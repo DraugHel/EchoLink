@@ -120,6 +120,27 @@ Das Feature ist standardmäßig deaktiviert (`E3_WORKSPACE_ENABLED` muss exakt
 importiert und exponiert noch keine Dateioperation oder Prozess-API. Tests:
 `tests/e3WorkspaceManager.test.mjs`.
 
+### server/e3/editor/
+Deterministischer Textdatei-Operationskern der Editor Engine, ohne
+Runtime-Anbindung:
+- **requestSchema.js / pathPolicy.js**: versionierte, geschlossene
+  Operationsschemas und kanonische portable POSIX-Pfade; unbekannte Felder,
+  Traversal, `.git`, Secrets, Datenbanken, Abhängigkeiten und generierte
+  Ausgaben werden fail-closed abgewiesen.
+- **safeTextFilesystem.js**: begrenzte UTF-8-Reads, deterministische Listen-
+  und Suchergebnisse sowie atomare Same-Directory-Writes mit `O_NOFOLLOW`,
+  `fsync`, Preimage-Recheck, Lease-Guard und Preimage-Retention.
+- **editorKernel.js**: registriert `read_file`, `list_files`, `stat_file`,
+  `search_text`, `create_file`, `replace_exact`, `insert_before`,
+  `insert_after`, `rename_file`, `move_file` und `delete_file`.
+
+Symlinks werden nie verfolgt, Hardlink-Mutationsziele werden abgewiesen und
+`replace`/`insert` verlangen SHA-256 plus exakte Trefferanzahl. Das Feature ist
+standardmäßig deaktiviert (`ECHOLINK_E3_EDITOR_ENABLED` muss exakt `true`
+sein), schützt `/root/echolink` zusätzlich als Root-Grenze und wird weiterhin
+weder von `server/index.js` noch `server/worker.js` importiert. Test:
+`tests/e3EditorKernel.test.mjs`.
+
 ### server/middleware/auth.js
 `requireAuth` (Session) + `requireApiKey` (Header gegen ECHO_API_KEY, für /api/external).
 

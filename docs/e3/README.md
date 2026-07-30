@@ -172,6 +172,19 @@ weaken an invariant because a host feature is unavailable.
 | Steps 11–14 | review and pilot export | approval hash binding and recovery pass fault injection |
 | Step 15+ | guarded productive apply | separate explicit approval and operational readiness review |
 
+## Implemented isolation milestones
+
+- Step 2: pure session contracts and state machine.
+- Step 3: isolated transactional persistence and fencing-aware repositories.
+- Step 4: default-off read-only workspace manager for exact detached worktrees.
+- Step 5: default-off, versioned text editor kernel with deterministic reads,
+  exact mutations, atomic publication, preimage retention, lease guards, and
+  traversal/symlink/hardlink defenses.
+
+Step 5 is a library boundary only. It is not imported by the existing server
+or worker, has no route or tool exposure, cannot target `/root/echolink`, and
+does not enable productive apply, deployment, process execution, or Git.
+
 ## Explicit non-goals for V1
 
 - semantic or AST-based editing
