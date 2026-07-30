@@ -180,10 +180,24 @@ weaken an invariant because a host feature is unavailable.
 - Step 5: default-off, versioned text editor kernel with deterministic reads,
   exact mutations, atomic publication, preimage retention, lease guards, and
   traversal/symlink/hardlink defenses.
+- Step 6: session-bound mutation orchestration with a durable operation-intent
+  journal, fencing, idempotency, content-addressed preimages, quotas, and
+  explicit crash recovery.
 
 Step 5 is a library boundary only. It is not imported by the existing server
 or worker, has no route or tool exposure, cannot target `/root/echolink`, and
 does not enable productive apply, deployment, process execution, or Git.
+
+Step 6 does not claim a false ACID transaction across SQLite and the
+filesystem. It persists `PREPARED`, publishes the guarded workspace mutation,
+persists `PUBLISHED`, and records the operation, event, session version,
+idempotency result, and `RECORDED` state in one SQLite transaction. Recovery
+compares the bound preimage and postimage: it may execute an unchanged
+preimage once, finalize an already visible postimage without replaying the
+mutation, or fail closed as `RECOVERY_REQUIRED`.
+
+Step 6 remains an internal library boundary with no production route, agent
+tool, repository apply, deployment, process execution, or Git capability.
 
 ## Explicit non-goals for V1
 

@@ -1,12 +1,13 @@
 import path from 'node:path'
 import {
   E3_EDITOR_API_VERSION,
+  E3_EDITOR_MUTATIONS,
   E3_EDITOR_OPERATION,
   E3_PATH_POLICY_VERSION
 } from './contracts.js'
 import { E3_EDITOR_ERROR, E3EditorError } from './errors.js'
 import { validateEditorRequest } from './requestSchema.js'
-import { SafeTextFilesystem } from './safeTextFilesystem.js'
+import { SafeTextFilesystem, sha256 } from './safeTextFilesystem.js'
 
 export const E3_EDITOR_FEATURE_ENV = 'ECHOLINK_E3_EDITOR_ENABLED'
 
@@ -32,6 +33,20 @@ function assertMatches(actual, expected) {
       { actual, expected }
     )
   }
+}
+
+function editedContent(request, current) {
+  const needle = request.search ?? request.anchor
+  assertMatches(
+    countOccurrences(current.content, needle),
+    request.expectedMatches
+  )
+  const replacement = request.type === E3_EDITOR_OPERATION.REPLACE_EXACT
+    ? request.replacement
+    : request.type === E3_EDITOR_OPERATION.INSERT_BEFORE
+      ? `${request.content}${request.anchor}`
+      : `${request.anchor}${request.content}`
+  return current.content.split(needle).join(replacement)
 }
 
 export class E3EditorKernel {
@@ -61,6 +76,93 @@ export class E3EditorKernel {
       }
     }
     this.filesystem = new SafeTextFilesystem(resolved, filesystemOptions)
+  }
+
+  planMutation(input) {
+    const request = validateEditorRequest(input)
+    if (!E3_EDITOR_MUTATIONS.includes(request.type)) {
+      throw new E3EditorError(
+        E3_EDITOR_ERROR.INVALID_REQUEST,
+        'Only mutation requests can be planned'
+      )
+    }
+    let pathBefore = request.path ?? request.sourcePath ?? null
+    let pathAfter = request.path ?? request.destinationPath ?? null
+    let preimageSha256 = null
+    let postimageSha256 = null
+    let changedBytes = 0
+
+    if (request.type === E3_EDITOR_OPERATION.CREATE_FILE) {
+      try {
+        this.filesystem.statFile(request.path)
+        throw new E3EditorError(
+          E3_EDITOR_ERROR.FILE_EXISTS,
+          'Create target already exists'
+        )
+      } catch (error) {
+        if (error?.code !== E3_EDITOR_ERROR.FILE_NOT_FOUND) throw error
+      }
+      postimageSha256 = sha256(Buffer.from(request.content, 'utf8'))
+      changedBytes = Buffer.byteLength(request.content, 'utf8')
+      pathBefore = null
+    } else {
+      const current = this.filesystem.readFile(pathBefore)
+      preimageSha256 = current.sha256
+      if (current.sha256 !== request.expectedSha256) {
+        throw new E3EditorError(
+          E3_EDITOR_ERROR.PREIMAGE_MISMATCH,
+          'Mutation preimage does not match'
+        )
+      }
+      if ([
+        E3_EDITOR_OPERATION.REPLACE_EXACT,
+        E3_EDITOR_OPERATION.INSERT_BEFORE,
+        E3_EDITOR_OPERATION.INSERT_AFTER
+      ].includes(request.type)) {
+        const content = editedContent(request, current)
+        postimageSha256 = sha256(Buffer.from(content, 'utf8'))
+        changedBytes = Math.max(
+          current.bytes,
+          Buffer.byteLength(content, 'utf8')
+        )
+      } else if (request.type === E3_EDITOR_OPERATION.DELETE_FILE) {
+        pathAfter = null
+        changedBytes = current.bytes
+      } else {
+        const sourceParent = path.posix.dirname(request.sourcePath)
+        const destinationParent = path.posix.dirname(request.destinationPath)
+        const sameParent = sourceParent === destinationParent
+        if (
+          (request.type === E3_EDITOR_OPERATION.RENAME_FILE) !== sameParent
+        ) {
+          throw new E3EditorError(
+            E3_EDITOR_ERROR.MOVE_SEMANTICS_MISMATCH,
+            'Rename and move semantics do not match paths'
+          )
+        }
+        try {
+          this.filesystem.statFile(request.destinationPath)
+          throw new E3EditorError(
+            E3_EDITOR_ERROR.FILE_EXISTS,
+            'Destination already exists'
+          )
+        } catch (error) {
+          if (error?.code !== E3_EDITOR_ERROR.FILE_NOT_FOUND) throw error
+        }
+        postimageSha256 = current.sha256
+        changedBytes = current.bytes
+      }
+    }
+    return Object.freeze({
+      version: E3_EDITOR_API_VERSION,
+      pathPolicyVersion: E3_PATH_POLICY_VERSION,
+      type: request.type,
+      pathBefore,
+      pathAfter,
+      preimageSha256,
+      postimageSha256,
+      changedBytes
+    })
   }
 
   execute(input) {
@@ -94,15 +196,10 @@ export class E3EditorKernel {
             'Replace preimage does not match'
           )
         }
-        assertMatches(
-          countOccurrences(current.content, request.search),
-          request.expectedMatches
-        )
         result = this.filesystem.replaceFile(
           request.path,
           request.expectedSha256,
-          current.content.split(request.search)
-            .join(request.replacement)
+          editedContent(request, current)
         )
         break
       }
@@ -115,18 +212,10 @@ export class E3EditorKernel {
             'Insert preimage does not match'
           )
         }
-        assertMatches(
-          countOccurrences(current.content, request.anchor),
-          request.expectedMatches
-        )
-        const replacement = request.type ===
-          E3_EDITOR_OPERATION.INSERT_BEFORE
-          ? `${request.content}${request.anchor}`
-          : `${request.anchor}${request.content}`
         result = this.filesystem.replaceFile(
           request.path,
           request.expectedSha256,
-          current.content.split(request.anchor).join(replacement)
+          editedContent(request, current)
         )
         break
       }

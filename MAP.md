@@ -141,6 +141,21 @@ sein), schützt `/root/echolink` zusätzlich als Root-Grenze und wird weiterhin
 weder von `server/index.js` noch `server/worker.js` importiert. Test:
 `tests/e3EditorKernel.test.mjs`.
 
+Sessiongebundene Mutationsschicht, weiterhin ohne Runtime-Anbindung:
+- **operationIntentRepository.js**: persistiert
+  `PREPARED → PUBLISHED → RECORDED` beziehungsweise
+  `RECOVERY_REQUIRED`, bindet Request-Hash, Sessionversion, Workspacepfad und
+  beide Fencing-Tokens und erzwingt Mutations-/Byte-Limits.
+- **preimageStore.js**: inhaltsadressierter, SHA-256-verifizierter
+  Preimage-Speicher mit atomarer Veröffentlichung und ohne Symlink-Following.
+- **sessionEditorService.js**: orchestriert Planung, Intent, gesicherten
+  Workspace-Publish, atomare DB-Aufzeichnung und explizite Crash-Recovery.
+- Migration 003 ergänzt Operation-Intents und Preimage-Referenzen.
+
+Die Integration wird in `tests/e3SessionEditorService.test.mjs` geprüft. Sie
+exponiert keine Route oder Agent-API und besitzt weiterhin kein produktives
+Apply.
+
 ### server/middleware/auth.js
 `requireAuth` (Session) + `requireApiKey` (Header gegen ECHO_API_KEY, für /api/external).
 

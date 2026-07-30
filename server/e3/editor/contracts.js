@@ -35,5 +35,7 @@ export const E3_EDITOR_LIMITS = Object.freeze({
   maxSearchResults: 1_000,
   maxPathBytes: 1_024,
   maxSegmentBytes: 255,
-  maxExpectedMatches: 10_000
+  maxExpectedMatches: 10_000,
+  maxMutationsPerSession: 100,
+  maxAggregateChangedBytes: 20 * 1024 * 1024
 })

@@ -266,3 +266,34 @@ test('retention failure is fail-closed', t => {
   })), code(E3_EDITOR_ERROR.PREIMAGE_RETENTION_FAILED))
   assert.equal(fs.existsSync(path.join(f.root, 'src/a.js')), true)
 })
+
+test('mutation planning is deterministic and publishes no change', t => {
+  const f = fixture()
+  t.after(f.cleanup)
+  const before = fs.readFileSync(path.join(f.root, 'src/a.js'))
+  const plan = f.kernel.planMutation(request(
+    E3_EDITOR_OPERATION.REPLACE_EXACT,
+    {
+      path: 'src/a.js',
+      expectedSha256: sha256(before),
+      search: 'alpha',
+      replacement: 'omega',
+      expectedMatches: 2
+    }
+  ))
+  assert.equal(plan.pathBefore, 'src/a.js')
+  assert.equal(plan.pathAfter, 'src/a.js')
+  assert.equal(plan.preimageSha256, sha256(before))
+  assert.equal(
+    plan.postimageSha256,
+    sha256(Buffer.from('omega\nbeta\nomega\n'))
+  )
+  assert.equal(plan.changedBytes, before.length)
+  assert.deepEqual(fs.readFileSync(path.join(f.root, 'src/a.js')), before)
+  assert.throws(
+    () => f.kernel.planMutation(request(E3_EDITOR_OPERATION.READ_FILE, {
+      path: 'src/a.js'
+    })),
+    code(E3_EDITOR_ERROR.INVALID_REQUEST)
+  )
+})

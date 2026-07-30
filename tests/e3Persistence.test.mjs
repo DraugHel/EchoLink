@@ -40,6 +40,9 @@ import {
   migration002
 } from '../server/e3/persistence/migrations/002-workspaces.js'
 import {
+  migration003
+} from '../server/e3/persistence/migrations/003-operation-intents.js'
+import {
   editorMigrationChecksum
 } from '../server/e3/persistence/migrations/index.js'
 
@@ -256,11 +259,17 @@ test('editor.db erzwingt Pragmas, Schema und Migrationchecksum', t => {
       name: migration002.name,
       checksum: editorMigrationChecksum(migration002),
       applied_at: 1_700
+    },
+    {
+      version: 3,
+      name: migration003.name,
+      checksum: editorMigrationChecksum(migration003),
+      applied_at: 1_700
     }
   ])
   assert.equal(database.pragma('user_version', {
     simple: true
-  }), 2)
+  }), 3)
 
   const tables = database.prepare(`
     SELECT name
@@ -273,6 +282,8 @@ test('editor.db erzwingt Pragmas, Schema und Migrationchecksum', t => {
     'editor_events',
     'editor_idempotency_keys',
     'editor_leases',
+    'editor_operation_intents',
+    'editor_operation_preimages',
     'editor_operations',
     'editor_sessions',
     'editor_validation_runs',
@@ -290,7 +301,7 @@ test('Migration rollbackt vollständig bei einem Teilfehler', t => {
   })
 
   const brokenMigration = Object.freeze({
-    version: 3,
+    version: 4,
     name: 'broken_test_migration',
     sql: `
       CREATE TABLE migration_must_rollback (id INTEGER);
@@ -301,7 +312,12 @@ test('Migration rollbackt vollständig bei einem Teilfehler', t => {
   assert.throws(
     () => openEditorDatabase({
       databasePath,
-      migrations: [migration001, migration002, brokenMigration],
+      migrations: [
+        migration001,
+        migration002,
+        migration003,
+        brokenMigration
+      ],
       now: () => 2_000
     }),
     expectPersistenceCode(E3_PERSISTENCE_ERROR.MIGRATION_FAILED)
@@ -314,7 +330,7 @@ test('Migration rollbackt vollständig bei einem Teilfehler', t => {
       SELECT COUNT(*) AS count
       FROM schema_migrations
     `).get().count,
-    2
+    3
   )
   assert.equal(
     database.prepare(`
@@ -326,10 +342,10 @@ test('Migration rollbackt vollständig bei einem Teilfehler', t => {
   )
   assert.equal(database.pragma('user_version', {
     simple: true
-  }), 2)
+  }), 3)
 })
 
-test('Bestehende Schema-Version 1 wird additiv auf 2 migriert', t => {
+test('Bestehende Schema-Version 1 wird additiv auf 3 migriert', t => {
   const directory = mkdtempSync(
     join(tmpdir(), 'echolink-e3-v1-upgrade-')
   )
@@ -355,7 +371,7 @@ test('Bestehende Schema-Version 1 wird additiv auf 2 migriert', t => {
   t.after(() => upgraded.close())
   assert.equal(upgraded.pragma('user_version', {
     simple: true
-  }), 2)
+  }), 3)
   assert.deepEqual(
     upgraded.prepare(`
       SELECT version, name
@@ -370,6 +386,10 @@ test('Bestehende Schema-Version 1 wird additiv auf 2 migriert', t => {
       {
         version: 2,
         name: migration002.name
+      },
+      {
+        version: 3,
+        name: migration003.name
       }
     ]
   )
@@ -822,14 +842,14 @@ test('Migrationset akzeptiert keine Lücken', t => {
   const harness = createDatabaseHarness(t)
   const database = harness.open()
   const invalid = Object.freeze({
-    version: 4,
+    version: 5,
     name: 'skipped_version',
     sql: 'CREATE TABLE skipped_version (id INTEGER) STRICT;'
   })
 
   assert.throws(
     () => migrateEditorDatabase(database, {
-      migrations: [migration001, migration002, invalid]
+      migrations: [migration001, migration002, migration003, invalid]
     }),
     expectPersistenceCode(
       E3_PERSISTENCE_ERROR.INVALID_MIGRATION_SET

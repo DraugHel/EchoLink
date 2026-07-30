@@ -551,6 +551,11 @@ export class EditorRepository {
     return this.#executeTransition(command, operation)
   }
 
+  recordPreparedOperation(command, operation, intentId) {
+    assertCanonicalSessionId(intentId)
+    return this.#executeTransition(command, operation, intentId)
+  }
+
   recordArtifact({
     id,
     sessionId,
@@ -776,7 +781,7 @@ export class EditorRepository {
     return Number(result.lastInsertRowid)
   }
 
-  #executeTransition(command, operation) {
+  #executeTransition(command, operation, intentId = null) {
     assertPlainObject(command, 'command')
     assertCanonicalSessionId(command.sessionId)
     assertSafeToken(command.requestId, 'requestId', {
@@ -799,10 +804,31 @@ export class EditorRepository {
             'Request ID was already used for another command'
           )
         }
-        return freezeDomainValue({
+        const replay = freezeDomainValue({
           ...JSON.parse(previousRequest.result_json),
           replayed: true
         })
+        if (intentId) {
+          const intentUpdate = this.database.prepare(`
+            UPDATE editor_operation_intents
+            SET state = 'RECORDED', result_json = ?, recorded_at = ?
+            WHERE id = ? AND session_id = ? AND request_id = ?
+              AND state IN ('PUBLISHED', 'RECORDED')
+          `).run(
+            canonicalJson(replay),
+            command.occurredAt,
+            intentId,
+            command.sessionId,
+            command.requestId
+          )
+          if (intentUpdate.changes !== 1) {
+            persistenceError(
+              E3_PERSISTENCE_ERROR.INVALID_RECORD,
+              'Prepared operation intent is not publishable'
+            )
+          }
+        }
+        return replay
       }
 
       const session = this.getSession(command.sessionId)
@@ -965,6 +991,26 @@ export class EditorRepository {
         eventId,
         command.occurredAt
       )
+      if (intentId) {
+        const intentUpdate = this.database.prepare(`
+          UPDATE editor_operation_intents
+          SET state = 'RECORDED', result_json = ?, recorded_at = ?
+          WHERE id = ? AND session_id = ? AND request_id = ?
+            AND state = 'PUBLISHED'
+        `).run(
+          canonicalJson(result),
+          command.occurredAt,
+          intentId,
+          command.sessionId,
+          command.requestId
+        )
+        if (intentUpdate.changes !== 1) {
+          persistenceError(
+            E3_PERSISTENCE_ERROR.INVALID_RECORD,
+            'Prepared operation intent is not PUBLISHED'
+          )
+        }
+      }
       return result
     })
 
