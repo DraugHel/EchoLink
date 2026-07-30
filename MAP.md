@@ -156,6 +156,25 @@ Die Integration wird in `tests/e3SessionEditorService.test.mjs` geprüft. Sie
 exponiert keine Route oder Agent-API und besitzt weiterhin kein produktives
 Apply.
 
+### server/e3/artifacts/
+
+Deterministische Kandidaten- und Undo-Artefakte, weiterhin ohne
+Runtime-Anbindung:
+- **artifactStore.js**: begrenzter, fsync- und SHA-256-gesicherter
+  Content-Addressed Store mit verifizierter Deduplizierung.
+- **candidateBuilder.js**: friert den Workspace über einen privaten
+  alternativen Git-Index ein und erzeugt vollständiges Tree-Manifest,
+  Forward-/Reverse-Patch, Unified Diff und begrenzten Diff-Stat.
+- **candidateArtifactRepository.js**: veröffentlicht fünf Artefaktmetadaten
+  und ihre Sessionversionsbindung atomar in SQLite.
+- **candidateArtifactService.js**: prüft Leases/Fencing, blockiert offene
+  Operation-Intents und verlangt zwei identische Freeze-Durchläufe.
+- Migration 004 ergänzt unveränderliche Kandidaten-Artefaktsets.
+
+Roundtrip, Reproduzierbarkeit, Manipulation, Race und Teilfehler werden in
+`tests/e3CandidateArtifacts.test.mjs` geprüft. Schritt 7 besitzt kein
+produktives Apply.
+
 ### server/middleware/auth.js
 `requireAuth` (Session) + `requireApiKey` (Header gegen ECHO_API_KEY, für /api/external).
 

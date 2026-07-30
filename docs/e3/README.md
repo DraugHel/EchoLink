@@ -183,6 +183,9 @@ weaken an invariant because a host feature is unavailable.
 - Step 6: session-bound mutation orchestration with a durable operation-intent
   journal, fencing, idempotency, content-addressed preimages, quotas, and
   explicit crash recovery.
+- Step 7: immutable candidate artifacts with a reproducible complete-tree
+  manifest, forward and reverse binary-safe patches, unified diff, bounded
+  diff stat, atomic metadata publication, and tamper detection.
 
 Step 5 is a library boundary only. It is not imported by the existing server
 or worker, has no route or tool exposure, cannot target `/root/echolink`, and
@@ -198,6 +201,17 @@ mutation, or fail closed as `RECOVERY_REQUIRED`.
 
 Step 6 remains an internal library boundary with no production route, agent
 tool, repository apply, deployment, process execution, or Git capability.
+
+Step 7 freezes a candidate twice through a private alternate Git index and
+accepts it only when both tree and artifact hashes agree. The real workspace
+index remains untouched. Durable bytes are published before their five
+artifact rows and candidate-set binding commit in one SQLite transaction.
+Forward and reverse patches are both checked in tests against the exact base.
+Artifact objects are immutable, content-addressed, size-bounded, fsynced, and
+verified on every read.
+
+This is the foundation for review and pre-apply undo; it still exposes no
+runtime route or tool and cannot apply a patch to the production repository.
 
 ## Explicit non-goals for V1
 
