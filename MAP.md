@@ -197,6 +197,30 @@ Schritt 8 führt noch keinen fremden Code aus und exponiert keine Route oder
 Agent-API. Manipulations-, Secret-Leak-, Runtime-Drift- und
 Arbitrary-Command-Versuche prüft `tests/e3ValidationPlanning.test.mjs`.
 
+Schritt-9-Lifecycle, weiterhin default-off und ohne Runtime-Anbindung:
+- **snapshotMaterializer.js**: rekonstruiert einen Kandidaten ausschließlich
+  aus vertrauenswürdigem Bare-Mirror, exaktem Base-Commit und gebundenem
+  Forward-Patch. Basis und Ergebnis werden gegen das vollständige
+  Candidate-Manifest geprüft; Symlinks, Hardlinks, Sonderdateien,
+  Grenzüberschreitungen und abweichende Hashes werden abgewiesen. Der
+  veröffentlichte Baum enthält kein `.git` und wird hostseitig read-only.
+- **dockerRuntime.js**: erzeugt ohne Shell einen festen Docker-Argumentvektor
+  mit digestgepinntem Image, `--pull never`, Network/IPC `none`, read-only
+  Root-FS, non-root UID/GID, Cap-Drop, No-New-Privileges sowie CPU-, RAM-,
+  PID-, Datei-, Log-, Output- und Zeitlimits. Snapshot und Output sind die
+  einzigen Bind-Mounts.
+- **validationBroker.js**: ist standardmäßig deaktiviert, kompiliert den Plan
+  erneut aus dem geschlossenen Request, bindet den abgeleiteten
+  Snapshot-Handle und prüft den Kandidaten vor und nach der Laufzeit.
+  Container- und Snapshot-Abwesenheit müssen nach Cleanup bewiesen sein;
+  mehrdeutige Docker-Fehler gelten nicht als erfolgreicher Cleanup.
+
+Schritt 9 exponiert weiterhin keine Route oder Agent-API und lässt das
+netzwerkgebundene UI-Profil für Schritt 10 gesperrt. Reale Container werden
+in den Tests nicht gestartet; der vollständige Lifecycle und die exakten
+Docker-Argumente werden mit einem kontrollierten Runtime-Adapter geprüft:
+`tests/e3ValidationBroker.test.mjs`.
+
 ### server/middleware/auth.js
 `requireAuth` (Session) + `requireApiKey` (Header gegen ECHO_API_KEY, für /api/external).
 

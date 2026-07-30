@@ -1,4 +1,6 @@
 export const E3_VALIDATION_REQUEST_VERSION = 1
+export const E3_VALIDATION_BROKER_FEATURE_FLAG =
+  'E3_VALIDATION_BROKER_ENABLED'
 export const E3_VALIDATION_PROFILE_SET_VERSION =
   'e3-validation-profiles-v1'
 export const E3_VALIDATION_DRIVER =
@@ -51,3 +53,7 @@ export const E3_VALIDATION_LIMITS = Object.freeze({
   maxPids: 128,
   maxOpenFiles: 1024
 })
+
+export function validationBrokerFeatureEnabled(env = {}) {
+  return env[E3_VALIDATION_BROKER_FEATURE_FLAG] === 'true'
+}

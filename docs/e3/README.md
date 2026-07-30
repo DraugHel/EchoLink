@@ -189,6 +189,9 @@ weaken an invariant because a host feature is unavailable.
 - Step 8: immutable validation profiles and deterministic admission plans
   that reject caller-controlled commands, arguments, images, mounts,
   environments, privileges, and network modes.
+- Step 9: default-off validation broker lifecycle with manifest-verified
+  read-only snapshots, a fixed hardened Docker invocation, bounded output,
+  timeout handling, forced cleanup, and post-run candidate verification.
 
 Step 5 is a library boundary only. It is not imported by the existing server
 or worker, has no route or tool exposure, cannot target `/root/echolink`, and
@@ -225,9 +228,23 @@ network policy. Plans are deterministic and deeply immutable, and their
 environment is rebuilt from an exact allowlist rather than inherited from
 the EchoLink process.
 
-The runtime broker remains disabled until Step 9 implements snapshot
-materialization, container lifecycle, bounded output, cleanup verification,
-and candidate re-verification. The isolated UI network remains Step 10.
+Step 9 implements that runtime boundary without exposing it to the existing
+server or worker. A candidate is reconstructed from the trusted bare mirror
+and forward patch, checked before patching and against the full manifest,
+published without Git metadata, and sealed read-only. The Docker adapter uses
+no shell and permits only the precompiled profile: immutable image digest,
+fixed entrypoint, no image pull, no network or IPC, non-root identity,
+read-only root filesystem, no capabilities, no-new-privileges, bounded
+resources, one read-only snapshot mount, one bounded output mount, and a
+bounded tmpfs.
+
+The broker verifies the snapshot before and after execution. It force-removes
+its owned container after normal exit, timeout, or launch failure and accepts
+cleanup only when Docker explicitly confirms that the container no longer
+exists. Snapshot cleanup is also mandatory for success. The feature remains
+default-off and disconnected from the current runtime. The `playwright:ui`
+profile remains blocked until Step 10 supplies its isolated two-container
+network.
 
 ## Explicit non-goals for V1
 
