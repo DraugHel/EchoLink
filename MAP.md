@@ -175,6 +175,28 @@ Roundtrip, Reproduzierbarkeit, Manipulation, Race und Teilfehler werden in
 `tests/e3CandidateArtifacts.test.mjs` geprüft. Schritt 7 besitzt kein
 produktives Apply.
 
+### server/e3/validation/
+
+Fail-closed Zulassungsgrenze für isolierte Validierung, weiterhin ohne
+Runtime-Anbindung oder Containerstart:
+- **contracts.js / errors.js**: versionierte Validierungsverträge, stabile
+  Profil-IDs, Netzwerkmodi, Mountklassen, Runtime- und Ressourcenlimits.
+- **profileRegistry.js**: unveränderlicher Katalog aus acht festen Profilen.
+  Images müssen als SHA-256-Digests bereitgestellt werden; Entry-Point,
+  Argumente, Mountklassen, User, Capabilities, Netzwerk und Limits sind
+  vollständig brokerseitig festgelegt und gemeinsam hashgebunden.
+- **requestSchema.js**: geschlossenes Requestschema. Der Aufrufer kann nur
+  Run, Session, Candidate-Set, Manifest, Snapshot-Handle, Profil-ID/-Version
+  sowie Lease/Fencing binden; unbekannte Ausführungsfelder werden abgewiesen.
+- **environmentPolicy.js / validationPlanner.js**: baut eine neue
+  Environment-Allowlist ohne Vererbung von `process.env` und erzeugt ein
+  deterministisches, tief eingefrorenes Planmanifest mit Request-, Profilset-
+  und Plan-SHA-256.
+
+Schritt 8 führt noch keinen fremden Code aus und exponiert keine Route oder
+Agent-API. Manipulations-, Secret-Leak-, Runtime-Drift- und
+Arbitrary-Command-Versuche prüft `tests/e3ValidationPlanning.test.mjs`.
+
 ### server/middleware/auth.js
 `requireAuth` (Session) + `requireApiKey` (Header gegen ECHO_API_KEY, für /api/external).
 

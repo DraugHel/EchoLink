@@ -186,6 +186,9 @@ weaken an invariant because a host feature is unavailable.
 - Step 7: immutable candidate artifacts with a reproducible complete-tree
   manifest, forward and reverse binary-safe patches, unified diff, bounded
   diff stat, atomic metadata publication, and tamper detection.
+- Step 8: immutable validation profiles and deterministic admission plans
+  that reject caller-controlled commands, arguments, images, mounts,
+  environments, privileges, and network modes.
 
 Step 5 is a library boundary only. It is not imported by the existing server
 or worker, has no route or tool exposure, cannot target `/root/echolink`, and
@@ -212,6 +215,19 @@ verified on every read.
 
 This is the foundation for review and pre-apply undo; it still exposes no
 runtime route or tool and cannot apply a patch to the production repository.
+
+Step 8 introduces the broker admission boundary but deliberately does not
+start containers yet. A request can select only an exact profile version and
+bind a frozen candidate, snapshot handle, profile-set hash, lease owner, and
+fencing token. The trusted registry supplies digest-pinned images, a fixed
+driver entrypoint, mount classes, non-root identity, resource ceilings, and
+network policy. Plans are deterministic and deeply immutable, and their
+environment is rebuilt from an exact allowlist rather than inherited from
+the EchoLink process.
+
+The runtime broker remains disabled until Step 9 implements snapshot
+materialization, container lifecycle, bounded output, cleanup verification,
+and candidate re-verification. The isolated UI network remains Step 10.
 
 ## Explicit non-goals for V1
 
