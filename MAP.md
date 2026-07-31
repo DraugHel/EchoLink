@@ -252,6 +252,22 @@ Schritt-11-Review-Gate, weiterhin default-off und ohne Runtime-Anbindung:
 Schritt 11 exponiert keine Route oder Agent-API und startet weder Container
 noch Prozesse. Test: `tests/e3ReviewGate.test.mjs`.
 
+Schritt-12-Approval-Gate, weiterhin default-off und ohne Runtime-Anbindung:
+- **approval/contracts.js / errors.js**: feste V1-Approval-Policy,
+  kanonische Zustimmungserklärung, Policy-Hash und stabile Fehlercodes.
+- **approvalGate.js**: verlangt eine explizite, feldgenau gebundene
+  `APPROVE`-Erklärung für Sessionversion, Base-Commit, Candidate, Review-Set,
+  Validierungsmanifest, Review-Zusammenfassung, Profilset und beide Policies.
+  Vor der Freigabe werden Kandidaten-, Review- und Validierungsartefakte erneut
+  gelesen, kanonisch geprüft und SHA-256-verifiziert.
+- Migration 006 ergänzt unveränderliche `editor_approval_records`.
+  Approval-Datensatz, `SESSION_APPROVED`-Event und Übergang zu `APPROVED`
+  werden atomar persistiert. Replays sind nur bytegenau identisch zulässig;
+  konkurrierende oder widersprüchliche Freigaben scheitern geschlossen.
+
+Schritt 12 exponiert keine Route oder Agent-API und aktiviert weder Export noch
+produktiven Apply. Test: `tests/e3ApprovalGate.test.mjs`.
+
 ### server/middleware/auth.js
 `requireAuth` (Session) + `requireApiKey` (Header gegen ECHO_API_KEY, für /api/external).
 

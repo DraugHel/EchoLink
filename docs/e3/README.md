@@ -29,6 +29,7 @@ other runtime change.
 | 9 – Validation broker | `3e7a7d831d3906e36d3fa20cb75d33f71de26d7b` | isolated snapshots and hardened networkless runtime |
 | 10 – UI validation | `c0eb2d77ed61d3718ee8bf08064f8e8c5e5abf9a` | isolated internal application/browser pair |
 | 11 – Review gate | `39cc5d9e639b80543aa84bfca1f2bc934871fdc4` | immutable validation evidence and atomic review freeze |
+| 12 – Bound approval | `260fb0e20f1e190f7cc91c5e2842938317685c3e` | immutable exact user consent and atomic approval transition |
 
 Step 2 lives in `server/e3/core/`. It defines the complete V1 and reserved
 status sets, commands, event and failure codes, immutable session
@@ -205,6 +206,10 @@ weaken an invariant because a host feature is unavailable.
 - Step 11: default-off review gate with immutable per-run evidence, a fixed
   eight-profile policy, verified candidate and log artifacts, canonical
   validation/review manifests, and an atomic `READY_FOR_REVIEW` transition.
+- Step 12: default-off approval gate with an exact canonical consent
+  statement, full candidate/review/policy binding, reverified artifacts,
+  immutable approval records, byte-bound idempotency, and an atomic
+  `APPROVED` transition.
 
 Step 5 is a library boundary only. It is not imported by the existing server
 or worker, has no route or tool exposure, cannot target `/root/echolink`, and
@@ -292,6 +297,26 @@ that a crash after the transition leaves none of them committed.
 The review gate is default-off and remains an internal library boundary. No
 existing route, worker, agent tool, deploy path, production database, Docker
 runtime, or productive repository apply imports it.
+
+Step 12 adds migration 006 and `server/e3/approval/`. `ApprovalGate` accepts
+only the fixed `APPROVE` decision and requires the caller to supply a closed,
+canonical statement bound to the current session version, base commit, review
+set, candidate set, candidate and review hashes, path policy, profile set,
+review policy, approval policy, actor, and approval timestamp. Unknown fields
+or any mismatched value fail closed.
+
+Before approval, the gate re-reads and hashes every candidate artifact, both
+review artifacts, and every validation log referenced by the immutable review
+set. It also parses and verifies the canonical candidate, validation, and
+review manifests. The approval record, the existing state-machine transition,
+the append-only `SESSION_APPROVED` event, and the idempotency result are
+committed in one SQLite transaction. Fault injection after the transition proves complete
+rollback. A review set can receive exactly one immutable approval record, and
+a request ID replays only when every bound byte is identical.
+
+The approval gate is default-off and remains an internal library boundary. It
+is not imported by the server, worker, agent tools, routes, export path, deploy
+path, or productive apply.
 
 ## Explicit non-goals for V1
 
