@@ -234,6 +234,24 @@ Argumentvektoren werden über kontrollierte Runtime-Adapter geprüft:
 `tests/e3ValidationBroker.test.mjs` und
 `tests/e3UiValidationRuntime.test.mjs`.
 
+Schritt-11-Review-Gate, weiterhin default-off und ohne Runtime-Anbindung:
+- **review/contracts.js / errors.js**: feste V1-Review-Policy mit allen acht
+  Pflichtprofilen, kanonische Manifeste, Policy-Hash und stabile Fehlercodes.
+- **validationEvidenceService.js**: bindet jeden Broker-Lauf unveränderlich an
+  Candidate, Profil, Profilset, Request und Plan. Logs sind begrenzt,
+  content-addressed und werden mit append-only Evidenzmetadaten gespeichert.
+- **reviewGate.js**: akzeptiert nur acht erfolgreiche, eindeutige Nachweise
+  desselben Kandidaten und Profilsets. Kandidatenartefakte und Logs werden
+  erneut gelesen und hashgeprüft. Validierungsmanifest, Review-Zusammenfassung,
+  Review-Set, Event und `READY_FOR_REVIEW` werden atomar persistiert.
+- Migration 005 ergänzt unveränderliche `editor_validation_evidence`- und
+  `editor_review_sets`-Tabellen. Manipulation, fehlende Profile, gemischte
+  Profilsets, stale Versionen/Fencing-Tokens, abgelaufene Leases und injizierte
+  Teilfehler scheitern geschlossen.
+
+Schritt 11 exponiert keine Route oder Agent-API und startet weder Container
+noch Prozesse. Test: `tests/e3ReviewGate.test.mjs`.
+
 ### server/middleware/auth.js
 `requireAuth` (Session) + `requireApiKey` (Header gegen ECHO_API_KEY, für /api/external).
 

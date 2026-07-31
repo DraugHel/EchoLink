@@ -22,6 +22,13 @@ other runtime change.
 | 2 – Core contracts | `175fddb628ff2fbfc6f5f3842226fbf078567f92` | pure session contracts and state machine |
 | 3 – Persistence | `61a301c851e55cd1bd22cda6e68477b8c84acf3b` | isolated SQLite schema, migrations, repository, events, leases, and idempotency |
 | 4 – Read-only workspaces | `e6b474eac35e0a6a2f51545e908e767e6e4f901c` | dedicated bare mirror, exact detached worktrees, manifests, fenced lifecycle, and safe cleanup |
+| 5 – Editor kernel | `eae9d3db41333a373e3b93876b60e26e084938e4` | deterministic guarded text operations |
+| 6 – Mutation journal | `63a41acc3b9aed3b924b7992c252ab899f618760` | durable mutation intents and recovery |
+| 7 – Candidate artifacts | `582dc42e11b3e8d2f4dd8a388f53199912ea3842` | immutable candidate, patch, diff, and manifest artifacts |
+| 8 – Validation planning | `228caab3f3130eb68c6789b3c3031e6e6cb0bd55` | immutable profiles and sealed validation plans |
+| 9 – Validation broker | `3e7a7d831d3906e36d3fa20cb75d33f71de26d7b` | isolated snapshots and hardened networkless runtime |
+| 10 – UI validation | `c0eb2d77ed61d3718ee8bf08064f8e8c5e5abf9a` | isolated internal application/browser pair |
+| 11 – Review gate | `39cc5d9e639b80543aa84bfca1f2bc934871fdc4` | immutable validation evidence and atomic review freeze |
 
 Step 2 lives in `server/e3/core/`. It defines the complete V1 and reserved
 status sets, commands, event and failure codes, immutable session
@@ -195,6 +202,9 @@ weaken an invariant because a host feature is unavailable.
 - Step 10: fixed two-container UI validation on a per-run internal Docker
   bridge with one application peer, one browser peer, an exact internal
   origin, no published ports or Internet egress, and proven cleanup.
+- Step 11: default-off review gate with immutable per-run evidence, a fixed
+  eight-profile policy, verified candidate and log artifacts, canonical
+  validation/review manifests, and an atomic `READY_FOR_REVIEW` transition.
 
 Step 5 is a library boundary only. It is not imported by the existing server
 or worker, has no route or tool exposure, cannot target `/root/echolink`, and
@@ -262,6 +272,26 @@ containers followed by the network. Success is impossible unless Docker
 proves that both containers and the network are absent. This remains a
 library boundary: no existing server or worker imports it, no real container
 is started by tests or deploy, and productive apply remains disabled.
+
+Step 11 adds migration 005 and `server/e3/review/`. Every broker result now
+exposes the exact profile and profile-set versions required for durable
+evidence. `ValidationEvidenceService` accepts only a result bound to the
+current candidate and validating session, stores a bounded content-addressed
+log, and commits immutable evidence metadata. Reusing a run ID with different
+bytes fails closed.
+
+`ReviewGate` requires exactly one successful result for each of the eight
+fixed V1 profiles. All evidence must bind the same candidate, profile-set
+version, and profile-set hash. It re-reads and hashes every candidate artifact
+and validation log before producing canonical validation-manifest and
+review-summary artifacts. Those artifacts, the review-set row, the session
+candidate binding, the append-only event, and the transition to
+`READY_FOR_REVIEW` commit in one SQLite transaction. Fault injection proves
+that a crash after the transition leaves none of them committed.
+
+The review gate is default-off and remains an internal library boundary. No
+existing route, worker, agent tool, deploy path, production database, Docker
+runtime, or productive repository apply imports it.
 
 ## Explicit non-goals for V1
 

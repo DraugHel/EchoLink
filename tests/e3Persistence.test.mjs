@@ -46,6 +46,9 @@ import {
   migration004
 } from '../server/e3/persistence/migrations/004-candidate-artifacts.js'
 import {
+  migration005
+} from '../server/e3/persistence/migrations/005-review-evidence.js'
+import {
   editorMigrationChecksum
 } from '../server/e3/persistence/migrations/index.js'
 
@@ -274,11 +277,17 @@ test('editor.db erzwingt Pragmas, Schema und Migrationchecksum', t => {
       name: migration004.name,
       checksum: editorMigrationChecksum(migration004),
       applied_at: 1_700
+    },
+    {
+      version: 5,
+      name: migration005.name,
+      checksum: editorMigrationChecksum(migration005),
+      applied_at: 1_700
     }
   ])
   assert.equal(database.pragma('user_version', {
     simple: true
-  }), 4)
+  }), 5)
 
   const tables = database.prepare(`
     SELECT name
@@ -295,7 +304,9 @@ test('editor.db erzwingt Pragmas, Schema und Migrationchecksum', t => {
     'editor_operation_intents',
     'editor_operation_preimages',
     'editor_operations',
+    'editor_review_sets',
     'editor_sessions',
+    'editor_validation_evidence',
     'editor_validation_runs',
     'editor_workspaces'
   ])
@@ -311,7 +322,7 @@ test('Migration rollbackt vollständig bei einem Teilfehler', t => {
   })
 
   const brokenMigration = Object.freeze({
-    version: 5,
+    version: 6,
     name: 'broken_test_migration',
     sql: `
       CREATE TABLE migration_must_rollback (id INTEGER);
@@ -327,6 +338,7 @@ test('Migration rollbackt vollständig bei einem Teilfehler', t => {
         migration002,
         migration003,
         migration004,
+        migration005,
         brokenMigration
       ],
       now: () => 2_000
@@ -341,7 +353,7 @@ test('Migration rollbackt vollständig bei einem Teilfehler', t => {
       SELECT COUNT(*) AS count
       FROM schema_migrations
     `).get().count,
-    4
+    5
   )
   assert.equal(
     database.prepare(`
@@ -353,10 +365,10 @@ test('Migration rollbackt vollständig bei einem Teilfehler', t => {
   )
   assert.equal(database.pragma('user_version', {
     simple: true
-  }), 4)
+  }), 5)
 })
 
-test('Bestehende Schema-Version 1 wird additiv auf 4 migriert', t => {
+test('Bestehende Schema-Version 1 wird additiv auf 5 migriert', t => {
   const directory = mkdtempSync(
     join(tmpdir(), 'echolink-e3-v1-upgrade-')
   )
@@ -382,7 +394,7 @@ test('Bestehende Schema-Version 1 wird additiv auf 4 migriert', t => {
   t.after(() => upgraded.close())
   assert.equal(upgraded.pragma('user_version', {
     simple: true
-  }), 4)
+  }), 5)
   assert.deepEqual(
     upgraded.prepare(`
       SELECT version, name
@@ -405,6 +417,10 @@ test('Bestehende Schema-Version 1 wird additiv auf 4 migriert', t => {
       {
         version: 4,
         name: migration004.name
+      },
+      {
+        version: 5,
+        name: migration005.name
       }
     ]
   )
@@ -857,7 +873,7 @@ test('Migrationset akzeptiert keine Lücken', t => {
   const harness = createDatabaseHarness(t)
   const database = harness.open()
   const invalid = Object.freeze({
-    version: 6,
+    version: 7,
     name: 'skipped_version',
     sql: 'CREATE TABLE skipped_version (id INTEGER) STRICT;'
   })
@@ -869,6 +885,7 @@ test('Migrationset akzeptiert keine Lücken', t => {
         migration002,
         migration003,
         migration004,
+        migration005,
         invalid
       ]
     }),

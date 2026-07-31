@@ -135,7 +135,9 @@ export class ValidationBroker {
         candidateManifestSha256:
           plan.candidateManifestSha256,
         profileId: plan.profile.id,
+        profileVersion: plan.profile.version,
         profileSha256: plan.profile.sha256,
+        profileSetVersion: plan.profileSet.version,
         profileSetSha256: plan.profileSet.sha256,
         requestSha256: plan.requestSha256,
         planSha256: plan.planSha256,
