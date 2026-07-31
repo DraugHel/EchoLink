@@ -268,6 +268,25 @@ Schritt-12-Approval-Gate, weiterhin default-off und ohne Runtime-Anbindung:
 Schritt 12 exponiert keine Route oder Agent-API und aktiviert weder Export noch
 produktiven Apply. Test: `tests/e3ApprovalGate.test.mjs`.
 
+Schritt-13-Pilot-Export, weiterhin default-off und ohne Runtime-Anbindung:
+- **export/contracts.js / errors.js**: feste V1-Exportpolicy, kanonische
+  Manifestregeln, Policy-Hash, Größenlimit und stabile Fehlercodes.
+- **deterministicTar.js**: erzeugt und prüft ein kanonisch sortiertes,
+  unkomprimiertes USTAR-V1-Archiv mit festen Metadaten, Header-Prüfsummen,
+  Nullpadding und genau zwei Abschlussblöcken.
+- **pilotExportService.js**: verifiziert die aktuelle Approval-Linie erneut und
+  exportiert Candidate-Manifest, Forward-/Reverse-Patch, Unified Diff,
+  Diff-Stat, Review-Artefakte, Approval-Statement und alle acht
+  Validierungslogs samt `SHA256SUMS` und Exportmanifest.
+- Migration 007 ergänzt unveränderliche `editor_pilot_export_records`.
+  Export-Artefakt, `EXPORT_STARTED`/`EXPORT_FINISHED`, beide Statuswechsel bis
+  `EXPORTED` und Exportdatensatz committen in einer SQLite-Transaktion.
+  Replays sind bytegebunden; manipulierte Quellen oder Pakete, stale
+  Versionen, Lease-/Fencing-Abweichungen und Teilfehler scheitern geschlossen.
+
+Schritt 13 exponiert keine Route oder Agent-API, führt keinen Produktiv-Apply
+und startet keine Prozesse oder Container. Test: `tests/e3PilotExport.test.mjs`.
+
 ### server/middleware/auth.js
 `requireAuth` (Session) + `requireApiKey` (Header gegen ECHO_API_KEY, für /api/external).
 

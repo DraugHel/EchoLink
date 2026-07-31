@@ -30,6 +30,7 @@ other runtime change.
 | 10 – UI validation | `c0eb2d77ed61d3718ee8bf08064f8e8c5e5abf9a` | isolated internal application/browser pair |
 | 11 – Review gate | `39cc5d9e639b80543aa84bfca1f2bc934871fdc4` | immutable validation evidence and atomic review freeze |
 | 12 – Bound approval | `260fb0e20f1e190f7cc91c5e2842938317685c3e` | immutable exact user consent and atomic approval transition |
+| 13 – Pilot export | `fd7defec816d5e9d605579094d9b1795a2f620d3` | deterministic self-verifying manual patch package and atomic export transition |
 
 Step 2 lives in `server/e3/core/`. It defines the complete V1 and reserved
 status sets, commands, event and failure codes, immutable session
@@ -210,6 +211,10 @@ weaken an invariant because a host feature is unavailable.
   statement, full candidate/review/policy binding, reverified artifacts,
   immutable approval records, byte-bound idempotency, and an atomic
   `APPROVED` transition.
+- Step 13: default-off pilot export with a deterministic USTAR package,
+  complete candidate/review/approval evidence, all validation logs, canonical
+  checksums and manifest, immutable export records, byte-bound replay, and one
+  atomic `APPROVED` to `EXPORTED` transaction.
 
 Step 5 is a library boundary only. It is not imported by the existing server
 or worker, has no route or tool exposure, cannot target `/root/echolink`, and
@@ -317,6 +322,35 @@ a request ID replays only when every bound byte is identical.
 The approval gate is default-off and remains an internal library boundary. It
 is not imported by the server, worker, agent tools, routes, export path, deploy
 path, or productive apply.
+
+Step 13 adds migration 007 and `server/e3/export/`. `PilotExportService`
+requires the exact current approved session version, approval record, live
+session lease, owner and fencing token. It reuses the approval verifier to
+re-read every bound candidate, review and validation artifact before package
+construction. Approval replay remains valid after the session advances to an
+exported downstream state.
+
+The exported package is an uncompressed deterministic USTAR-V1 archive with
+fixed file modes, zero owner IDs and timestamps, sorted portable paths, header
+checksums, zero padding and a strict two-block trailer. It contains the
+candidate manifest, forward and reverse patches, unified diff, diff stat,
+validation manifest, review summary, canonical approval statement and all
+eight validation logs. A canonical export manifest and `SHA256SUMS` bind every
+payload byte, all policy versions and hashes, the exact base commit, session,
+candidate, review and approval.
+
+Package bytes are published content-addressed before metadata. The package
+artifact row, immutable pilot-export record, `EXPORT_STARTED` and
+`EXPORT_FINISHED` events, and both state transitions from `APPROVED` through
+`EXPORTING` to `EXPORTED` commit in one SQLite transaction. Fault injection
+after the first transition proves complete database rollback. Exact request
+replay re-verifies the package and source evidence; changed bytes or a second
+export for the same approval fail closed.
+
+The pilot export is manual-apply-only, default-off and an internal library
+boundary. It is not imported by the existing server, worker, agent tools,
+routes or deploy path, starts no process or container, and cannot write to the
+productive repository.
 
 ## Explicit non-goals for V1
 

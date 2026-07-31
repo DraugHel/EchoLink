@@ -499,6 +499,7 @@ export class ApprovalGate {
     const evidenceById = new Map(
       evidenceRows.map(evidence => [evidence.id, evidence])
     )
+    const verifiedEvidence = []
     for (const validation of validationManifest.validations) {
       const evidence = evidenceById.get(validation.runId)
       if (
@@ -544,8 +545,9 @@ export class ApprovalGate {
         exitCode: evidence.exit_code,
         signal: evidence.signal
       }, 'Validation manifest entry')
+      let logBytes
       try {
-        this.store.read(evidence.log_sha256)
+        logBytes = this.store.read(evidence.log_sha256)
       } catch (cause) {
         approvalError(
           E3_APPROVAL_ERROR.ARTIFACT_TAMPERED,
@@ -554,8 +556,24 @@ export class ApprovalGate {
           cause
         )
       }
+      verifiedEvidence.push({
+        id: evidence.id,
+        profileId: evidence.profile_id,
+        profileVersion: evidence.profile_version,
+        logSha256: evidence.log_sha256,
+        logBytes
+      })
     }
-    return { review, candidate }
+    return {
+      review,
+      candidate,
+      candidateBytes,
+      validationBytes,
+      summaryBytes,
+      validationManifest,
+      reviewSummary,
+      evidence: verifiedEvidence
+    }
   }
 
   #expectedStatement(input, session, review, candidate) {
@@ -632,13 +650,19 @@ export class ApprovalGate {
       occurredAt: approval.createdAt
     }, 'Persisted approval statement')
     const session = this.sessions.getSession(approval.sessionId)
+    const downstreamStatuses = [
+      E3_SESSION_STATUS.APPROVED,
+      E3_SESSION_STATUS.EXPORTING,
+      E3_SESSION_STATUS.EXPORTED,
+      E3_SESSION_STATUS.COMPLETED
+    ]
     if (
-      session?.status !== E3_SESSION_STATUS.APPROVED ||
-      session.version !== approval.approvedSessionVersion
+      !downstreamStatuses.includes(session?.status) ||
+      session.version < approval.approvedSessionVersion
     ) {
       approvalError(
         E3_APPROVAL_ERROR.HASH_BINDING_MISMATCH,
-        'Persisted approval does not match the approved session'
+        'Persisted approval does not match an approved session lineage'
       )
     }
     assertBinding(session.approval ?? {}, {
@@ -654,7 +678,7 @@ export class ApprovalGate {
       approvedBy: approval.actorId,
       approvedAt: approval.createdAt
     }, 'Approved session binding')
-    this.#loadAndVerifyReview({
+    const verifiedReview = this.#loadAndVerifyReview({
       sessionId: approval.sessionId,
       reviewSetId: approval.reviewSetId,
       expectedVersion: approval.reviewSessionVersion
@@ -672,6 +696,37 @@ export class ApprovalGate {
         profileSetVersion: approval.profileSetVersion
       }
     })
+    return {
+      approval,
+      session,
+      ...verifiedReview
+    }
+  }
+
+  verifyById(id) {
+    const approval = this.getById(id)
+    if (!approval) {
+      approvalError(
+        E3_APPROVAL_ERROR.APPROVAL_CONFLICT,
+        'Approval record does not exist'
+      )
+    }
+    return this.#verifyPersistedApproval(approval)
+  }
+
+  verifyForExport(id) {
+    const verified = this.verifyById(id)
+    if (
+      verified.session.status !== E3_SESSION_STATUS.APPROVED ||
+      verified.session.version !==
+        verified.approval.approvedSessionVersion
+    ) {
+      approvalError(
+        E3_APPROVAL_ERROR.SESSION_NOT_READY,
+        'Pilot export requires the current approved session version'
+      )
+    }
+    return verified
   }
 
   approve(input) {
