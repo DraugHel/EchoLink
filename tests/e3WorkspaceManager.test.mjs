@@ -635,6 +635,47 @@ test('Veraltetes Workspace-Fencing kann weder lesen noch entfernen', t => {
   )
 })
 
+test('Cleanup nutzt aktuellen Lease-Token ohne das Erzeugungsmanifest umzuschreiben', t => {
+  const harness = createHarness(t)
+  const provisioned = harness.manager.provisionWorkspace({
+    sessionId: SESSION_ID,
+    leaseOwner: MANAGER_OWNER,
+    fencingToken: 1,
+    createdAt: 2_000
+  })
+  let session = harness.sessions.transitionSession(
+    sessionCommand(
+      harness.session,
+      E3_SESSION_COMMAND.FINISH_PROVISIONING
+    )
+  ).session
+  session = harness.sessions.transitionSession(
+    sessionCommand(session, E3_SESSION_COMMAND.CANCEL)
+  ).session
+
+  const takeover = harness.sessions.claimLease({
+    resourceType: E3_LEASE_RESOURCE_TYPE.WORKSPACE,
+    resourceKey: SESSION_ID,
+    owner: MANAGER_OWNER,
+    occurredAt: 100_001,
+    expiresAt: 200_000,
+    expectedFencingToken: 1,
+    previousOwnerConfirmedDead: true
+  })
+  assert.equal(takeover.fencingToken, 2)
+  assert.equal(provisioned.record.fencingToken, 1)
+
+  const removed = harness.manager.removeWorkspace({
+    sessionId: SESSION_ID,
+    leaseOwner: MANAGER_OWNER,
+    fencingToken: takeover.fencingToken,
+    removedAt: 100_100
+  })
+  assert.equal(removed.removed, true)
+  assert.equal(removed.record.state, E3_WORKSPACE_STATE.REMOVED)
+  assert.equal(removed.record.fencingToken, 1)
+})
+
 test('Workspace-Schritt exponiert keine Editor- oder Prozess-API', () => {
   const managerSource = readFileSync(
     new URL(

@@ -6,6 +6,7 @@ import { migration004 } from './004-candidate-artifacts.js'
 import { migration005 } from './005-review-evidence.js'
 import { migration006 } from './006-approval-records.js'
 import { migration007 } from './007-pilot-exports.js'
+import { migration008 } from './008-recovery-runs.js'
 
 export const EDITOR_MIGRATIONS = Object.freeze([
   migration001,
@@ -14,7 +15,8 @@ export const EDITOR_MIGRATIONS = Object.freeze([
   migration004,
   migration005,
   migration006,
-  migration007
+  migration007,
+  migration008
 ])
 
 export function editorMigrationChecksum(migration) {

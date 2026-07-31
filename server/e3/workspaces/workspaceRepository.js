@@ -18,6 +18,7 @@ import {
 } from './errors.js'
 
 const CLEANUP_SESSION_STATUSES = Object.freeze([
+  E3_SESSION_STATUS.EXPORTED,
   E3_SESSION_STATUS.COMPLETED,
   E3_SESSION_STATUS.FAILED,
   E3_SESSION_STATUS.CANCELLED,
@@ -261,7 +262,7 @@ export class WorkspaceRepository {
           occurredAt,
           sessionId,
           E3_WORKSPACE_STATE.READY,
-          fencingToken
+          workspace.fencingToken
         )
         if (update.changes !== 1) {
           workspaceError(
@@ -324,7 +325,7 @@ export class WorkspaceRepository {
         removedAt,
         sessionId,
         E3_WORKSPACE_STATE.REMOVING,
-        fencingToken
+        workspace.fencingToken
       )
       if (update.changes !== 1) {
         workspaceError(

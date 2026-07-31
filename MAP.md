@@ -287,6 +287,32 @@ Schritt-13-Pilot-Export, weiterhin default-off und ohne Runtime-Anbindung:
 Schritt 13 exponiert keine Route oder Agent-API, führt keinen Produktiv-Apply
 und startet keine Prozesse oder Container. Test: `tests/e3PilotExport.test.mjs`.
 
+Schritt-14-Recovery/Reaper, weiterhin default-off und ohne Runtime-Anbindung:
+- **recovery/contracts.js / errors.js**: feste V1-Recovery-Policy, geschlossene
+  Requestfelder, kanonischer Policy-Hash, Entscheidungen, Gründe und stabile
+  Fehlercodes. Unbekannte Pfade werden nie automatisch gelöscht oder verschoben.
+- **recoveryRepository.js**: liest Workspace-/Session-Snapshots, laufende
+  Validationen und offene Mutationsintents, übernimmt ausschließlich
+  abgelaufene Session-/Workspace-Leases per CAS mit monotonem Fencing und
+  speichert unveränderliche Recovery-Läufe und Einzelentscheidungen.
+- **recoveryService.js**: serialisiert über den globalen Cleanup-Lock, gleicht
+  DB, kanonische Workspace-Pfade und hashgebundene Manager-Manifeste ab, prüft
+  Leases, Prozesse, Container, Ports und Retention und delegiert zulässigen
+  Cleanup ausschließlich an den bestehenden `WorkspaceManager`. Mehrdeutige
+  Fälle werden nur als `QUARANTINE_REQUIRED` protokolliert und behalten.
+- **sessionFinalizer.js**: schließt einen exportierten Pilot erst nach
+  nachgewiesenem Workspace-Cleanup über die bestehende zentrale Transition zu
+  `COMPLETED` ab.
+- Migration 008 ergänzt unveränderliche `editor_recovery_runs` und
+  `editor_recovery_decisions`. Crashpunkte vor/nach Lease-Takeover, Cleanup,
+  Sessionabschluss und Audit sind idempotent wiederaufnehmbar. Der aktuelle
+  Lease-Token fencet Cleanup; der im unveränderten Workspace-Manifest gebundene
+  Erzeugungs-Token bleibt dessen Identitätsnachweis.
+
+Schritt 14 exponiert keine Route oder Agent-API, führt keinen Produktiv-Apply,
+keinen Docker-Prune und keinen allgemeinen rekursiven Löschpfad aus. Tests:
+`tests/e3RecoveryReaper.test.mjs`, `tests/e3WorkspaceManager.test.mjs`.
+
 ### server/middleware/auth.js
 `requireAuth` (Session) + `requireApiKey` (Header gegen ECHO_API_KEY, für /api/external).
 

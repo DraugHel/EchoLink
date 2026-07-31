@@ -31,6 +31,7 @@ other runtime change.
 | 11 – Review gate | `39cc5d9e639b80543aa84bfca1f2bc934871fdc4` | immutable validation evidence and atomic review freeze |
 | 12 – Bound approval | `260fb0e20f1e190f7cc91c5e2842938317685c3e` | immutable exact user consent and atomic approval transition |
 | 13 – Pilot export | `fd7defec816d5e9d605579094d9b1795a2f620d3` | deterministic self-verifying manual patch package and atomic export transition |
+| 14 – Recovery and reaper | `708a3e95f20b5895f9c198804b21e2d7b533b02f` | conservative reconciler, fenced cleanup, immutable decisions, and crash-resumable finalization |
 
 Step 2 lives in `server/e3/core/`. It defines the complete V1 and reserved
 status sets, commands, event and failure codes, immutable session
@@ -215,6 +216,10 @@ weaken an invariant because a host feature is unavailable.
   complete candidate/review/approval evidence, all validation logs, canonical
   checksums and manifest, immutable export records, byte-bound replay, and one
   atomic `APPROVED` to `EXPORTED` transaction.
+- Step 14: default-off startup recovery and conservative reaper with a global
+  cleanup lock, DB/manifest reconciliation, process/container/port checks,
+  expired-lease takeover, trusted workspace cleanup, immutable decisions,
+  exported-session finalization, and crash-resumable fault injection.
 
 Step 5 is a library boundary only. It is not imported by the existing server
 or worker, has no route or tool exposure, cannot target `/root/echolink`, and
@@ -351,6 +356,40 @@ The pilot export is manual-apply-only, default-off and an internal library
 boundary. It is not imported by the existing server, worker, agent tools,
 routes or deploy path, starts no process or container, and cannot write to the
 productive repository.
+
+Step 14 adds migration 008 and `server/e3/recovery/`.
+`RecoveryReaperService` requires the exact current global cleanup lease and a
+host-local manager lock. It inventories only the canonical E3 workspace root,
+joins each DB workspace to its session, current session/workspace leases,
+active validation runs and open mutation intents, and re-verifies the exact
+manager-owned manifest before any cleanup decision. Missing inspectors, live
+processes, containers or ports, valid foreign leases, active work, retention
+windows, path drift, symlinks, changed manifests and unknown directories all
+retain the resource or produce an immutable `QUARANTINE_REQUIRED` decision.
+Unknown entries are represented only by a path hash and are never deleted or
+moved automatically.
+
+Only expired or absent session/workspace leases can be taken over. The
+takeover uses a compare-and-swap transaction and advances the fencing token.
+The current lease token authorizes lifecycle mutation, while the original
+workspace-record token remains the immutable identity bound into the signed
+manifest. Cleanup is delegated exclusively to `WorkspaceManager`, which still
+removes only the exact registered Git worktree, verified manifest and empty
+manager-owned directory. No generic recursive deletion or Docker pruning is
+introduced.
+
+An `EXPORTED` session becomes `COMPLETED` only after the workspace is proven
+removed. The existing central session transition writes the completion event
+and idempotency record. Migration 008 stores immutable recovery-run summaries
+and per-resource decisions. Exact request replay is byte-bound. Fault
+injection after lock acquisition, lease takeover, workspace cleanup, session
+finalization, and durable audit proves that every observable partial state is
+safely resumable; a completed audit is returned as replay.
+
+Recovery remains default-off and an internal library boundary. It is not
+imported by the application server, worker, routes, agent tools, deploy path or
+productive apply. Step 14 therefore closes the non-apply pilot foundation but
+does not itself claim an operational pilot period or authorize Step-15 apply.
 
 ## Explicit non-goals for V1
 

@@ -414,12 +414,6 @@ export class WorkspaceManager {
           'Filesystem workspace has no DB record'
         )
       }
-      if (record.fencingToken !== fencingToken) {
-        workspaceError(
-          E3_WORKSPACE_ERROR.LEASE_MISMATCH,
-          'Workspace record has a stale fencing token'
-        )
-      }
       if (record.state === E3_WORKSPACE_STATE.REMOVED) {
         if (existsSync(paths.workspaceRoot)) {
           workspaceError(
