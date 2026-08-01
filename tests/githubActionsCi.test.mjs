@@ -31,10 +31,10 @@ test('CI besitzt nur Leserechte und speichert keine Checkout-Credentials', () =>
   assert.doesNotMatch(workflow, /git push|npm run deploy/)
 })
 
-test('CI verwendet Node 22, Lockfiles und reproduzierbare Installationen', () => {
+test('CI verwendet Node 24.18.0, Lockfiles und reproduzierbare Installationen', () => {
   assert.match(workflow, /actions\/checkout@v5/)
   assert.match(workflow, /actions\/setup-node@v6/)
-  assert.match(workflow, /node-version: '22'/)
+  assert.match(workflow, /node-version: '24\.18\.0'/)
   assert.match(workflow, /cache: npm/)
   assert.match(workflow, /package-lock\.json/)
   assert.match(workflow, /client\/package-lock\.json/)

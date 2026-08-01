@@ -73,6 +73,7 @@ function fakeDocker({
   browserResult,
   applicationRunning = true,
   ambiguousNetworkCleanup = false,
+  networkMissingMessage = name => `No such network: ${name}`,
   onBrowserRun
 } = {}) {
   const calls = []
@@ -110,7 +111,7 @@ function fakeDocker({
             status: 1,
             signal: null,
             stdout: Buffer.alloc(0),
-            stderr: Buffer.from(`No such network: ${args[2]}`)
+            stderr: Buffer.from(networkMissingMessage(args[2]))
           }
     }
     if (args[0] === 'rm') {
@@ -251,6 +252,7 @@ test('UI runtime creates one internal bridge and two hardened peers', t => {
     assert.ok(call.args.includes('--read-only'))
     assert.ok(call.args.includes('ALL'))
     assert.ok(call.args.includes('no-new-privileges:true'))
+    assert.ok(call.args.includes('apparmor=docker-default'))
     assert.equal(call.args.includes('--privileged'), false)
     assert.equal(call.args.includes('--publish'), false)
     assert.equal(serialized.includes('/var/run/docker.sock'), false)
@@ -342,6 +344,25 @@ test('application must remain alive through the browser run', t => {
   assert.equal(pair.fake.networkExists, false)
   assert.equal(pair.fake.containers.size, 0)
 })
+
+test(
+  'Docker daemon network-not-found wording proves cleanup',
+  t => {
+    const pair = fixture(t, {
+      networkMissingMessage: name =>
+        `Error response from daemon: network ${name} not found`
+    })
+
+    const result = pair.runtime.run(
+      uiPlan(),
+      pair.snapshot
+    )
+
+    assert.equal(result.status, 'succeeded')
+    assert.equal(pair.fake.networkExists, false)
+    assert.equal(pair.fake.containers.size, 0)
+  }
+)
 
 test('ambiguous network cleanup always fails closed', t => {
   const pair = fixture(t, { ambiguousNetworkCleanup: true })

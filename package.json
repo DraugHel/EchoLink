@@ -10,6 +10,7 @@
     "test:smoke": "node --test tests/*.test.mjs",
     "test": "npm run test:smoke",
     "ci": "npm test && npm run build",
+    "e3:validation:images": "bash scripts/e3-build-validation-images.sh",
     "deploy": "bash scripts/deploy.sh",
     "mcp:web": "node server/mcp/webServer.js",
     "mcp:web:smoke": "node scripts/mcp-web-smoke.js",

@@ -32,6 +32,7 @@ other runtime change.
 | 12 – Bound approval | `260fb0e20f1e190f7cc91c5e2842938317685c3e` | immutable exact user consent and atomic approval transition |
 | 13 – Pilot export | `fd7defec816d5e9d605579094d9b1795a2f620d3` | deterministic self-verifying manual patch package and atomic export transition |
 | 14 – Recovery and reaper | `708a3e95f20b5895f9c198804b21e2d7b533b02f` | conservative reconciler, fenced cleanup, immutable decisions, and crash-resumable finalization |
+| 14A.1 – Trusted validation runtime | `89f9de4c3fb792caad06f1a29412bd572c51baa0` | digest-pinned Node/Playwright images, fixed driver dispatch, real eight-profile smoke and hash-bound image manifest |
 
 Step 2 lives in `server/e3/core/`. It defines the complete V1 and reserved
 status sets, commands, event and failure codes, immutable session
@@ -220,6 +221,13 @@ weaken an invariant because a host feature is unavailable.
   cleanup lock, DB/manifest reconciliation, process/container/port checks,
   expired-lease takeover, trusted workspace cleanup, immutable decisions,
   exported-session finalization, and crash-resumable fault injection.
+- Step 14A.1: explicit operator-only construction of two immutable validator
+  images from digest-pinned upstream manifests and all three lockfiles. A fixed
+  non-root driver implements exactly the eight accepted profiles; both images
+  are smoke-tested through the existing hardened broker runtimes before one
+  root-owned, canonical image manifest is published. CI is aligned to Node
+  24.18.0. No route, agent tool, feature activation or pilot orchestration is
+  added.
 
 Step 5 is a library boundary only. It is not imported by the existing server
 or worker, has no route or tool exposure, cannot target `/root/echolink`, and
@@ -390,6 +398,35 @@ Recovery remains default-off and an internal library boundary. It is not
 imported by the application server, worker, routes, agent tools, deploy path or
 productive apply. Step 14 therefore closes the non-apply pilot foundation but
 does not itself claim an operational pilot period or authorize Step-15 apply.
+
+
+Step 14A.1 makes the previously abstract validation profiles operational only
+through an explicit root-operator image build. `imageSources.js` pins the exact
+Node 24.18.0 and Playwright 1.61.1 upstream manifests. The two Dockerfiles use
+those immutable bases and install project or driver dependencies solely with
+lockfiles and `npm ci`. The source build context is reconstructed through a
+private temporary Git index, excludes ignored production state and is bound by
+both a Git tree and a byte-level manifest hash.
+
+The driver at `/opt/echolink/validation-driver.mjs` accepts exactly one fixed
+profile ID. It rebuilds a bounded writable copy below `/e3/tmp`, rejects Git or
+dependency paths and unsafe links, injects only image-owned dependency layers,
+and launches only the pinned Node executable without a shell. The UI handler
+serves one synthetic fixture and the browser blocks every origin except the
+internal `http://e3-app:4173` peer.
+
+`scripts/e3-build-validation-images.sh` accepts no arguments, requires an
+explicit root operator, `main`, a reachable pinned Docker executable and an
+absent durable manifest. It builds both images, verifies labels, architecture,
+non-root identity and Node version, then runs all eight profiles through
+`DockerValidationRuntime` and `DockerUiValidationRuntime`. Success requires
+proven container/network cleanup before the canonical root-owned manifest is
+installed at `/var/lib/echolink-e3/validation-images.json`.
+
+The trusted image runtime is still not imported by normal EchoLink startup and
+does not enable `E3_VALIDATION_BROKER_ENABLED`. It creates no route, agent tool,
+worker, productive workspace mutation, apply, deploy, PM2 action or production
+database access. Operational pilot orchestration remains a later 14A step.
 
 ## Explicit non-goals for V1
 

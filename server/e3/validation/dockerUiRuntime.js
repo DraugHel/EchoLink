@@ -188,6 +188,8 @@ function hardenedArguments({
     'ALL',
     '--security-opt',
     'no-new-privileges:true',
+    '--security-opt',
+    'apparmor=docker-default',
     '--pids-limit',
     String(limits.pids),
     '--memory',
@@ -398,7 +400,7 @@ export class DockerUiValidationRuntime {
     ).toString('utf8')
     if (
       inspection.status === 0 ||
-      !/No such network/i.test(message)
+      !/(?:No such network|network .+ not found)/i.test(message)
     ) {
       runtimeError(
         E3_VALIDATION_ERROR.CLEANUP_FAILED,

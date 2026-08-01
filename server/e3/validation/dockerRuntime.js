@@ -159,6 +159,8 @@ function buildDockerArguments(plan, snapshotPath, outputPath) {
     'ALL',
     '--security-opt',
     'no-new-privileges:true',
+    '--security-opt',
+    'apparmor=docker-default',
     '--pids-limit',
     String(limits.pids),
     '--memory',

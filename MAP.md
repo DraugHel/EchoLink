@@ -32,7 +32,7 @@ Läuft unter PM2 als `echolink` auf 127.0.0.1:3000 (siehe ecosystem.config.cjs).
 - **Env**: `.env` via server/loadEnv.js (MUSS erster Import in index.js/worker.js bleiben).
   PM2-env hat Vorrang vor .env. Wichtigste Vars: SESSION_SECRET, ECHO_API_KEY,
   BRIEFING_CONVERSATION_ID, DEFAULT_MODEL, SEARXNG_URL, FIRECRAWL_URL, ZAI_API_KEY,
-  MOONSHOT_API_KEY, ANTHROPIC_API_KEY, GOOGLE_*, REDDIT_*, VAPID_*, MEMORY_DEBUG,
+  MOONSHOT_API_KEY, DEEPSEEK_API_KEY, ANTHROPIC_API_KEY, GOOGLE_*, REDDIT_*, VAPID_*, MEMORY_DEBUG,
   TRUST_PROXY.
 
 ## Backend — Kern
@@ -214,6 +214,31 @@ Schritt-9-Lifecycle, weiterhin default-off und ohne Runtime-Anbindung:
   Snapshot-Handle und prüft den Kandidaten vor und nach der Laufzeit.
   Container- und Snapshot-Abwesenheit müssen nach Cleanup bewiesen sein;
   mehrdeutige Docker-Fehler gelten nicht als erfolgreicher Cleanup.
+
+Schritt-14A.1-Trusted-Validation-Runtime, weiterhin operator-only und ohne
+normale Runtime-Anbindung:
+- **imageSources.js / imageManifest.js**: pinnt die exakten Node-/Playwright-
+  Basemanifeste und verifiziert ein kanonisches, root-eigenes Manifest mit
+  Git-Tree-, Source-, Lockfile-, Driver- und lokalen Image-ID-Bindungen.
+- **docker/e3-validation/**: zwei digestgepinnt gebaute non-root Images und ein
+  fester Driver für exakt die acht akzeptierten Profile. Der Driver nutzt
+  keine Shell, verwirft fremde Environmentwerte, kopiert den Snapshot nur
+  begrenzt unter `/e3/tmp` und blockiert fremde Browser-Origins.
+- **scripts/e3-build-validation-images.sh**: argumentloser expliziter
+  Root-Operatorlauf. Der Buildkontext entsteht aus einem privaten Git-Index,
+  Images werden vollständig verifiziert und alle Profile durch die bestehenden
+  realen Docker-Runtimes gesmoked. Erst nach nachgewiesenem Cleanup wird
+  `/var/lib/echolink-e3/validation-images.json` veröffentlicht.
+- **scripts/e3-validation-image-smoke.mjs /
+  e3-write-validation-image-manifest.mjs**: fester realer Profilsmoke und
+  atomare Manifestpublikation.
+- CI verwendet nun exakt Node `24.18.0`; Docker-Runtimes verlangen zusätzlich
+  explizit `apparmor=docker-default`.
+
+14A.1 aktiviert kein Feature-Flag, exponiert keine Route oder Agent-API und
+implementiert noch keinen Operational Pilot Harness. Tests:
+`tests/e3TrustedValidationRuntime.test.mjs`,
+`tests/e3ValidationBroker.test.mjs`, `tests/e3UiValidationRuntime.test.mjs`.
 
 Schritt-10-UI-Isolation:
 - **dockerUiRuntime.js**: erstellt pro Lauf genau eine interne Docker-Bridge
@@ -565,6 +590,12 @@ Neue Skills: Ordner + SKILL.md anlegen, fertig — kein Code nötig.
 - RULES.md.bak ist absichtlich da.
 - dist/ ist Build-Artefakt — niemals direkt editieren.
 - Chat.jsx und ShiftImporter.jsx sind Monster-Dateien; Änderungen chirurgisch, nie „neu schreiben".
+
+### DeepSeek-Provider
+DeepSeek V4 Flash läuft über `server/providers/openai-compatible.js` und den OpenAI-kompatiblen
+Endpunkt. Modellpräfix `deepseek/`; `DEEPSEEK_API_KEY` aktiviert den Eintrag
+`deepseek/deepseek-v4-flash` in der Modellliste. Thinking wird über `reasoningEffort`
+gesteuert und Sampling-Parameter werden gemäß DeepSeek-Dokumentation weggelassen.
 
 ### Kimi-Provider
 Kimi läuft über `server/providers/openai-compatible.js`, Modellpräfix `kimi/`; K3 nutzt `reasoning_effort`, Sampling-Parameter bleiben wegen fester Providerwerte weg. Bei Tool-Loops `reasoning_content` bewahren.

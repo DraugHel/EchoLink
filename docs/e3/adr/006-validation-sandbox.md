@@ -12,8 +12,9 @@ hardening but uses hostnetwork and permits the production origin. The host
 Docker daemon is rootful. `rootlesskit` exists, while a complete rootless or
 Podman setup is not currently available.
 
-Production uses Node `24.18.0`; CI currently uses Node 22. A reproducible
-validator cannot leave the runtime version implicit.
+Production and the trusted validation runtime use Node `24.18.0`. Step
+14A.1 aligns CI to the same exact version. A reproducible validator cannot
+leave the runtime version implicit.
 
 ## Decision
 
@@ -61,6 +62,20 @@ Dependency installation is not a session operation. Trusted image-building
 uses both lockfiles and `npm ci`; lifecycle scripts run only in that controlled
 build stage. Dependency layers are read-only during validation.
 
+The trusted runtime consists of two repository-defined images. The Node image
+uses the exact Node 24.18.0 Debian manifest and contains project and client
+dependency layers. The browser image uses an exact Playwright 1.61.1 manifest,
+replaces its Node runtime with the same exact Node 24.18.0 bytes, and installs
+only the exact `playwright-core` driver dependency. Neither image is selected
+by the caller.
+
+An explicit operator script reconstructs its build context from a private Git
+index rather than copying the live repository. It binds the context Git tree,
+byte-level source manifest, three lockfile hashes and complete driver-source
+hash. Built local image IDs and all source bindings are written to one
+canonical, root-owned `0640` manifest. Normal runtime accepts only those
+immutable `sha256:` IDs through the existing profile registry.
+
 ### Container baseline
 
 Every container uses:
@@ -70,7 +85,7 @@ Every container uses:
 - read-only root filesystem
 - all capabilities dropped
 - `no-new-privileges`
-- standard seccomp and an E3 AppArmor profile when available
+- standard seccomp and the explicit Docker `docker-default` AppArmor profile
 - explicit read-only dependency mounts
 - validation snapshot and bounded output/tmpfs mounts only
 - PID, CPU, memory, open-file, output-byte, and wall-time limits
@@ -133,6 +148,13 @@ The broker streams bounded stdout/stderr through redaction. On completion it:
 5. returns the exact candidate and profile hashes
 
 A cleanup failure prevents a successful validation result.
+
+Before the durable image manifest is published, an operator-only smoke runs all
+eight accepted profiles through the real hardened Docker runtimes against a
+read-only synthetic snapshot. The smoke may not reuse the production
+Playwright MCP image or production origin. Any failed profile, surviving
+container, surviving network, image-label mismatch, runtime-version mismatch
+or unsafe manifest aborts publication.
 
 ## Consequences
 

@@ -342,6 +342,7 @@ test('Docker runtime emits only the fixed hardened argument vector', t => {
   assert.ok(runCall.args.includes('--network'))
   assert.ok(runCall.args.includes('none'))
   assert.ok(runCall.args.includes('no-new-privileges:true'))
+  assert.ok(runCall.args.includes('apparmor=docker-default'))
   assert.ok(runCall.args.includes(NODE_DIGEST))
   assert.equal(runCall.args.includes('--privileged'), false)
   assert.equal(runCall.args.includes('/var/run/docker.sock'), false)

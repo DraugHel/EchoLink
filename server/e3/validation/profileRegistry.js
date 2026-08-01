@@ -158,7 +158,7 @@ function buildProfiles(nodeImageDigest, playwrightImageDigest) {
       resourceLimits: limits({
         timeoutMs: 10 * 60_000,
         memoryBytes: 3 * 1024 * 1024 * 1024,
-        cpuMillis: 6_000
+        cpuMillis: 4_000
       })
     }),
     profile({
@@ -219,7 +219,7 @@ function buildProfiles(nodeImageDigest, playwrightImageDigest) {
       resourceLimits: limits({
         timeoutMs: 10 * 60_000,
         memoryBytes: 3 * 1024 * 1024 * 1024,
-        cpuMillis: 6_000,
+        cpuMillis: 4_000,
         outputBytes: 256 * 1024 * 1024,
         pids: 256
       })

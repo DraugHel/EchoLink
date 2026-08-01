@@ -16,7 +16,7 @@ function formatSearchResultDate(timestamp) {
 }
 
 export default function Sidebar({ conversations, activeId, onSelect, onCreate, onDelete, onRename, onArchive, onRestore, onSearchResult, user, onLogout, mobileOpen, onMobileClose, mobile }) {
-  
+
   const [actionMenuId, setActionMenuId] =
     useState(null)
 
