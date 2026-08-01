@@ -25,7 +25,8 @@ import { streamOllama } from '../providers/ollama.js'
 import {
   splitSystemTimeNote,
   streamZai,
-  streamKimi
+  streamKimi,
+  streamDeepSeek
 } from '../providers/openai-compatible.js'
 import { streamAnthropic } from '../providers/anthropic.js'
 import { streamResponses } from '../providers/openai-responses.js'
@@ -116,6 +117,13 @@ function providerFor(model) {
     return {
       streamFn: streamKimi,
       providerModel: model.slice(5)
+    }
+  }
+
+  if (model.startsWith('deepseek/')) {
+    return {
+      streamFn: streamDeepSeek,
+      providerModel: model.slice(9)
     }
   }
 
@@ -288,6 +296,7 @@ async function callModel({
   const providerMessages =
     streamFn === streamZai ||
     streamFn === streamKimi ||
+    streamFn === streamDeepSeek ||
     streamFn === streamResponses
       ? splitSystemTimeNote(workingMessages)
       : workingMessages
@@ -443,7 +452,7 @@ export async function runScheduledAgent({
           content: fullContent || '',
           tool_calls: toolCalls,
           ...(rawOutput ? { _raw: rawOutput } : {}),
-          ...(model.startsWith('kimi/') && fullThinking
+          ...((model.startsWith('kimi/') || model.startsWith('deepseek/')) && fullThinking
             ? { reasoning_content: fullThinking }
             : {})
         })

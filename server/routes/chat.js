@@ -54,7 +54,7 @@ import {
   prepareGmailSendDraft
 } from '../lib/gmailTools.js'
 import { OLLAMA_URL, streamOllama } from '../providers/ollama.js'
-import { OPENAI_KEY, ZAI_KEY, KIMI_KEY, streamZai, streamKimi, splitSystemTimeNote } from '../providers/openai-compatible.js'
+import { OPENAI_KEY, ZAI_KEY, KIMI_KEY, DEEPSEEK_KEY, streamZai, streamKimi, streamDeepSeek, splitSystemTimeNote } from '../providers/openai-compatible.js'
 import { ANTHROPIC_KEY, streamAnthropic } from '../providers/anthropic.js'
 import { streamResponses } from '../providers/openai-responses.js'
 import {
@@ -1732,6 +1732,14 @@ Use these as background context. If these memories fully answer the request, ans
 
   const history = rawContextPlan.messages.slice(1)
 
+  // Historical images are only sent when this request also contains a new
+  // image. Text-only turns must stay compatible with text-only providers.
+  const hasImages = Array.isArray(attachments) && attachments.some(
+    attachment =>
+      typeof attachment === 'string' ||
+      attachment?.kind === 'image'
+  )
+
   for (const m of history) {
     const msg = { role: m.role, content: m.content }
     if (m.images) {
@@ -1759,7 +1767,7 @@ Use these as background context. If these memories fully answer the request, ans
           }
         }
         if (textParts.length > 0) msg.content = (msg.content ? msg.content + '\n\n' : '') + textParts.join('\n\n')
-        if (base64Images.length > 0) msg.images = base64Images
+        if (hasImages && base64Images.length > 0) msg.images = base64Images
       } catch (err) {
         console.error('Attachment processing failed:', err.message)
       }
@@ -1767,14 +1775,9 @@ Use these as background context. If these memories fully answer the request, ans
     ollamaMessages.push(msg)
   }
 
-  // Auto-route to a vision-capable model before the
-  // final context trim, because that model may have a
-  // different context budget.
-  const hasImages = ollamaMessages.some(
-    message =>
-      message.images &&
-      message.images.length > 0
-  )
+  // Route to the vision model only when the current request actually
+  // uploads an image. Historical images are omitted from text-only turns
+  // above, so text-only providers never receive image_url content.
 
   const VISION_MODEL =
     process.env.VISION_MODEL ||
@@ -1927,8 +1930,9 @@ Use these as background context. If these memories fully answer the request, ans
       if (activeModel.startsWith('claude')) streamFn = streamAnthropic
       else if (activeModel.startsWith('zai/')) { streamFn = streamZai; providerModel = activeModel.slice(4) }
       else if (activeModel.startsWith('kimi/')) { streamFn = streamKimi; providerModel = activeModel.slice(5) }
+      else if (activeModel.startsWith('deepseek/')) { streamFn = streamDeepSeek; providerModel = activeModel.slice(9) }
       else if (activeModel.startsWith('openai/')) { streamFn = streamResponses; providerModel = activeModel.slice(7) }
-      if (streamFn === streamZai || streamFn === streamKimi || streamFn === streamResponses) {
+      if (streamFn === streamZai || streamFn === streamKimi || streamFn === streamDeepSeek || streamFn === streamResponses) {
         workingMessages = splitSystemTimeNote(workingMessages)
       }
       assertChatRequestActive(activeRequest)
@@ -1962,7 +1966,7 @@ Use these as background context. If these memories fully answer the request, ans
           tool_calls: toolCalls,
           // Responses-API: Items (inkl. Reasoning) fuer die naechste Iteration mitnehmen
           ...(rawOutput ? { _raw: rawOutput } : {}),
-          ...(streamFn === streamKimi && fullThinking
+          ...( (streamFn === streamKimi || streamFn === streamDeepSeek) && fullThinking
             ? { reasoning_content: fullThinking }
             : {})
         })
@@ -2676,6 +2680,29 @@ async function loadModelList() {
           .map(id => ({
             name: `openai/${id}`,
             provider: 'openai'
+          }))
+      }
+    },
+    {
+      name: 'deepseek',
+      enabled: Boolean(DEEPSEEK_KEY),
+      load: async () => {
+        const data = await fetchJsonWithTimeout(
+          'https://api.deepseek.com/models',
+          {
+            headers: {
+              Authorization: `Bearer ${DEEPSEEK_KEY}`
+            }
+          }
+        )
+
+        return (data.data || [])
+          .map(model => model.id)
+          .filter(Boolean)
+          .sort()
+          .map(id => ({
+            name: `deepseek/${id}`,
+            provider: 'deepseek'
           }))
       }
     }

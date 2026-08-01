@@ -44,7 +44,8 @@ export default function SettingsPanel({
     anthropic: 'Anthropic',
     openai: 'OpenAI',
     zai: 'Z.ai',
-    kimi: 'Kimi (Moonshot)'
+    kimi: 'Kimi (Moonshot)',
+    deepseek: 'DeepSeek'
   }
 
   const [provider, setProvider] = useState(null)
@@ -59,6 +60,8 @@ export default function SettingsPanel({
           ? 'zai'
           : form.model.startsWith('kimi/')
             ? 'kimi'
+            : form.model.startsWith('deepseek/')
+              ? 'deepseek'
             : undefined
   })
 

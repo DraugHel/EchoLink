@@ -16,6 +16,10 @@ export const ZAI_KEY = process.env.ZAI_API_KEY || ''
 const KIMI_URL = 'https://api.moonshot.ai/v1/chat/completions'
 export const KIMI_KEY = process.env.MOONSHOT_API_KEY || ''
 
+// ===================== DeepSeek V4 — OpenAI-kompatibel =====================
+const DEEPSEEK_URL = 'https://api.deepseek.com/chat/completions'
+export const DEEPSEEK_KEY = process.env.DEEPSEEK_API_KEY || ''
+
 // Ollama-internes Format -> OpenAI Chat Completions Format
 function toOpenAI(messages) {
   const out = []
@@ -188,6 +192,15 @@ export const streamKimi = (model, messages, options, res, abortSignal) =>
   streamOpenAICompatible(
     'Kimi', KIMI_URL, KIMI_KEY, model, messages, options, res, abortSignal,
     kimiRequestExtras(model, options?.reasoningEffort),
+    { allowSampling: false }
+  )
+
+export const streamDeepSeek = (model, messages, options, res, abortSignal) =>
+  streamOpenAICompatible(
+    'DeepSeek', DEEPSEEK_URL, DEEPSEEK_KEY, model, messages, options, res, abortSignal,
+    options?.reasoningEffort === 'off'
+      ? { thinking: { type: 'disabled' } }
+      : { thinking: { type: 'enabled' } },
     { allowSampling: false }
   )
 
