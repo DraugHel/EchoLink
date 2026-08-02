@@ -599,3 +599,16 @@ gesteuert und Sampling-Parameter werden gemäß DeepSeek-Dokumentation weggelass
 
 ### Kimi-Provider
 Kimi läuft über `server/providers/openai-compatible.js`, Modellpräfix `kimi/`; K3 nutzt `reasoning_effort`, Sampling-Parameter bleiben wegen fester Providerwerte weg. Bei Tool-Loops `reasoning_content` bewahren.
+
+
+## E3 Schritt 14A.2 — Operational Pilot Harness
+
+Der operator-only Harness liegt unter `server/e3/pilot/operationalPilot.js` mit dem CLI-Wrapper `scripts/e3-operational-pilot.mjs`. Er akzeptiert ausschließlich die drei festen Fälle `success`, `validation-reject` und `tamper-reject`, bindet das kanonische Image-Manifest und bleibt außerhalb von `server/index.js` und `server/worker.js`. Der CLI-Aufruf ist default-off und verlangt einmalig `E3_PILOT_HARNESS_ENABLED=true`; freie Pfade, Profile, Images oder Operationsdateien werden nicht akzeptiert.
+
+Ein vollständiger Operatorlauf wird ausschließlich aus `/root/echolink` gestartet:
+
+```bash
+E3_PILOT_HARNESS_ENABLED=true npm run e3:pilot --
+```
+
+Der Lauf bewahrt nur `pilot-summary.json` und `pilot-attestation.json` unter einer privaten, eindeutig benannten `/tmp/echolink-e3-operational-pilot-*`-Wurzel auf. Repository-, `dist`- und E3-Docker-Inventar müssen vor und nach dem Lauf bytegleich beziehungsweise identisch sein. Produktive Apply-, Revert-, Deploy-, Push-, Commit-, PM2- und systemd-Aktionen sind ausgeschlossen.

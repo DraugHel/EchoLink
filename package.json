@@ -19,7 +19,8 @@
     "mcp:github:smoke": "node scripts/mcp-github-smoke.js",
     "mcp:github:configure": "bash scripts/configure-github-mcp.sh",
     "mcp:playwright": "node server/mcp/playwrightLauncher.js",
-    "mcp:playwright:smoke": "node scripts/mcp-playwright-smoke.js"
+    "mcp:playwright:smoke": "node scripts/mcp-playwright-smoke.js",
+    "e3:pilot": "node scripts/e3-operational-pilot.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.29.0",

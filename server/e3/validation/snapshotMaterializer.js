@@ -182,7 +182,9 @@ function scanTree(root) {
     }
   }
   visit('')
-  return entries
+  return entries.sort((a, b) =>
+    a.path.localeCompare(b.path, 'en')
+  )
 }
 
 function expectedEntries(manifest) {

@@ -216,6 +216,68 @@ test('candidate is materialized without Git metadata and sealed read-only', t =>
   assert.equal(fs.existsSync(snapshot.path), false)
 })
 
+test('snapshot comparison uses global candidate path order', t => {
+  const root = fs.mkdtempSync(
+    path.join(os.tmpdir(), 'e3-vsnapshot-order-')
+  )
+  const source = path.join(root, 'source')
+  const mirror = path.join(root, 'mirror.git')
+  const snapshotRoot = path.join(root, 'snapshots')
+  fs.mkdirSync(path.join(source, 'docs', 'e3'), { recursive: true })
+  git(source, ['init', '--initial-branch=main'])
+  git(source, ['config', 'user.name', 'E3 Test'])
+  git(source, ['config', 'user.email', 'e3@example.invalid'])
+  fs.writeFileSync(
+    path.join(source, 'docs', 'e3', 'README.md'),
+    '# baseline\n'
+  )
+  git(source, ['add', '--all'])
+  git(source, ['commit', '-m', 'baseline'])
+  const baseCommit = git(source, ['rev-parse', 'HEAD']).trim()
+  git(root, ['clone', '--bare', source, mirror])
+  const candidatePath = 'docs/e3-pilot-success.txt'
+  const candidateBytes = Buffer.from('E3 operational pilot success\n')
+  fs.writeFileSync(path.join(source, candidatePath), candidateBytes)
+  const candidate = new CandidateBuilder().build({
+    sessionId: SESSION_ID,
+    baseCommit,
+    workspacePath: source,
+    sessionVersion: 3,
+    operations: [
+      {
+        sequence: 1,
+        type: 'create_file',
+        pathBefore: null,
+        pathAfter: candidatePath,
+        preimageSha256: null,
+        postimageSha256: sha256(candidateBytes)
+      }
+    ],
+    generatedAt: 3_000
+  })
+  const materializer = new ValidationSnapshotMaterializer({
+    snapshotRoot,
+    mirrorPath: mirror
+  })
+  t.after(() => {
+    fs.rmSync(root, { recursive: true, force: true })
+  })
+  const snapshot = materializer.materialize({
+    runId: '523e4567-e89b-42d3-a456-426614174000',
+    sessionId: SESSION_ID,
+    baseCommit,
+    candidateManifestSha256: sha256(candidate.manifest),
+    manifestBytes: candidate.manifest,
+    forwardPatch: candidate.forwardPatch
+  })
+  assert.equal(
+    fs.readFileSync(path.join(snapshot.path, candidatePath), 'utf8'),
+    'E3 operational pilot success\n'
+  )
+  assert.equal(materializer.verify(snapshot, candidate.manifest), true)
+  assert.equal(materializer.remove(snapshot), true)
+})
+
 test('manifest, patch and post-materialization tampering fail closed', t => {
   const fixture = candidateFixture(t)
   assert.throws(

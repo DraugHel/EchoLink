@@ -455,3 +455,19 @@ database access. Operational pilot orchestration remains a later 14A step.
 - **Lease:** time-bounded ownership record.
 - **Fencing token:** monotonically increasing token required for every later
   state-changing write.
+
+
+## Operational Pilot Harness
+
+Der operator-only Harness liegt unter `server/e3/pilot/operationalPilot.js` mit dem CLI-Wrapper `scripts/e3-operational-pilot.mjs`. Er akzeptiert ausschließlich die drei festen Fälle `success`, `validation-reject` und `tamper-reject`, bindet das kanonische Image-Manifest und bleibt außerhalb von `server/index.js` und `server/worker.js`.
+
+Der Entry-Point ist default-off und wird nur für einen expliziten root-Operatorlauf freigeschaltet:
+
+```bash
+cd /root/echolink
+E3_PILOT_HARNESS_ENABLED=true npm run e3:pilot --
+```
+
+Ohne Argument wird der vollständige feste Katalog ausgeführt. Optional ist exakt `--case success`, `--case validation-reject` oder `--case tamper-reject` zulässig. Der Harness akzeptiert keine freien Pfade, Profile, Images, Shellbefehle oder Operationsdateien.
+
+Jeder erfolgreiche Fall entfernt seine private Datenbank, Workspaces, Snapshots, Outputs und Artefakte. Die Pilotwurzel enthält danach ausschließlich die hashgebundene `pilot-summary.json` und `pilot-attestation.json`. Repository, produktives `dist` und alle bereits vorhandenen E3-gelabelten Docker-Ressourcen müssen nach dem Lauf unverändert sein. Der Harness führt keinen produktiven Apply oder Revert, keinen Commit oder Push, keinen Deploy und keine PM2-/systemd-Aktion aus.
