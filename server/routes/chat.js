@@ -97,6 +97,7 @@ import { resizeImageBuffer } from '../utils/image.js'
 import fs from 'fs'
 import path from 'path'
 import crypto from 'crypto'
+import { persistE3ApprovalCompletion } from '../lib/e3ApprovalCompletion.js'
 
 const router = Router()
 const pendingTerminalActions = new Map()
@@ -2273,6 +2274,12 @@ router.post(
           clearTimeout(entry.timeout)
           pendingE3Actions.delete(actionId)
           entry.resolve(formatE3ToolResult(result))
+        } else {
+          persistE3ApprovalCompletion({
+            db,
+            result,
+            formatResult: formatE3ToolResult
+          })
         }
         return res.json({
           success: true,
