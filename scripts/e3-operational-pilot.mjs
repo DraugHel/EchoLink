@@ -15,6 +15,8 @@ import { join, relative, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import {
   E3_OPERATIONAL_PILOT_CASES,
+  E3_OPERATIONAL_PILOT_NEGATIVE_CASES,
+  E3_OPERATIONAL_PILOT_POSITIVE_CASES,
   createOperationalPilotAdapter,
   parseOperationalPilotArgs,
   readCanonicalPilotManifest,
@@ -26,14 +28,11 @@ const GIT = '/usr/bin/git'
 const DOCKER = '/usr/bin/docker'
 const PILOT_FLAG = 'E3_PILOT_HARNESS_ENABLED'
 const ALLOWED_DIRTY_PATHS = Object.freeze([
-  'MAP.md',
-  'docs/e3/README.md',
-  'package.json',
   'scripts/e3-operational-pilot.mjs',
-  'server/e3/pilot/',
-  'server/e3/validation/snapshotMaterializer.js',
-  'tests/e3OperationalPilot.test.mjs',
-  'tests/e3ValidationBroker.test.mjs'
+  'server/e3/pilot/interruptionPilot.js',
+  'server/e3/pilot/operationalPilot.js',
+  'tests/e3InterruptionPilot.test.mjs',
+  'tests/e3OperationalPilot.test.mjs'
 ])
 const MAX_BUFFER = 256 * 1024 * 1024
 
@@ -263,13 +262,31 @@ export async function main(argv = process.argv.slice(2)) {
     if (!equalInventory(dockerAfter, dockerBefore)) {
       throw new Error('Operational pilot did not restore Docker resources')
     }
+    const positiveCatalog = (
+      cases.length === E3_OPERATIONAL_PILOT_POSITIVE_CASES.length &&
+      cases.every((name, index) =>
+        name === E3_OPERATIONAL_PILOT_POSITIVE_CASES[index]
+      )
+    )
+    const negativeCatalog = (
+      cases.length === E3_OPERATIONAL_PILOT_NEGATIVE_CASES.length &&
+      cases.every((name, index) =>
+        name === E3_OPERATIONAL_PILOT_NEGATIVE_CASES[index]
+      )
+    )
     const fullCatalog = (
       cases.length === E3_OPERATIONAL_PILOT_CASES.length &&
       cases.every((name, index) => name === E3_OPERATIONAL_PILOT_CASES[index])
     )
     const attestation = {
       format: 'echolink-e3-operational-pilot-attestation-v1',
-      result: fullCatalog ? 'IMPLEMENTATION_READY' : 'CASE_COMPLETED',
+      result: fullCatalog
+        ? 'IMPLEMENTATION_READY'
+        : positiveCatalog
+          ? 'POSITIVE_CATALOG_COMPLETED'
+          : negativeCatalog
+            ? 'NEGATIVE_CATALOG_COMPLETED'
+            : 'CASE_COMPLETED',
       baselineCommit,
       manifestSha256: manifest.manifestSha256,
       imageDigests: {
@@ -315,6 +332,12 @@ export async function main(argv = process.argv.slice(2)) {
       cases: attestation.cases
     }))
     console.log('E3_STEP14A2_OPERATIONAL_PILOT_SUCCESS')
+    if (positiveCatalog) {
+      console.log('E3_STEP14A3_POSITIVE_OPERATIONAL_PILOT_SUCCESS')
+    }
+    if (negativeCatalog) {
+      console.log('E3_STEP14A4_NEGATIVE_OPERATIONAL_PILOT_SUCCESS')
+    }
     if (fullCatalog) {
       console.log('E3_STEP14A2_IMPLEMENTATION_READY')
     }
