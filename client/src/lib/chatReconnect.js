@@ -57,3 +57,44 @@ export function resolveChatActionRequests(
     request => String(request?.actionId || '') !== resolvedId
   )
 }
+
+export function attachPendingChatActions(
+  messages,
+  actionRequests
+) {
+  const base = Array.isArray(messages)
+    ? messages.map(message => ({
+        ...message,
+        actionRequests: []
+      }))
+    : []
+
+  const actions = []
+  const seen = new Set()
+
+  for (const action of Array.isArray(actionRequests)
+    ? actionRequests
+    : []) {
+    const actionId = String(action?.actionId || '')
+    if (!actionId || seen.has(actionId)) continue
+    seen.add(actionId)
+    actions.push({
+      ...action,
+      actionId
+    })
+  }
+
+  if (actions.length === 0) return base
+
+  return [
+    ...base,
+    {
+      id: `pending-action:${actions[0].actionId}`,
+      role: 'assistant',
+      content: '',
+      streaming: false,
+      pendingActionOnly: true,
+      actionRequests: actions
+    }
+  ]
+}

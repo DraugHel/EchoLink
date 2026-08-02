@@ -1,9 +1,14 @@
-import { createHash } from 'node:crypto'
+import {
+  createHash,
+  createHmac,
+  timingSafeEqual
+} from 'node:crypto'
 import { spawn } from 'node:child_process'
 import process from 'node:process'
 import {
   E3_CHAT_FEATURE_FLAG,
   E3_CHAT_ERROR,
+  E3_CHAT_STATUS,
   e3ChatFeatureEnabled
 } from '../e3/chat/chatSessionService.js'
 
@@ -431,28 +436,268 @@ export async function executeE3Tool(
   throw error
 }
 
-export function approveE3Action(
+const E3_ACTION_PATTERN =
+  /^e3-([0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})-([0-9a-f]{64})-([0-9a-f]{64})$/
+
+function approvalCardSecret(secret = process.env.SESSION_SECRET) {
+  const value = String(secret || '')
+  if (
+    value.length < 16 ||
+    value === 'aender-mich' ||
+    value === 'echolink-change-this-secret'
+  ) {
+    const error = new Error(
+      'E3 approval cards require the configured session secret'
+    )
+    error.code = E3_CHAT_ERROR.INTERNAL
+    throw error
+  }
+  return value
+}
+
+export function e3ApprovalBindingSha256(result) {
+  const binding = {
+    version: 1,
+    sessionId: result?.sessionId,
+    conversationId: result?.conversationId,
+    baselineCommit: result?.baselineCommit,
+    candidateSetId: result?.candidate?.id,
+    candidateManifestSha256:
+      result?.candidate?.candidateManifestSha256,
+    forwardPatchSha256:
+      result?.candidate?.forwardPatchSha256,
+    reviewSetId: result?.review?.id,
+    validationManifestSha256:
+      result?.review?.validationManifestSha256,
+    reviewSummarySha256:
+      result?.review?.reviewSummarySha256,
+    diffSha256: result?.diff?.sha256
+  }
+  return createHash('sha256')
+    .update(canonicalToolJson(binding))
+    .digest('hex')
+}
+
+function e3ApprovalCapability(
   sessionId,
+  bindingSha256,
+  secret
+) {
+  return createHmac(
+    'sha256',
+    approvalCardSecret(secret)
+  )
+    .update(
+      `echolink-e3-approval-card-v1\0` +
+      `${sessionId}\0${bindingSha256}`
+    )
+    .digest('hex')
+}
+
+export function e3ApprovalActionId(
+  result,
+  secret = process.env.SESSION_SECRET
+) {
+  const sessionId = String(result?.sessionId || '')
+  const bindingSha256 =
+    e3ApprovalBindingSha256(result)
+  const capability = e3ApprovalCapability(
+    sessionId,
+    bindingSha256,
+    secret
+  )
+  return `e3-${sessionId}-${bindingSha256}-${capability}`
+}
+
+export function parseE3ApprovalActionId(actionId) {
+  const match = E3_ACTION_PATTERN.exec(
+    String(actionId || '')
+  )
+  if (!match) return null
+  return Object.freeze({
+    sessionId: match[1],
+    bindingSha256: match[2],
+    capability: match[3]
+  })
+}
+
+export function e3SessionIdFromAction(actionId) {
+  return parseE3ApprovalActionId(actionId)?.sessionId || null
+}
+
+export function verifyE3ApprovalActionId(
+  actionId,
+  result,
+  secret = process.env.SESSION_SECRET
+) {
+  const parsed = parseE3ApprovalActionId(actionId)
+  if (
+    !parsed ||
+    parsed.sessionId !== result?.sessionId
+  ) {
+    return false
+  }
+  let expected
+  try {
+    expected = e3ApprovalActionId(result, secret)
+  } catch {
+    return false
+  }
+  const suppliedBytes = Buffer.from(
+    String(actionId),
+    'utf8'
+  )
+  const expectedBytes = Buffer.from(expected, 'utf8')
+  return (
+    suppliedBytes.length === expectedBytes.length &&
+    timingSafeEqual(suppliedBytes, expectedBytes)
+  )
+}
+
+async function authorizeE3ApprovalAction(
+  actionId,
+  userId,
+  acceptedStatuses,
+  options
+) {
+  const parsed = parseE3ApprovalActionId(actionId)
+  if (!parsed) {
+    const error = new Error(
+      'E3 approval card capability is invalid'
+    )
+    error.code = E3_CHAT_ERROR.INVALID_REQUEST
+    throw error
+  }
+  const result = await runE3Worker(
+    'get',
+    {
+      sessionId: parsed.sessionId,
+      userId
+    },
+    options
+  )
+  if (!acceptedStatuses.includes(result?.status)) {
+    const error = new Error(
+      'E3 approval card is stale for the current session state'
+    )
+    error.code = E3_CHAT_ERROR.STATE_CONFLICT
+    throw error
+  }
+  if (!verifyE3ApprovalActionId(actionId, result)) {
+    const error = new Error(
+      'E3 approval card does not match the durable reviewed bytes'
+    )
+    error.code = E3_CHAT_ERROR.FORBIDDEN
+    throw error
+  }
+  return Object.freeze({
+    sessionId: parsed.sessionId,
+    result
+  })
+}
+
+export async function approveE3Action(
+  actionId,
   userId,
   options = {}
 ) {
+  const authorized = await authorizeE3ApprovalAction(
+    actionId,
+    userId,
+    [
+      E3_CHAT_STATUS.READY_FOR_REVIEW,
+      E3_CHAT_STATUS.COMPLETED
+    ],
+    options
+  )
   return runE3Worker(
     'approve',
-    { sessionId, userId },
+    {
+      sessionId: authorized.sessionId,
+      userId
+    },
     options
   )
 }
 
-export function denyE3Action(
-  sessionId,
+export async function denyE3Action(
+  actionId,
   userId,
   options = {}
 ) {
-  return runE3Worker(
-    'deny',
-    { sessionId, userId },
+  const authorized = await authorizeE3ApprovalAction(
+    actionId,
+    userId,
+    [
+      E3_CHAT_STATUS.READY_FOR_REVIEW,
+      E3_CHAT_STATUS.DENIED
+    ],
     options
   )
+  return runE3Worker(
+    'deny',
+    {
+      sessionId: authorized.sessionId,
+      userId
+    },
+    options
+  )
+}
+
+export async function listE3PendingApprovals(
+  userId,
+  conversationId,
+  options = {}
+) {
+  const sessions = await runE3Worker(
+    'list',
+    {
+      userId,
+      conversationId
+    },
+    options
+  )
+  return Object.freeze(
+    sessions.filter(
+      session =>
+        session?.status ===
+        E3_CHAT_STATUS.READY_FOR_REVIEW
+    )
+  )
+}
+
+export function e3ApprovalActionRequest(
+  result,
+  {
+    secret = process.env.SESSION_SECRET,
+    restored = false
+  } = {}
+) {
+  if (
+    result?.status !== E3_CHAT_STATUS.READY_FOR_REVIEW ||
+    !result?.review ||
+    !result?.diff
+  ) {
+    const error = new Error(
+      'E3 approval card requires durable review-ready bytes'
+    )
+    error.code = E3_CHAT_ERROR.STATE_CONFLICT
+    throw error
+  }
+  return Object.freeze({
+    actionRequest: true,
+    actionId: e3ApprovalActionId(result, secret),
+    description:
+      `E3 validated ${result.operationCount} exact source operation${
+        result.operationCount === 1 ? '' : 's'
+      } and froze the reviewed bytes.`,
+    command: formatE3ApprovalPreview(result),
+    reason:
+      'Approve creates the verified E3 export package. It does not modify the productive repository.',
+    type: 'e3',
+    source: 'chat',
+    ...(restored ? { restored: true } : {})
+  })
 }
 
 export async function readE3ExportPackage(
@@ -467,19 +712,6 @@ export async function readE3ExportPackage(
   return new E3ChatSessionService({
     enabled: e3ToolsEnabled()
   }).readExport({ sessionId, userId })
-}
-
-export function e3ApprovalActionId(sessionId) {
-  return `e3-${sessionId}`
-}
-
-export function e3SessionIdFromAction(actionId) {
-  const value = String(actionId || '')
-  if (!value.startsWith('e3-')) return null
-  const sessionId = value.slice(3)
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(sessionId)
-    ? sessionId
-    : null
 }
 
 export function formatE3ApprovalPreview(result) {

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 
 import {
   MAX_CHAT_RECONNECT_RETRIES,
+  attachPendingChatActions,
   chatReconnectDelayMs,
   chatReconnectingContent,
   chatStreamApplicationError,
@@ -77,4 +78,54 @@ test('erledigte Freigabe wird aus dem sichtbaren Pending-State entfernt', () => 
     resolveChatActionRequests(undefined, 'resolved'),
     []
   )
+})
+
+test('durable E3 approval card survives message reload and disappears after resolution', () => {
+  const storedMessages = [
+    {
+      id: 1,
+      role: 'user',
+      content: 'Bitte über E3 ändern'
+    }
+  ]
+  const action = {
+    actionId:
+      'e3-123e4567-e89b-42d3-a456-426614174000-' +
+      'a'.repeat(64) +
+      '-' +
+      'b'.repeat(64),
+    description: 'E3 validated one operation',
+    command: 'reviewed diff',
+    reason: 'export only',
+    type: 'e3',
+    source: 'chat',
+    restored: true
+  }
+
+  const restored = attachPendingChatActions(
+    storedMessages,
+    [action, action]
+  )
+
+  assert.equal(restored.length, 2)
+  assert.equal(
+    restored[1].pendingActionOnly,
+    true
+  )
+  assert.deepEqual(
+    restored[1].actionRequests,
+    [action]
+  )
+
+  const resolved = attachPendingChatActions(
+    storedMessages,
+    []
+  )
+
+  assert.deepEqual(resolved, [
+    {
+      ...storedMessages[0],
+      actionRequests: []
+    }
+  ])
 })

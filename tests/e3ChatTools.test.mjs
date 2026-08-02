@@ -15,9 +15,13 @@ import {
   E3_TOOLS,
   E3_TOOL_NAMES,
   e3ApprovalActionId,
+  e3ApprovalActionRequest,
+  e3ApprovalBindingSha256,
   e3SessionIdFromAction,
   formatE3ApprovalPreview,
-  safeE3WorkerEnvironment
+  parseE3ApprovalActionId,
+  safeE3WorkerEnvironment,
+  verifyE3ApprovalActionId
 } from '../server/lib/e3Tools.js'
 
 const GIT = '/usr/bin/git'
@@ -376,31 +380,116 @@ test('denial is durable, cleans the workspace, and creates no export', t => {
   }), /not available/)
 })
 
-test('action IDs are namespaced and approval preview states the non-apply boundary', () => {
+test('approval cards are capability-bound to the durable reviewed bytes', () => {
   const sessionId = '123e4567-e89b-42d3-a456-426614174000'
-  const actionId = e3ApprovalActionId(sessionId)
-  assert.equal(actionId, `e3-${sessionId}`)
-  assert.equal(e3SessionIdFromAction(actionId), sessionId)
-  assert.equal(e3SessionIdFromAction(sessionId), null)
-  const preview = formatE3ApprovalPreview({
+  const secret =
+    'test-session-secret-with-at-least-thirty-two-bytes'
+  const result = {
     sessionId,
+    conversationId: 42,
+    status: E3_CHAT_STATUS.READY_FOR_REVIEW,
     summary: 'Preview',
     baselineCommit: 'a'.repeat(40),
+    operationCount: 1,
     operationPaths: ['docs/a.txt'],
+    candidate: {
+      id: 'candidate-1',
+      candidateManifestSha256: 'c'.repeat(64),
+      forwardPatchSha256: 'b'.repeat(64)
+    },
     validation: {
       profiles: E3_CHAT_PROFILE_IDS.map(profileId => ({
         profileId,
         status: 'succeeded'
       }))
     },
+    review: {
+      id: 'review-1',
+      validationManifestSha256: 'd'.repeat(64),
+      reviewSummarySha256: 'e'.repeat(64)
+    },
     diff: {
       sha256: 'b'.repeat(64),
-      preview: 'diff --git a/docs/a.txt b/docs/a.txt\n',
+      preview:
+        'diff --git a/docs/a.txt b/docs/a.txt\n',
       truncated: false
     }
-  })
-  assert.match(preview, /Approve creates a verified export package only/)
-  assert.match(preview, /does not apply, commit, push, deploy, or restart PM2/)
+  }
+
+  const binding = e3ApprovalBindingSha256(result)
+  const actionId = e3ApprovalActionId(
+    result,
+    secret
+  )
+  const parsed = parseE3ApprovalActionId(actionId)
+
+  assert.match(binding, /^[0-9a-f]{64}$/)
+  assert.equal(parsed.sessionId, sessionId)
+  assert.equal(parsed.bindingSha256, binding)
+  assert.equal(
+    e3SessionIdFromAction(actionId),
+    sessionId
+  )
+  assert.equal(
+    e3SessionIdFromAction(`e3-${sessionId}`),
+    null
+  )
+  assert.equal(
+    verifyE3ApprovalActionId(
+      actionId,
+      result,
+      secret
+    ),
+    true
+  )
+  const tamperedActionId =
+    actionId.slice(0, -1) +
+    (actionId.endsWith('0') ? '1' : '0')
+
+  assert.equal(
+    verifyE3ApprovalActionId(
+      tamperedActionId,
+      result,
+      secret
+    ),
+    false
+  )
+  assert.equal(
+    verifyE3ApprovalActionId(
+      actionId,
+      {
+        ...result,
+        diff: {
+          ...result.diff,
+          sha256: 'f'.repeat(64)
+        }
+      },
+      secret
+    ),
+    false
+  )
+
+  const restored = e3ApprovalActionRequest(
+    result,
+    {
+      secret,
+      restored: true
+    }
+  )
+
+  assert.equal(restored.actionId, actionId)
+  assert.equal(restored.type, 'e3')
+  assert.equal(restored.restored, true)
+
+  const preview = formatE3ApprovalPreview(result)
+  assert.match(
+    preview,
+    /Approve creates a verified export package only/
+  )
+  assert.match(
+    preview,
+    /does not apply, commit, push, deploy, or restart PM2/
+  )
 })
 
 test('chat wiring is gated, authenticated, and uses the existing Approve/Deny UI', () => {
@@ -420,5 +509,11 @@ test('chat wiring is gated, authenticated, and uses the existing Approve/Deny UI
   assert.equal(chat.includes("'/e3/session/:sessionId/export'"), true)
   assert.equal(chat.includes('approveE3Action'), true)
   assert.equal(chat.includes('denyE3Action'), true)
+  assert.equal(chat.includes('listE3PendingApprovals'), true)
+  assert.equal(chat.includes('e3ApprovalActionRequest'), true)
+  assert.equal(
+    chat.includes("String(actionId).startsWith('e3-')"),
+    true
+  )
   assert.equal(chat.includes('E3 never applies, commits, pushes, deploys, or restarts PM2'), true)
 })

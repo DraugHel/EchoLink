@@ -10,6 +10,7 @@ import LunaMiniHud from '../components/LunaMiniHud.jsx'
 import TerminalTimeline from '../components/TerminalTimeline.jsx'
 import {
   MAX_CHAT_RECONNECT_RETRIES,
+  attachPendingChatActions,
   chatReconnectDelayMs,
   chatReconnectingContent,
   chatStreamApplicationError,
@@ -656,8 +657,9 @@ export default function Chat({ user, onLogout }) {
           activeId > 0 &&
           (!hasTarget || pushedConversationId === activeId)
         ) {
-          const msgs = await api.get(
-            `/api/conversations/${activeId}/messages`
+          const msgs = await loadConversationMessages(
+            activeId,
+            { refresh: true }
           )
 
           setMessages(msgs)
@@ -839,6 +841,29 @@ export default function Chat({ user, onLogout }) {
     return convos
   }
 
+  async function loadConversationMessages(
+    conversationId,
+    { refresh = false } = {}
+  ) {
+    const suffix = refresh
+      ? `?refresh=${Date.now()}`
+      : ''
+
+    const [msgs, actions] = await Promise.all([
+      api.get(
+        `/api/conversations/${conversationId}/messages${suffix}`
+      ),
+      api.get(
+        `/api/chat/${conversationId}/actions${suffix}`
+      )
+    ])
+
+    return attachPendingChatActions(
+      msgs,
+      actions
+    )
+  }
+
   useEffect(() => {
     if (!activeConvo?.id) return
 
@@ -858,8 +883,9 @@ export default function Chat({ user, onLogout }) {
       try {
         const conversationId = activeConvo.id
 
-        const msgs = await api.get(
-          `/api/conversations/${conversationId}/messages?refresh=${Date.now()}`
+        const msgs = await loadConversationMessages(
+          conversationId,
+          { refresh: true }
         )
 
         setMessages(msgs)
@@ -924,7 +950,10 @@ export default function Chat({ user, onLogout }) {
     setActiveConvo(convo)
     setLoading(true)
     try {
-      const msgs = await api.get(`/api/conversations/${convo.id}/messages`)
+      const msgs = await loadConversationMessages(
+        convo.id,
+        { refresh: true }
+      )
       setMessages(msgs)
     } finally {
       setLoading(false)
@@ -1535,7 +1564,10 @@ export default function Chat({ user, onLogout }) {
       // (needed for delete/regenerate to work — temp IDs like "u_..." don't match DB rows)
       if (activeConvo) {
         try {
-          const msgs = await api.get(`/api/conversations/${activeConvo.id}/messages`)
+          const msgs = await loadConversationMessages(
+            activeConvo.id,
+            { refresh: true }
+          )
           setMessages(msgs)
         } catch {}
       }
@@ -1554,13 +1586,24 @@ export default function Chat({ user, onLogout }) {
       if (!response.ok) {
         throw await readResponseError(response)
       }
-      setMessages(prev => prev.map(message => ({
-        ...message,
-        actionRequests: resolveChatActionRequests(
+      setMessages(prev => prev.flatMap(message => {
+        const actionRequests = resolveChatActionRequests(
           message.actionRequests,
           actionId
         )
-      })))
+
+        if (
+          message.pendingActionOnly &&
+          actionRequests.length === 0
+        ) {
+          return []
+        }
+
+        return [{
+          ...message,
+          actionRequests
+        }]
+      }))
       const chatRunState = chatRunStateRef.current
       if (chatRunState) {
         setChatRun(current =>
@@ -1596,13 +1639,24 @@ export default function Chat({ user, onLogout }) {
       if (!response.ok) {
         throw await readResponseError(response)
       }
-      setMessages(prev => prev.map(message => ({
-        ...message,
-        actionRequests: resolveChatActionRequests(
+      setMessages(prev => prev.flatMap(message => {
+        const actionRequests = resolveChatActionRequests(
           message.actionRequests,
           actionId
         )
-      })))
+
+        if (
+          message.pendingActionOnly &&
+          actionRequests.length === 0
+        ) {
+          return []
+        }
+
+        return [{
+          ...message,
+          actionRequests
+        }]
+      }))
       const chatRunState = chatRunStateRef.current
       if (chatRunState) {
         setChatRun(current =>
@@ -2239,12 +2293,16 @@ export default function Chat({ user, onLogout }) {
               id={m.id}
               createdAt={m.created_at}
               prevCreatedAt={prev ? prev.created_at : null}
-              onDelete={deleteMessage}
+              onDelete={m.pendingActionOnly
+                ? undefined
+                : deleteMessage}
               onApprove={handleActionApprove}
               onAlwaysAllow={handleActionAlways}
               onDeny={handleActionDeny}
               editing={editingId === m.id}
-              onEdit={() => setEditingId(m.id)}
+              onEdit={m.pendingActionOnly
+                ? undefined
+                : () => setEditingId(m.id)}
               onSaveEdit={saveEdit}
               onCancelEdit={() => setEditingId(null)}
               retryFailed={m.retryFailed}

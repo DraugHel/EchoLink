@@ -57,12 +57,11 @@ import {
   E3_TOOL_NAMES,
   approveE3Action,
   denyE3Action,
-  e3ApprovalActionId,
-  e3SessionIdFromAction,
+  e3ApprovalActionRequest,
   e3ToolsEnabled,
   executeE3Tool,
-  formatE3ApprovalPreview,
   formatE3ToolResult,
+  listE3PendingApprovals,
   readE3ExportPackage
 } from '../lib/e3Tools.js'
 import { OLLAMA_URL, streamOllama } from '../providers/ollama.js'
@@ -466,7 +465,8 @@ async function executeTool(
       })}\n\n`)
 
       if (result?.actionRequired === true) {
-        const actionId = e3ApprovalActionId(result.sessionId)
+        const action = e3ApprovalActionRequest(result)
+        const actionId = action.actionId
         return new Promise(resolve => {
           const previous = pendingE3Actions.get(actionId)
           if (previous) {
@@ -496,19 +496,9 @@ async function executeTool(
             timeout
           })
 
-          res.write(`data: ${JSON.stringify({
-            actionRequest: true,
-            actionId,
-            description:
-              `E3 validated ${result.operationCount} exact source operation${
-                result.operationCount === 1 ? '' : 's'
-              } and froze the reviewed bytes.`,
-            command: formatE3ApprovalPreview(result),
-            reason:
-              'Approve creates the verified E3 export package. It does not modify the productive repository.',
-            type: 'e3',
-            source: 'chat'
-          })}\n\n`)
+          res.write(
+            `data: ${JSON.stringify(action)}\n\n`
+          )
         })
       }
 
@@ -2272,13 +2262,11 @@ router.post(
   requireAuth,
   async (req, res) => {
     const actionId = req.params.actionId
-    const e3SessionId = e3SessionIdFromAction(actionId)
-
-    if (e3SessionId) {
+    if (String(actionId).startsWith('e3-')) {
       const entry = pendingE3Actions.get(actionId)
       try {
         const result = await approveE3Action(
-          e3SessionId,
+          actionId,
           req.session.userId
         )
         if (entry) {
@@ -2465,13 +2453,11 @@ router.post(
   requireAuth,
   async (req, res) => {
     const actionId = req.params.actionId
-    const e3SessionId = e3SessionIdFromAction(actionId)
-
-    if (e3SessionId) {
+    if (String(actionId).startsWith('e3-')) {
       const entry = pendingE3Actions.get(actionId)
       try {
         const result = await denyE3Action(
-          e3SessionId,
+          actionId,
           req.session.userId
         )
         if (entry) {
@@ -2558,7 +2544,7 @@ router.post(
 router.get(
   '/:conversationId/actions',
   requireAuth,
-  (req, res) => {
+  async (req, res) => {
     const conversationId =
       Number(req.params.conversationId)
 
@@ -2646,8 +2632,47 @@ router.get(
           }
         })
 
+    let e3Actions = []
+
+    if (e3ToolsEnabled()) {
+      try {
+        const pending =
+          await listE3PendingApprovals(
+            req.session.userId,
+            conversationId
+          )
+
+        e3Actions = pending.map(result =>
+          e3ApprovalActionRequest(
+            result,
+            { restored: true }
+          )
+        )
+      } catch (error) {
+        console.error(JSON.stringify({
+          level: 'error',
+          event: 'e3_approval_recovery_failed',
+          conversationId,
+          userId: req.session.userId,
+          error:
+            error?.code ||
+            error?.message ||
+            String(error)
+        }))
+
+        return res.status(503).json({
+          error:
+            'E3 approval cards could not be restored safely',
+          code:
+            error?.code ||
+            'E3_CHAT_APPROVAL_RECOVERY_FAILED'
+        })
+      }
+    }
+
     res.json([
       ...terminalActions,
+      ...e3Actions,
       ...calendarActions,
       ...gmailActions
     ])
