@@ -50,7 +50,7 @@ test('Reconnect-Hinweis verschwindet direkt nach erfolgreichem Verbindungsaufbau
   )
 })
 
-test('Providerfehler startet keinen automatischen Chat-Retry', () => {
+test('generischer OpenAI-Streamfehler nutzt den begrenzten Reconnect', () => {
   const error = chatStreamApplicationError(
     'OpenAI Responses stream error'
   )
@@ -59,7 +59,32 @@ test('Providerfehler startet keinen automatischen Chat-Retry', () => {
     error.message,
     'OpenAI Responses stream error'
   )
-  assert.equal(error.retryable, false)
+  assert.equal(error.retryable, true)
+})
+
+test('spezifische Provider- und Anwendungsfehler bleiben nicht retryable', () => {
+  assert.equal(
+    chatStreamApplicationError(
+      'OpenAI Responses 400: invalid_request_error'
+    ).retryable,
+    false
+  )
+  assert.equal(
+    chatStreamApplicationError(
+      'Max tool iterations reached'
+    ).retryable,
+    false
+  )
+})
+
+test('Server kann einen Streamfehler explizit als retryable markieren', () => {
+  const error = chatStreamApplicationError({
+    message: 'temporary upstream reset',
+    retryable: true
+  })
+
+  assert.equal(error.message, 'temporary upstream reset')
+  assert.equal(error.retryable, true)
 })
 
 test('erledigte Freigabe wird aus dem sichtbaren Pending-State entfernt', () => {

@@ -30,6 +30,10 @@ export function clearChatReconnectContent(content) {
   )
 }
 
+const RETRYABLE_STREAM_APPLICATION_ERRORS = new Set([
+  'OpenAI Responses stream error'
+])
+
 export function chatStreamApplicationError(value) {
   const message =
     typeof value === 'string'
@@ -39,10 +43,15 @@ export function chatStreamApplicationError(value) {
     message || 'Chat stream failed'
   )
 
-  // The server completed the HTTP/SSE transport and deliberately emitted an
-  // application/provider error. Reposting the chat request would start a new
-  // model run rather than resume the failed one.
-  error.retryable = false
+  // A bare OpenAI response.failed event has no actionable application error
+  // and is commonly a transient upstream stream failure. Reuse the existing
+  // bounded reconnect path with the same request ID instead of marking the
+  // whole agent run as failed immediately. Specific provider/application
+  // errors remain non-retryable unless the server explicitly opts in.
+  error.retryable = Boolean(
+    value?.retryable === true ||
+    RETRYABLE_STREAM_APPLICATION_ERRORS.has(message)
+  )
   return error
 }
 
