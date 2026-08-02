@@ -42,6 +42,9 @@ import { EditorRepository } from '../persistence/editorRepository.js'
 import { WorkspaceManager } from '../workspaces/workspaceManager.js'
 import { acquireManagerLock } from '../workspaces/managerLock.js'
 import {
+  cleanupTerminalWorkspaceStorage
+} from './workspaceStorageCleanup.js'
+import {
   E3_VALIDATION_PROFILE_ID,
   E3_VALIDATION_RUNTIME
 } from '../validation/contracts.js'
@@ -1113,9 +1116,18 @@ export class E3ChatSessionService {
       fencingToken: metadata.workspaceFencingToken,
       removedAt: occurredAt
     })
+    const storage = cleanupTerminalWorkspaceStorage({
+      database: context.database,
+      sessionId: metadata.sessionId,
+      sessionRoot: context.sessionRoot,
+      workspaceStorageRoot: context.workspaceStorageRoot
+    })
     return Object.freeze({
       removed: result.removed === true,
-      alreadyAbsent: result.alreadyAbsent === true
+      alreadyAbsent: result.alreadyAbsent === true,
+      storageRemoved: storage.removed === true,
+      storageAlreadyAbsent: storage.alreadyAbsent === true,
+      storageLogicalBytes: storage.logicalBytes
     })
   }
 

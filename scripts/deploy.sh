@@ -187,6 +187,32 @@ node --check scripts/mcp-registry-smoke.js
 node --check scripts/mcp-github-smoke.js
 node --check scripts/mcp-playwright-smoke.js
 bash -n scripts/configure-github-mcp.sh
+bash -n scripts/e3-rebind-validation-images.sh
+bash -n scripts/e3-clean-runtime-residue.sh
+node --check scripts/e3-clean-chat-workspace-storage.mjs
+node --check server/e3/chat/workspaceStorageCleanup.js
+
+E3_CHAT_TOOLS_MODE="$(
+  node --input-type=module -e "
+    import './server/loadEnv.js'
+    process.stdout.write(
+      process.env.E3_CHAT_TOOLS_ENABLED === 'true'
+        ? 'active'
+        : 'disabled'
+    )
+  "
+)"
+
+if [[ "$E3_CHAT_TOOLS_MODE" == "active" ]]; then
+  echo "===== E3 VALIDATOR BINDING ====="
+  npm run e3:validation:rebind
+
+  echo "===== E3 TERMINAL SESSION STORAGE ====="
+  npm run e3:cleanup:chat-storage -- --apply
+
+  echo "===== E3 TEMPORARY RESIDUE ====="
+  npm run e3:cleanup:residue -- --apply
+fi
 
 MCP_PLAYWRIGHT_MODE="$(
   node --input-type=module -e "
