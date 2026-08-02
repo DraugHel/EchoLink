@@ -53,6 +53,18 @@ import {
   prepareGmailDeleteDraft,
   prepareGmailSendDraft
 } from '../lib/gmailTools.js'
+import {
+  E3_TOOL_NAMES,
+  approveE3Action,
+  denyE3Action,
+  e3ApprovalActionId,
+  e3SessionIdFromAction,
+  e3ToolsEnabled,
+  executeE3Tool,
+  formatE3ApprovalPreview,
+  formatE3ToolResult,
+  readE3ExportPackage
+} from '../lib/e3Tools.js'
 import { OLLAMA_URL, streamOllama } from '../providers/ollama.js'
 import { OPENAI_KEY, ZAI_KEY, KIMI_KEY, DEEPSEEK_KEY, streamZai, streamKimi, streamDeepSeek, splitSystemTimeNote } from '../providers/openai-compatible.js'
 import { ANTHROPIC_KEY, streamAnthropic } from '../providers/anthropic.js'
@@ -91,6 +103,7 @@ const router = Router()
 const pendingTerminalActions = new Map()
 const pendingCalendarActions = new Map()
 const pendingGmailActions = new Map()
+const pendingE3Actions = new Map()
 
 setImmediate(() => {
   try {
@@ -427,6 +440,89 @@ async function executeTool(
   let args = toolCall.function?.arguments || {}
   if (typeof args === 'string') {
     try { args = JSON.parse(args) } catch {}
+  }
+
+  if (E3_TOOL_NAMES.has(name)) {
+    res.write(`data: ${JSON.stringify({
+      tool: name,
+      status: 'running'
+    })}\n\n`)
+    try {
+      const result = await executeE3Tool(
+        name,
+        args,
+        {
+          userId: requestContext.userId,
+          conversationId,
+          requestId: requestContext.requestId
+        }
+      )
+      assertAbortSignalActive(abortSignal)
+      res.write(`data: ${JSON.stringify({
+        tool: name,
+        status: 'done',
+        sessionId: result?.sessionId,
+        e3Status: result?.status
+      })}\n\n`)
+
+      if (result?.actionRequired === true) {
+        const actionId = e3ApprovalActionId(result.sessionId)
+        return new Promise(resolve => {
+          const previous = pendingE3Actions.get(actionId)
+          if (previous) {
+            clearTimeout(previous.timeout)
+            previous.resolve(
+              'E3 approval request was replaced by an exact durable replay.'
+            )
+          }
+
+          const timeout = setTimeout(() => {
+            const current = pendingE3Actions.get(actionId)
+            if (current?.resolve !== resolve) return
+            pendingE3Actions.delete(actionId)
+            resolve(
+              `E3 session ${result.sessionId} remains READY_FOR_REVIEW. ` +
+              'Use e3_request_approval to display the card again.'
+            )
+          }, 30 * 60 * 1000)
+          timeout.unref?.()
+
+          pendingE3Actions.set(actionId, {
+            actionId,
+            conversationId,
+            sessionId: result.sessionId,
+            userId: requestContext.userId,
+            resolve,
+            timeout
+          })
+
+          res.write(`data: ${JSON.stringify({
+            actionRequest: true,
+            actionId,
+            description:
+              `E3 validated ${result.operationCount} exact source operation${
+                result.operationCount === 1 ? '' : 's'
+              } and froze the reviewed bytes.`,
+            command: formatE3ApprovalPreview(result),
+            reason:
+              'Approve creates the verified E3 export package. It does not modify the productive repository.',
+            type: 'e3',
+            source: 'chat'
+          })}\n\n`)
+        })
+      }
+
+      return formatE3ToolResult(result)
+    } catch (error) {
+      res.write(`data: ${JSON.stringify({
+        tool: name,
+        status: 'error',
+        error: error?.code || error?.message || 'E3 error'
+      })}\n\n`)
+      return `E3 error [${
+        error?.code || 'E3_CHAT_INTERNAL'
+      }]: ${error?.message || String(error)}`
+    }
   }
 
   if (name === 'web_search') {
@@ -1046,6 +1142,38 @@ async function updateMemory(userId, conversationId, model, force = false) {
   }
 }
 
+router.get(
+  '/e3/session/:sessionId/export',
+  requireAuth,
+  async (req, res) => {
+    try {
+      const exported = await readE3ExportPackage(
+        req.params.sessionId,
+        req.session.userId
+      )
+      res.setHeader('Content-Type', 'application/x-tar')
+      res.setHeader(
+        'Content-Disposition',
+        `attachment; filename="${exported.filename}"`
+      )
+      res.setHeader('X-E3-Export-SHA256', exported.sha256)
+      return res.send(exported.bytes)
+    } catch (error) {
+      const status = error?.code === 'E3_CHAT_FORBIDDEN'
+        ? 403
+        : error?.code === 'E3_CHAT_DISABLED'
+          ? 503
+          : error?.code === 'E3_CHAT_NOT_FOUND'
+            ? 404
+            : 409
+      return res.status(status).json({
+        error: error?.message || String(error),
+        code: error?.code || 'E3_CHAT_INTERNAL'
+      })
+    }
+  }
+)
+
 router.post(
   '/:conversationId/cancel',
   requireAuth,
@@ -1326,6 +1454,20 @@ Use these as background context. If these memories fully answer the request, ans
   systemContent = systemContent
     ? `${systemContent}\n\n${calendarToolPolicy}`
     : calendarToolPolicy
+
+
+  const e3ToolPolicy = `[E3 source-editing policy:
+- When the user asks to change EchoLink source or repository files and E3 tools are available, inspect the relevant source read-only and use e3_prepare_change with a small exact operation list.
+- Do not ask for a natural-language confirmation before e3_prepare_change. The application presents the hash-bound Approve/Deny card after all fixed validation profiles pass.
+- E3 approval in this bridge creates a verified export package only.
+- E3 never applies, commits, pushes, deploys, or restarts PM2.
+- Never describe an E3 export as already applied to the productive repository.]`
+
+  if (e3ToolsEnabled()) {
+    systemContent = systemContent
+      ? `${systemContent}\n\n${e3ToolPolicy}`
+      : e3ToolPolicy
+  }
 
   // Context guard:
   // - keeps a contiguous suffix of the conversation
@@ -2130,6 +2272,36 @@ router.post(
   requireAuth,
   async (req, res) => {
     const actionId = req.params.actionId
+    const e3SessionId = e3SessionIdFromAction(actionId)
+
+    if (e3SessionId) {
+      const entry = pendingE3Actions.get(actionId)
+      try {
+        const result = await approveE3Action(
+          e3SessionId,
+          req.session.userId
+        )
+        if (entry) {
+          clearTimeout(entry.timeout)
+          pendingE3Actions.delete(actionId)
+          entry.resolve(formatE3ToolResult(result))
+        }
+        return res.json({
+          success: true,
+          type: 'e3',
+          sessionId: result.sessionId,
+          status: result.status,
+          export: result.export
+        })
+      } catch (error) {
+        return res.status(
+          error?.code === 'E3_CHAT_FORBIDDEN' ? 403 : 409
+        ).json({
+          error: error?.message || String(error),
+          code: error?.code || 'E3_CHAT_INTERNAL'
+        })
+      }
+    }
 
     const calendarEntry =
       pendingCalendarActions.get(actionId)
@@ -2291,8 +2463,38 @@ router.post(
 router.post(
   '/action/:actionId/deny',
   requireAuth,
-  (req, res) => {
+  async (req, res) => {
     const actionId = req.params.actionId
+    const e3SessionId = e3SessionIdFromAction(actionId)
+
+    if (e3SessionId) {
+      const entry = pendingE3Actions.get(actionId)
+      try {
+        const result = await denyE3Action(
+          e3SessionId,
+          req.session.userId
+        )
+        if (entry) {
+          clearTimeout(entry.timeout)
+          pendingE3Actions.delete(actionId)
+          entry.resolve(formatE3ToolResult(result))
+        }
+        return res.json({
+          success: true,
+          denied: true,
+          type: 'e3',
+          sessionId: result.sessionId,
+          status: result.status
+        })
+      } catch (error) {
+        return res.status(
+          error?.code === 'E3_CHAT_FORBIDDEN' ? 403 : 409
+        ).json({
+          error: error?.message || String(error),
+          code: error?.code || 'E3_CHAT_INTERNAL'
+        })
+      }
+    }
 
     const calendarEntry =
       pendingCalendarActions.get(actionId)

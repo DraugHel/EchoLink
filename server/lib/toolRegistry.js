@@ -4,6 +4,7 @@ import {
   TERMINAL_TOOL
 } from './webSearch.js'
 import { TASK_TOOLS } from './taskTools.js'
+import { E3_TOOLS, e3ToolsEnabled } from './e3Tools.js'
 import { CALENDAR_TOOLS } from './calendarTools.js'
 import { CALENDAR_EXTRA_TOOLS } from './calendarExtraTools.js'
 import { GMAIL_TOOLS } from './gmailTools.js'
@@ -27,5 +28,6 @@ export const ALL_TOOLS = [
   ...(playwrightMcpEnabled()
     ? PLAYWRIGHT_TOOLS
     : []),
+  ...(e3ToolsEnabled() ? E3_TOOLS : []),
   ...TASK_TOOLS
 ]
