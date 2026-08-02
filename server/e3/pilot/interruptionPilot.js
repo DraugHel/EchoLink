@@ -830,6 +830,10 @@ export function runOperationalPilotInterruptionCase({
         env: {
           PATH: '/usr/bin:/bin',
           HOME: repositoryRoot,
+          TMPDIR:
+            process.env.TMPDIR === '/e3/tmp'
+              ? '/e3/tmp'
+              : '/tmp',
           LANG: 'C',
           LC_ALL: 'C',
           TZ: 'UTC',

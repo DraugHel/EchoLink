@@ -283,7 +283,7 @@ function preparePrivateDirectory(path) {
     !stat.isDirectory() ||
     stat.isSymbolicLink() ||
     realpathSync(path) !== resolve(path) ||
-    stat.uid !== 0 ||
+    stat.uid !== process.getuid() ||
     (stat.mode & 0o777) !== 0o700
   ) {
     fail(
@@ -371,7 +371,7 @@ function readMetadata(sessionRoot) {
     !stat.isFile() ||
     stat.isSymbolicLink() ||
     stat.nlink !== 1 ||
-    stat.uid !== 0 ||
+    stat.uid !== process.getuid() ||
     (stat.mode & 0o777) !== 0o600 ||
     stat.size > 2 * 1024 * 1024
   ) {
@@ -1791,7 +1791,7 @@ export class E3ChatSessionService {
       !stat.isFile() ||
       stat.isSymbolicLink() ||
       stat.nlink !== 1 ||
-      stat.uid !== 0 ||
+      stat.uid !== process.getuid() ||
       (stat.mode & 0o777) !== 0o600 ||
       sha256(bytes) !== metadata.export.packageSha256
     ) {

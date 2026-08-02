@@ -206,4 +206,8 @@ test('interruption catalog and worker surface are closed', () => {
   ]) {
     assert.equal(source.includes(forbidden), false, forbidden)
   }
+  assert.match(
+    source,
+    /TMPDIR:\s*process\.env\.TMPDIR === '\/e3\/tmp'/
+  )
 })

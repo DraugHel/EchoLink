@@ -120,6 +120,21 @@ test('E3 chat feature flag is exact and default-off', () => {
   assert.equal(e3ChatFeatureEnabled({ E3_CHAT_TOOLS_ENABLED: 'true' }), true)
 })
 
+test('private E3 chat storage follows the current runtime uid', () => {
+  const source = fs.readFileSync(
+    new URL(
+      '../server/e3/chat/chatSessionService.js',
+      import.meta.url
+    ),
+    'utf8'
+  )
+  const runtimeUidChecks = source.match(
+    /stat\.uid !== process\.getuid\(\)/g
+  ) || []
+  assert.equal(runtimeUidChecks.length, 3)
+  assert.equal(source.includes('stat.uid !== 0'), false)
+})
+
 test('first Luna bridge admits only exact create and replace operations', () => {
   const request = normalizeE3PrepareRequest({
     userId: 1,
