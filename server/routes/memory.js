@@ -9,6 +9,7 @@ import {
   listMemoryItems,
   updateMemoryItem
 } from '../lib/memoryItems.js'
+import { runDeepSeekMemory } from '../lib/deepseekMemory.js'
 
 const router = Router()
 const OLLAMA_URL = process.env.OLLAMA_URL || 'http://localhost:11434'
@@ -147,6 +148,17 @@ async function runMemoryModel(
     }
 
     return extractOpenAIText(data)
+  }
+
+  if (
+    selectedModel.startsWith('deepseek/')
+  ) {
+    return runDeepSeekMemory({
+      model: selectedModel,
+      prompt,
+      apiKey:
+        process.env.DEEPSEEK_API_KEY || ''
+    })
   }
 
   const ollamaModel =
