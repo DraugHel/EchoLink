@@ -8,7 +8,9 @@ import {
   chatReconnectingContent,
   chatStreamApplicationError,
   clearChatReconnectContent,
-  resolveChatActionRequests
+  removeResolvedChatAction,
+  resolveChatActionRequests,
+  shouldReloadResolvedE3Action
 } from '../client/src/lib/chatReconnect.js'
 
 test('Reconnect besitzt ein begrenztes längeres Zeitfenster', () => {
@@ -102,6 +104,51 @@ test('erledigte Freigabe wird aus dem sichtbaren Pending-State entfernt', () => 
   assert.deepEqual(
     resolveChatActionRequests(undefined, 'resolved'),
     []
+  )
+})
+
+test('synthetische Approval-Bubble verschwindet vollständig nach Auflösung', () => {
+  const messages = [{
+    id: 'pending-action:e3-test',
+    role: 'assistant',
+    content: '',
+    pendingActionOnly: true,
+    actionRequests: [{
+      actionId: 'e3-test',
+      type: 'e3'
+    }]
+  }]
+
+  assert.deepEqual(
+    removeResolvedChatAction(
+      messages,
+      'e3-test'
+    ),
+    []
+  )
+})
+
+test('nur wiederhergestellte E3-Karten laden den autoritativen Verlauf neu', () => {
+  assert.equal(
+    shouldReloadResolvedE3Action({
+      type: 'e3',
+      restored: true
+    }),
+    true
+  )
+  assert.equal(
+    shouldReloadResolvedE3Action({
+      type: 'e3',
+      restored: false
+    }),
+    false
+  )
+  assert.equal(
+    shouldReloadResolvedE3Action({
+      type: 'shell',
+      restored: true
+    }),
+    false
   )
 })
 

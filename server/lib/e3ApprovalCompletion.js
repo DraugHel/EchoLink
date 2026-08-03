@@ -1,11 +1,12 @@
-export function persistE3ApprovalCompletion({
-  db,
-  result,
-  formatResult
-}) {
-  const conversationId = Number(result?.conversationId)
-  const content = String(formatResult(result) || '').trim()
+function formatE3ActionResult(result, formatResult) {
+  return String(formatResult(result) || '').trim()
+}
 
+function persistE3ActionContent({
+  db,
+  conversationId,
+  content
+}) {
   if (
     !Number.isSafeInteger(conversationId) ||
     conversationId <= 0 ||
@@ -44,4 +45,116 @@ export function persistE3ApprovalCompletion({
   }
 
   return false
+}
+
+function pendingEntryIsActive(entry) {
+  if (typeof entry?.isRequestActive !== 'function') {
+    return false
+  }
+
+  try {
+    return entry.isRequestActive() === true
+  } catch {
+    return false
+  }
+}
+
+function clearPendingEntry(
+  pendingActions,
+  actionId,
+  entry
+) {
+  clearTimeout(entry?.timeout)
+  pendingActions.delete(actionId)
+}
+
+export function persistE3ApprovalCompletion({
+  db,
+  result,
+  formatResult
+}) {
+  return persistE3ActionContent({
+    db,
+    conversationId: Number(result?.conversationId),
+    content: formatE3ActionResult(result, formatResult)
+  })
+}
+
+export function settleE3ActionCompletion({
+  pendingActions,
+  actionId,
+  db,
+  result,
+  formatResult
+}) {
+  const content = formatE3ActionResult(
+    result,
+    formatResult
+  )
+  const entry = pendingActions.get(actionId)
+  const continued = pendingEntryIsActive(entry)
+
+  if (entry) {
+    clearPendingEntry(
+      pendingActions,
+      actionId,
+      entry
+    )
+    entry.resolve(content)
+  }
+
+  const persisted = continued
+    ? false
+    : persistE3ActionContent({
+        db,
+        conversationId:
+          Number(result?.conversationId),
+        content
+      })
+
+  return Object.freeze({
+    continued,
+    persisted
+  })
+}
+
+export function detachPendingE3ActionsForRequest({
+  pendingActions,
+  userId,
+  conversationId,
+  requestId
+}) {
+  const expectedUserId = Number(userId)
+  const expectedConversationId =
+    Number(conversationId)
+  const expectedRequestId =
+    String(requestId || '')
+  let detached = 0
+
+  for (
+    const [actionId, entry] of pendingActions
+  ) {
+    if (
+      Number(entry?.userId) !== expectedUserId ||
+      Number(entry?.conversationId) !==
+        expectedConversationId ||
+      String(entry?.requestId || '') !==
+        expectedRequestId
+    ) {
+      continue
+    }
+
+    clearPendingEntry(
+      pendingActions,
+      actionId,
+      entry
+    )
+    entry.resolve(
+      `E3 session ${entry.sessionId} remains READY_FOR_REVIEW. ` +
+      'The approval card can be restored safely after reconnect.'
+    )
+    detached += 1
+  }
+
+  return detached
 }

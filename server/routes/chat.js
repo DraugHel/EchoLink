@@ -97,7 +97,10 @@ import { resizeImageBuffer } from '../utils/image.js'
 import fs from 'fs'
 import path from 'path'
 import crypto from 'crypto'
-import { persistE3ApprovalCompletion } from '../lib/e3ApprovalCompletion.js'
+import {
+  detachPendingE3ActionsForRequest,
+  settleE3ActionCompletion
+} from '../lib/e3ApprovalCompletion.js'
 
 const router = Router()
 const pendingTerminalActions = new Map()
@@ -493,6 +496,9 @@ async function executeTool(
             conversationId,
             sessionId: result.sessionId,
             userId: requestContext.userId,
+            requestId: requestContext.requestId,
+            isRequestActive:
+              requestContext.isRequestActive,
             resolve,
             timeout
           })
@@ -2035,6 +2041,12 @@ Use these as background context. If these memories fully answer the request, ans
   const onDisconnect = () => {
     if (res.writableEnded) return
     clientDisconnected = true
+    detachPendingE3ActionsForRequest({
+      pendingActions: pendingE3Actions,
+      userId: req.session.userId,
+      conversationId: convo.id,
+      requestId
+    })
     abortChatRequest(activeRequest)
   }
 
@@ -2116,7 +2128,13 @@ Use these as background context. If these memories fully answer the request, ans
             playwrightSession,
             {
               userId: req.session.userId,
-              requestId
+              requestId,
+              isRequestActive: () => (
+                !clientDisconnected &&
+                !isChatRequestCancelled(
+                  activeRequest
+                )
+              )
             }
           )
           assertChatRequestActive(activeRequest)
@@ -2264,23 +2282,18 @@ router.post(
   async (req, res) => {
     const actionId = req.params.actionId
     if (String(actionId).startsWith('e3-')) {
-      const entry = pendingE3Actions.get(actionId)
       try {
         const result = await approveE3Action(
           actionId,
           req.session.userId
         )
-        if (entry) {
-          clearTimeout(entry.timeout)
-          pendingE3Actions.delete(actionId)
-          entry.resolve(formatE3ToolResult(result))
-        } else {
-          persistE3ApprovalCompletion({
-            db,
-            result,
-            formatResult: formatE3ToolResult
-          })
-        }
+        settleE3ActionCompletion({
+          pendingActions: pendingE3Actions,
+          actionId,
+          db,
+          result,
+          formatResult: formatE3ToolResult
+        })
         return res.json({
           success: true,
           type: 'e3',
@@ -2461,17 +2474,18 @@ router.post(
   async (req, res) => {
     const actionId = req.params.actionId
     if (String(actionId).startsWith('e3-')) {
-      const entry = pendingE3Actions.get(actionId)
       try {
         const result = await denyE3Action(
           actionId,
           req.session.userId
         )
-        if (entry) {
-          clearTimeout(entry.timeout)
-          pendingE3Actions.delete(actionId)
-          entry.resolve(formatE3ToolResult(result))
-        }
+        settleE3ActionCompletion({
+          pendingActions: pendingE3Actions,
+          actionId,
+          db,
+          result,
+          formatResult: formatE3ToolResult
+        })
         return res.json({
           success: true,
           denied: true,

@@ -15,7 +15,8 @@ import {
   chatReconnectingContent,
   chatStreamApplicationError,
   clearChatReconnectContent,
-  resolveChatActionRequests
+  removeResolvedChatAction,
+  shouldReloadResolvedE3Action
 } from '../lib/chatReconnect.js'
 import {
   getLunaToolKind,
@@ -1586,24 +1587,38 @@ export default function Chat({ user, onLogout }) {
       if (!response.ok) {
         throw await readResponseError(response)
       }
-      setMessages(prev => prev.flatMap(message => {
-        const actionRequests = resolveChatActionRequests(
-          message.actionRequests,
-          actionId
+      const clearResolvedAction = () => {
+        setMessages(prev =>
+          removeResolvedChatAction(
+            prev,
+            actionId
+          )
         )
+      }
 
-        if (
-          message.pendingActionOnly &&
-          actionRequests.length === 0
-        ) {
-          return []
+      if (
+        shouldReloadResolvedE3Action(
+          actionRequest
+        ) &&
+        activeConvo?.id
+      ) {
+        try {
+          const msgs =
+            await loadConversationMessages(
+              activeConvo.id,
+              { refresh: true }
+            )
+          setMessages(msgs)
+        } catch (reloadError) {
+          console.error(
+            'Reload after E3 approval failed:',
+            reloadError
+          )
+          clearResolvedAction()
         }
-
-        return [{
-          ...message,
-          actionRequests
-        }]
-      }))
+      } else {
+        clearResolvedAction()
+      }
       const chatRunState = chatRunStateRef.current
       if (chatRunState) {
         setChatRun(current =>
@@ -1639,24 +1654,38 @@ export default function Chat({ user, onLogout }) {
       if (!response.ok) {
         throw await readResponseError(response)
       }
-      setMessages(prev => prev.flatMap(message => {
-        const actionRequests = resolveChatActionRequests(
-          message.actionRequests,
-          actionId
+      const clearResolvedAction = () => {
+        setMessages(prev =>
+          removeResolvedChatAction(
+            prev,
+            actionId
+          )
         )
+      }
 
-        if (
-          message.pendingActionOnly &&
-          actionRequests.length === 0
-        ) {
-          return []
+      if (
+        shouldReloadResolvedE3Action(
+          actionRequest
+        ) &&
+        activeConvo?.id
+      ) {
+        try {
+          const msgs =
+            await loadConversationMessages(
+              activeConvo.id,
+              { refresh: true }
+            )
+          setMessages(msgs)
+        } catch (reloadError) {
+          console.error(
+            'Reload after E3 denial failed:',
+            reloadError
+          )
+          clearResolvedAction()
         }
-
-        return [{
-          ...message,
-          actionRequests
-        }]
-      }))
+      } else {
+        clearResolvedAction()
+      }
       const chatRunState = chatRunStateRef.current
       if (chatRunState) {
         setChatRun(current =>

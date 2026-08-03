@@ -67,6 +67,41 @@ export function resolveChatActionRequests(
   )
 }
 
+export function removeResolvedChatAction(
+  messages,
+  actionId
+) {
+  if (!Array.isArray(messages)) return []
+
+  return messages.flatMap(message => {
+    const actionRequests = resolveChatActionRequests(
+      message.actionRequests,
+      actionId
+    )
+
+    if (
+      message.pendingActionOnly &&
+      actionRequests.length === 0
+    ) {
+      return []
+    }
+
+    return [{
+      ...message,
+      actionRequests
+    }]
+  })
+}
+
+export function shouldReloadResolvedE3Action(
+  actionRequest
+) {
+  return (
+    actionRequest?.type === 'e3' &&
+    actionRequest?.restored === true
+  )
+}
+
 export function attachPendingChatActions(
   messages,
   actionRequests
