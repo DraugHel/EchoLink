@@ -39,6 +39,19 @@ const FORBIDDEN_PYTHON = [
 
 export const NEVER_AUTO_APPROVE = /^(?:rm|rmdir|mv|cp|install|touch|dd|mkfs|shred|shutdown|reboot|halt|poweroff|kill|killall|pkill|chmod|chown|truncate|useradd|userdel|usermod|groupadd|groupdel|fdisk|parted|wipefs|iptables|nft|ufw|tee|xargs|eval|source|exec|bash|sh|zsh|python3?|perl|ruby|node|npx|curl|wget)\b|^(?:pm2\s+(?:delete|kill|flush|restart|reload|start|stop))\b|^(?:git\s+(?:add|apply|am|checkout|cherry-pick|clean|commit|fetch|merge|pull|push|rebase|reset|restore|revert|switch|tag))\b|^(?:docker\s+(?:build|compose|container|exec|image|kill|network|pull|push|restart|rm|rmi|run|start|stop|system\s+prune|volume\s+(?:create|prune|rm)))\b|^(?:npm\s+(?:install|uninstall|remove|run|start|stop|restart|publish))\b/i
 
+const DESTRUCTIVE_EXECUTABLES = new Set([
+  'rm', 'rmdir', 'shred', 'unlink',
+  'mkfs', 'wipefs', 'fdisk', 'parted',
+  'shutdown', 'reboot', 'halt', 'poweroff',
+  'kill', 'killall', 'pkill', 'truncate'
+])
+
+const DESTRUCTIVE_INTERPRETER_SOURCE =
+  /\b(?:unlink|remove|rmdir|removedirs|rmtree)\s*\(|\.(?:rm|rmSync|rmdir|rmdirSync|unlink|unlinkSync)\s*\(|\bfs\.(?:rm|rmSync|rmdir|rmdirSync|unlink|unlinkSync)\s*\(/i
+
+const NESTED_DESTRUCTIVE_COMMAND =
+  /(?:^|[;&|(`\n]\s*)(?:command\s+|sudo\s+|env\s+)*(?:rm|rmdir|shred|unlink|mkfs|wipefs|fdisk|parted|shutdown|reboot|halt|poweroff|kill|killall|pkill|truncate)\b/i
+
 function shellWords(source) {
   const words = []
   let word = ''
@@ -452,6 +465,231 @@ function commandIsReadOnly(words, raw) {
   }
   if (executable === 'unzip') return args.includes('-l') || args.includes('-Z')
   return false
+}
+
+function destructiveGitReason(args) {
+  const gitArgs = [...args]
+  while (gitArgs[0] === '-C' && gitArgs.length >= 2) {
+    gitArgs.splice(0, 2)
+  }
+  while (gitArgs[0] === '--no-pager') gitArgs.shift()
+
+  const subcommand = gitArgs.shift() || ''
+  if (subcommand === 'clean') return 'git clean ist gesperrt'
+  if (
+    subcommand === 'reset' &&
+    gitArgs.some(arg => arg === '--hard' || arg.startsWith('--hard='))
+  ) {
+    return 'git reset --hard ist gesperrt'
+  }
+  if (
+    subcommand === 'push' &&
+    gitArgs.some(arg =>
+      arg === '-f' ||
+      arg === '--force' ||
+      arg.startsWith('--force=') ||
+      arg === '--force-with-lease' ||
+      arg.startsWith('--force-with-lease=') ||
+      arg === '--delete' ||
+      arg.startsWith('--delete=') ||
+      arg.startsWith('+') ||
+      arg.startsWith(':')
+    )
+  ) {
+    return 'erzwungener oder löschender Git-Push ist gesperrt'
+  }
+  if (
+    subcommand === 'branch' &&
+    gitArgs.some(arg => arg === '-d' || arg === '-D' || arg === '--delete')
+  ) {
+    return 'Löschen von Git-Branches ist gesperrt'
+  }
+  if (
+    subcommand === 'tag' &&
+    gitArgs.some(arg => arg === '-d' || arg === '--delete')
+  ) {
+    return 'Löschen von Git-Tags ist gesperrt'
+  }
+  if (
+    subcommand === 'worktree' &&
+    ['remove', 'prune'].includes(gitArgs[0] || '')
+  ) {
+    return 'Entfernen von Git-Worktrees ist gesperrt'
+  }
+  if (
+    (subcommand === 'update-ref' && gitArgs.includes('-d')) ||
+    (subcommand === 'symbolic-ref' && gitArgs.includes('--delete'))
+  ) {
+    return 'Löschen von Git-Referenzen ist gesperrt'
+  }
+  return ''
+}
+
+function destructiveDockerReason(args) {
+  const scope = args[0] || ''
+  const action = args[1] || ''
+  if (['rm', 'rmi'].includes(scope)) {
+    return 'Docker-Entfernung ist gesperrt'
+  }
+  if (
+    ['container', 'image', 'network', 'volume', 'system', 'builder', 'buildx']
+      .includes(scope) &&
+    ['rm', 'remove', 'prune'].includes(action)
+  ) {
+    return 'Docker-Entfernung oder Prune ist gesperrt'
+  }
+  if (
+    scope === 'compose' &&
+    ['down', 'rm'].includes(action)
+  ) {
+    return 'Docker-Compose-Entfernung ist gesperrt'
+  }
+  return ''
+}
+
+function destructiveSqlReason(executable, args) {
+  if (!['sqlite3', 'psql', 'mysql', 'mariadb'].includes(executable)) {
+    return ''
+  }
+  const sql = args.join(' ')
+  if (/\b(?:delete\s+from|drop\s+(?:table|database|index|view|trigger)|truncate\s+(?:table\s+)?)\b/i.test(sql)) {
+    return 'löschendes SQL ist gesperrt'
+  }
+  if (/\.\s*(?:shell|system)\b[\s\S]*\b(?:rm|rmdir|unlink|shred)\b/i.test(sql)) {
+    return 'löschender SQL-Shell-Aufruf ist gesperrt'
+  }
+  return ''
+}
+
+function destructiveCommandReason(words, raw) {
+  const normalized = [...words]
+  while (normalized.length && ASSIGNMENT.test(normalized[0])) {
+    normalized.shift()
+  }
+  while (
+    ['if', 'elif', 'while', 'until', 'then', 'do', 'else'].includes(
+      normalized[0]
+    )
+  ) {
+    normalized.shift()
+  }
+  if (!normalized.length || CONTROL_ONLY.has(normalized[0])) return ''
+  if (normalized[0] === 'for' || normalized[0] === '[[' || normalized[0] === '[') {
+    return ''
+  }
+
+  while (normalized[0] === 'command' || normalized[0] === 'sudo') {
+    const wrapper = normalized.shift()
+    if (wrapper === 'sudo') {
+      while (normalized[0]?.startsWith('-')) {
+        const option = normalized.shift()
+        if (/^(?:-u|-g|-h|-p|-C|--user|--group|--host|--prompt|--chdir)$/.test(option)) {
+          normalized.shift()
+        }
+      }
+    } else {
+      while (normalized[0]?.startsWith('-')) normalized.shift()
+    }
+  }
+  if (normalized[0] === 'env') {
+    normalized.shift()
+    while (
+      normalized[0]?.startsWith('-') ||
+      ASSIGNMENT.test(normalized[0] || '')
+    ) {
+      normalized.shift()
+    }
+  }
+
+  const executable = normalized.shift()?.split('/').at(-1) || ''
+  const args = normalized
+  if (DESTRUCTIVE_EXECUTABLES.has(executable)) {
+    return `${executable} ist als destruktiver Befehl gesperrt`
+  }
+  if (
+    executable === 'find' &&
+    args.some(arg =>
+      arg === '-delete' ||
+      ['-exec', '-execdir', '-ok', '-okdir'].includes(arg)
+    ) &&
+    /(?:-delete\b|-(?:exec|execdir|ok|okdir)\b[\s\S]*\b(?:rm|rmdir|unlink|shred)\b)/i.test(raw)
+  ) {
+    return 'löschendes find ist gesperrt'
+  }
+  if (
+    executable === 'xargs' &&
+    args.some(arg => DESTRUCTIVE_EXECUTABLES.has(arg.split('/').at(-1)))
+  ) {
+    return 'löschendes xargs ist gesperrt'
+  }
+  if (executable === 'git') return destructiveGitReason(args)
+  if (executable === 'docker') return destructiveDockerReason(args)
+  if (
+    ['npm', 'pnpm', 'yarn'].includes(executable) &&
+    ['remove', 'rm', 'uninstall'].includes(args[0] || '')
+  ) {
+    return 'Entfernen von Paketen ist gesperrt'
+  }
+  if (
+    ['apt', 'apt-get', 'dnf', 'yum'].includes(executable) &&
+    ['autoremove', 'purge', 'remove'].includes(args[0] || '')
+  ) {
+    return 'Entfernen von Systempaketen ist gesperrt'
+  }
+
+  const sqlReason = destructiveSqlReason(executable, args)
+  if (sqlReason) return sqlReason
+
+  if (
+    ['bash', 'sh', 'zsh'].includes(executable) &&
+    ['-c', '-lc'].includes(args[0] || '') &&
+    args[1]
+  ) {
+    return classifyDestructiveTerminalCommand(args[1]).reason
+  }
+  if (
+    ['python', 'python3', 'node', 'perl', 'ruby'].includes(executable) &&
+    DESTRUCTIVE_INTERPRETER_SOURCE.test(raw)
+  ) {
+    return 'löschender Interpreter-Code ist gesperrt'
+  }
+  return ''
+}
+
+export function classifyDestructiveTerminalCommand(command) {
+  const original = typeof command === 'string' ? command.trim() : ''
+  if (!original) return { destructive: false, reason: '' }
+
+  const unwrapped = unwrapBash(original)
+  const source = unwrapped === null ? original : unwrapped
+  const segments = splitCommands(source)
+
+  if (segments?.length) {
+    for (const segment of segments) {
+      const words = shellWords(segment)
+      if (!words) continue
+      const reason = destructiveCommandReason(words, segment)
+      if (reason) return { destructive: true, reason }
+    }
+  }
+
+  if (NESTED_DESTRUCTIVE_COMMAND.test(source)) {
+    return {
+      destructive: true,
+      reason: 'verschachtelter destruktiver Befehl ist gesperrt'
+    }
+  }
+  if (DESTRUCTIVE_INTERPRETER_SOURCE.test(source)) {
+    return {
+      destructive: true,
+      reason: 'löschender Interpreter-Code ist gesperrt'
+    }
+  }
+  return { destructive: false, reason: '' }
+}
+
+export function isDestructiveTerminalCommand(command) {
+  return classifyDestructiveTerminalCommand(command).destructive
 }
 
 export function classifyTerminalCommand(command, options = {}) {
