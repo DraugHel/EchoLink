@@ -1,11 +1,8 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
 
 import {
-  classifyDestructiveTerminalCommand,
   classifyTerminalCommand,
-  isDestructiveTerminalCommand,
   isReadOnlyTerminalCommand
 } from '../server/lib/terminalCommandPolicy.js'
 
@@ -21,7 +18,6 @@ for p in /root/.cache /root/.local /root/.npm; do
 done'`
 
   assert.equal(isReadOnlyTerminalCommand(command), true)
-  assert.equal(isDestructiveTerminalCommand(command), false)
 })
 
 test('Audit mit Variablen, Substitution, Git, awk und Credentials-Metadaten ist read-only', () => {
@@ -169,7 +165,7 @@ AUDIT`
   assert.equal(isReadOnlyTerminalCommand(command), true)
 })
 
-test('versteckte Schreiboperationen gelten nicht fälschlich als read-only', () => {
+test('versteckte Schreiboperationen bleiben freigabepflichtig', () => {
   const commands = [
     `printf ok; rm -f /tmp/hidden-write`,
     `bash -lc 'df -h; rm -f /tmp/hidden-write'`,
@@ -233,7 +229,7 @@ PY`
   }
 })
 
-test('unklare Shell-Konstrukte gelten nicht fälschlich als read-only', () => {
+test('unklare Shell-Konstrukte fallen sicher auf Approval zurück', () => {
   const commands = [
     `bash -lc "df -h"`,
     `printf '%s' \`rm -f /tmp/hidden-write\``,
@@ -261,78 +257,5 @@ test('explizite Präfix-Allowlist bleibt möglich, destruktive Präfixe aber nic
       allowedPrefixes: ['rm']
     }),
     false
-  )
-})
-
-test('klare Lösch- und Destruktivbefehle werden unabhängig vom Read-only-Parser blockiert', () => {
-  const commands = [
-    'rm -rf /root/echolink',
-    `bash -lc 'printf ok; rm -f /tmp/file'`,
-    'command sudo rm -rf /root/echolink',
-    'sudo -u root rm -rf /root/echolink',
-    'find /root/echolink -type f -delete',
-    'find /tmp -type f -exec rm -f {} +',
-    `printf '%s\n' /tmp/example | xargs rm -f`,
-    'git clean -fdx',
-    'git reset --hard HEAD~1',
-    'git push --force origin main',
-    'git push --force-with-lease origin main',
-    'git push origin :main',
-    'git branch -D work',
-    'git update-ref -d refs/heads/work',
-    'docker system prune -af',
-    'docker image rm image-id',
-    'docker compose down -v',
-    `sqlite3 data/echolink.db 'DELETE FROM messages;'`,
-    `sqlite3 data/echolink.db 'DROP TABLE messages;'`,
-    'npm uninstall better-sqlite3',
-    'apt-get purge sqlite3',
-    `python3 -c "from pathlib import Path; Path('/tmp/x').unlink()"`,
-    `node -e "require('fs').rmSync('/tmp/x')"`
-  ]
-
-  for (const command of commands) {
-    const result = classifyDestructiveTerminalCommand(command)
-    assert.equal(result.destructive, true, command)
-    assert.ok(result.reason, command)
-  }
-})
-
-test('Agentenarbeit ohne Löschen bleibt automatisch ausführbar', () => {
-  const commands = [
-    `bash -lc "df -h"`,
-    'unknown-inspector --read-only',
-    `sed -i 's/old/new/' server/example.js`,
-    'git add server/example.js',
-    'git commit -m "fix: example"',
-    'git push origin main',
-    'npm test',
-    'npm run build',
-    'npm run deploy',
-    'pm2 restart echolink --update-env',
-    'docker build -t echolink:test .',
-    `sqlite3 data/echolink.db 'UPDATE settings SET value = 1;'`
-  ]
-
-  for (const command of commands) {
-    assert.equal(
-      isDestructiveTerminalCommand(command),
-      false,
-      command
-    )
-  }
-})
-
-test('Chat verdrahtet normale Terminalarbeit ohne Approval und blockiert Destruktives vorher', () => {
-  const source = readFileSync(
-    new URL('../server/routes/chat.js', import.meta.url),
-    'utf8'
-  )
-
-  assert.match(source, /if \(commandPolicy\.destructive\)/)
-  assert.match(source, /requiresApproval:\s*false/)
-  assert.doesNotMatch(
-    source,
-    /requiresApproval:\s*!commandPolicy\.readOnly/
   )
 })

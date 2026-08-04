@@ -94,7 +94,6 @@ import {
   waitForTerminalOperation
 } from '../lib/terminalOperations.js'
 import {
-  classifyDestructiveTerminalCommand,
   classifyTerminalCommand,
   NEVER_AUTO_APPROVE
 } from '../lib/terminalCommandPolicy.js'
@@ -275,13 +274,9 @@ function userAllowedPrefixes() {
 }
 
 function terminalCommandPolicy(command) {
-  const inspection = classifyTerminalCommand(command, {
+  return classifyTerminalCommand(command, {
     allowedPrefixes: userAllowedPrefixes()
   })
-  return {
-    ...inspection,
-    ...classifyDestructiveTerminalCommand(command)
-  }
 }
 
 function approvalReason(command) {
@@ -531,19 +526,6 @@ async function executeTool(
     const command = args.command
     const description = args.description || command
     const commandPolicy = terminalCommandPolicy(command)
-
-    if (commandPolicy.destructive) {
-      const message =
-        `Blocked destructive terminal command: ${commandPolicy.reason}`
-      res.write(`data: ${JSON.stringify({
-        tool: 'terminal',
-        status: 'error',
-        query: command,
-        error: message
-      })}\n\n`)
-      return message
-    }
-
     const operation = createTerminalOperation({
       userId: requestContext.userId,
       conversationId,
@@ -551,42 +533,53 @@ async function executeTool(
       toolCallId: toolCall.id,
       command,
       description,
-      requiresApproval: false
+      requiresApproval: !commandPolicy.readOnly
     })
 
-    res.write(`data: ${JSON.stringify({
-      tool: 'terminal',
-      status: 'running',
-      query: command
-    })}\n\n`)
-
-    if (operation.status === 'queued') {
-      if (commandPolicy.readOnly) {
-        const completed = await executeTerminalOperation(operation.id)
-        const result = formatTerminalOperationResult(completed)
-        res.write(`data: ${JSON.stringify({
-          tool: 'terminal',
-          status: 'done',
-          query: command
-        })}\n\n`)
-        return result
-      }
-      spawnTerminalOperationRunner(operation.id)
+    // Harmlose read-only Commands laufen ohne Approval durch
+    if (commandPolicy.readOnly) {
+      res.write(`data: ${JSON.stringify({ tool: 'terminal', status: 'running', query: command })}\n\n`)
+      const completed = operation.status === 'queued'
+        ? await executeTerminalOperation(operation.id)
+        : operation.status === 'running'
+          ? await waitForTerminalOperation(operation.id)
+          : operation
+      const result = formatTerminalOperationResult(completed)
+      res.write(`data: ${JSON.stringify({ tool: 'terminal', status: 'done', query: command })}\n\n`)
+      return result
     }
 
-    const completed = operation.status === 'succeeded' ||
-      operation.status === 'failed' ||
-      operation.status === 'denied' ||
-      operation.status === 'expired'
-      ? operation
-      : await waitForTerminalOperation(operation.id)
-    const result = formatTerminalOperationResult(completed)
-    res.write(`data: ${JSON.stringify({
-      tool: 'terminal',
-      status: completed.status === 'succeeded' ? 'done' : 'error',
-      query: command
-    })}\n\n`)
-    return result
+    if (operation.status !== 'awaiting_approval') {
+      const completed = await waitForTerminalOperation(operation.id)
+      return formatTerminalOperationResult(completed)
+    }
+
+    // Pause and ask for approval
+    return new Promise((resolve) => {
+      const actionId = operation.action_id
+      pendingTerminalActions.set(actionId, {
+        operationId: operation.id,
+        command,
+        conversationId,
+        resolve
+      })
+      setTimeout(() => {
+        if (pendingTerminalActions.has(actionId)) {
+          pendingTerminalActions.delete(actionId)
+          const expired = getTerminalOperation(operation.id)
+          resolve(formatTerminalOperationResult(expired))
+        }
+      }, 5 * 60 * 1000 + 250)
+      res.write(`data: ${JSON.stringify({
+        actionRequest: true,
+        actionId,
+        description,
+        command,
+        reason: approvalReason(command),
+        type: 'shell',
+        source: 'chat'
+      })}\n\n`)
+    })
   }
   if (name === 'firecrawl_scrape') {
     const url = args.url
