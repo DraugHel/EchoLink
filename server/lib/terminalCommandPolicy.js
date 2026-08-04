@@ -256,7 +256,7 @@ function unwrapBash(command) {
     return null
   }
 
-  const heredoc = command.match(/^bash\s+<<-?\s*['"]?([A-Za-z_][A-Za-z0-9_]*)['"]?\s*\n([\s\S]*)$/)
+  const heredoc = command.match(/^bash(?:\s+-s)?\s+<<-?\s*['"]?([A-Za-z_][A-Za-z0-9_]*)['"]?\s*\n([\s\S]*)$/)
   if (!heredoc) return command
   const lines = heredoc[2].split('\n')
   if (lines.at(-1)?.trim() !== heredoc[1]) return null
@@ -428,7 +428,11 @@ function commandIsReadOnly(words, raw) {
     return /^(?:ls|inspect)$/.test(args[1] || '') && /^(?:container|image|network|volume)$/.test(args[0] || '')
   }
   if (executable === 'sqlite3') {
-    const sql = args.slice(1).join(' ').trim()
+    const sqliteArgs = [...args]
+    if (sqliteArgs[0] === '-readonly') sqliteArgs.shift()
+    if (!sqliteArgs.length || sqliteArgs[0].startsWith('-')) return false
+    sqliteArgs.shift()
+    const sql = sqliteArgs.join(' ').trim()
     if (!sql || WRITE_SQL.test(sql)) return false
     if (sql.startsWith('.')) return READ_ONLY_SQLITE_DOT_COMMAND.test(sql)
 

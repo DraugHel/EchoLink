@@ -105,6 +105,66 @@ AUDIT`
   assert.equal(isReadOnlyTerminalCommand(command), true)
 })
 
+test('vollständiger produktiver Luna-Systemaudit ist bytegetreu read-only', () => {
+  const command = `bash -s <<'AUDIT'
+set -Eeuo pipefail
+REPO=/root/echolink
+MANIFEST=/var/lib/echolink-e3/validation-images.json
+DB=/root/echolink/data/echolink.db
+cd "$REPO"
+printf '%s\\n' '===== ECHOLINK READ-ONLY SYSTEM AUDIT ====='
+printf 'UTC=%s\\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+printf '%s\\n' '===== GIT ====='
+printf 'BRANCH=%s\\n' "$(git branch --show-current)"
+printf 'HEAD=%s\\n' "$(git rev-parse HEAD)"
+printf 'TREE=%s\\n' "$(git rev-parse HEAD^{tree})"
+printf 'LOCAL_MAIN=%s\\n' "$(git rev-parse refs/heads/main)"
+printf 'ORIGIN_MAIN=%s\\n' "$(git rev-parse refs/remotes/origin/main)"
+printf 'REMOTE_MAIN=%s\\n' "$(git ls-remote --heads origin refs/heads/main | awk '{print $1}')"
+printf 'STATUS='
+git status --short --untracked-files=all
+printf '%s\\n' '===== DISK ====='
+df -h /
+df -i /
+printf '%s\\n' '===== PM2 ====='
+pm2 status
+printf '%s\\n' '===== DOCKER STORAGE ====='
+docker system df
+printf '%s\\n' '===== DOCKER IMAGES ====='
+docker image ls --no-trunc --format 'REPOSITORY={{.Repository}} TAG={{.Tag}} ID={{.ID}} CREATED={{.CreatedAt}} SIZE={{.Size}}'
+printf '%s\\n' '===== VALIDATOR MANIFEST ====='
+if [[ -f "$MANIFEST" ]]; then
+  stat --format='MODE=%a OWNER=%U:%G SIZE=%s MTIME=%y PATH=%n' -- "$MANIFEST"
+  sha256sum -- "$MANIFEST"
+else
+  printf '%s\\n' 'MANIFEST=MISSING'
+fi
+printf '%s\\n' '===== SQLITE ====='
+if command -v sqlite3 >/dev/null 2>&1 && [[ -f "$DB" ]]; then
+  printf 'DB='
+  stat --format='SIZE=%s PATH=%n' -- "$DB"
+  sqlite3 -readonly "$DB" 'PRAGMA quick_check;'
+else
+  printf 'SQLITE_OR_DB=UNAVAILABLE\\n'
+fi
+printf '%s\\n' '===== HEALTH 3000 ====='
+if command -v curl >/dev/null 2>&1; then
+  curl -fsS --max-time 10 -o /dev/null -w 'HTTP=%{http_code} TIME=%{time_total}s URL=%{url_effective}\\n' http://127.0.0.1:3000/ || printf '%s\\n' 'HEALTH_3000=FAILED'
+else
+  printf '%s\\n' 'CURL=MISSING'
+fi
+printf '%s\\n' '===== HEALTH 3011 ====='
+if command -v curl >/dev/null 2>&1; then
+  curl -fsS --max-time 10 -o /dev/null -w 'HTTP=%{http_code} TIME=%{time_total}s URL=%{url_effective}\\n' http://127.0.0.1:3011/ || printf '%s\\n' 'HEALTH_3011=FAILED'
+else
+  printf '%s\\n' 'CURL=MISSING'
+fi
+printf '%s\\n' '===== AUDIT COMPLETE ====='
+AUDIT`
+
+  assert.equal(isReadOnlyTerminalCommand(command), true)
+})
+
 test('versteckte Schreiboperationen bleiben freigabepflichtig', () => {
   const commands = [
     `printf ok; rm -f /tmp/hidden-write`,
@@ -128,6 +188,10 @@ test('versteckte Schreiboperationen bleiben freigabepflichtig', () => {
     `sqlite3 /root/echolink/data/echolink.db '.shell rm -f /tmp/hidden-write'`,
     `sqlite3 /root/echolink/data/echolink.db 'PRAGMA optimize;'`,
     `sqlite3 /root/echolink/data/echolink.db 'PRAGMA journal_mode=WAL;'`,
+    `sqlite3 -readonly /root/echolink/data/echolink.db 'DELETE FROM memories;'`,
+    `sqlite3 -readonly /root/echolink/data/echolink.db '.shell rm -f /tmp/hidden-write'`,
+    `sqlite3 -init /tmp/startup.sql /root/echolink/data/echolink.db 'SELECT 1;'`,
+    `sqlite3 -cmd 'DELETE FROM memories;' /root/echolink/data/echolink.db 'SELECT 1;'`,
     `date --set tomorrow`,
     `hostname changed-host`,
     `curl --data 'x=1' http://127.0.0.1:3000/`,
