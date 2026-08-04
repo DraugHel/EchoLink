@@ -93,10 +93,6 @@ import {
   spawnTerminalOperationRunner,
   waitForTerminalOperation
 } from '../lib/terminalOperations.js'
-import {
-  classifyTerminalCommand,
-  NEVER_AUTO_APPROVE
-} from '../lib/terminalCommandPolicy.js'
 import { resizeImageBuffer } from '../utils/image.js'
 import fs from 'fs'
 import path from 'path'
@@ -243,6 +239,25 @@ function gmailActionCard(
 }
 const MAX_TOOL_ITERATIONS = 25
 
+// --- Auto-Approve fuer harmlose read-only Commands ---
+// Alles mit Shell-Metazeichen (Pipes, Chaining, Redirects, Substitution)
+// braucht IMMER Approval — sonst laesst sich die Allowlist umgehen.
+const UNSAFE_META = /[;&|><`$\n\\]/
+const SAFE_PATTERNS = [
+  /^(ls|pwd|whoami|date|uptime|uname|hostname|id|echo|stat)\b/,
+  /^(cat|head|tail|wc|stat|file|du|df|free)\b/,
+  /^(grep|find|which|ps|ss)\b/,
+  /^pm2 (status|list|ls|info|show|describe)\b/,
+  /^pm2 logs\b.*--nostream/,
+  /^git (status|log|diff|show|branch|remote|stash list)\b/,
+  /^(systemctl status|journalctl)\b/,
+  /^docker (ps|logs|images)\b/,
+  /^docker stats --no-stream\b/,
+  /^(sort|uniq|cut|tr|column|jq|nl|tac)\b/,
+  /^(md5sum|sha256sum|sha1sum|cksum|b2sum)\b/,
+  /^node --check\b/,
+]
+
 // --- Skills (progressive disclosure): Index immer, Volltext per cat oder /trigger ---
 const SKILLS_DIR = '/root/echolink/skills'
 
@@ -273,14 +288,24 @@ function userAllowedPrefixes() {
   try { return JSON.parse(fs.readFileSync(ALLOWLIST_PATH, 'utf-8')) } catch { return [] }
 }
 
-function terminalCommandPolicy(command) {
-  return classifyTerminalCommand(command, {
-    allowedPrefixes: userAllowedPrefixes()
-  })
+// Warum braucht ein Command Approval? (fuer die UI)
+function approvalReason(cmd) {
+  const c = (cmd || '').trim()
+  const masked = c.replace(/'[^']*'/g, 'Q')
+  if (masked.includes("'")) return 'Unbalancierte Quotes'
+  if (/[;&><`$\n\\]/.test(masked)) return 'Shell-Metazeichen ausserhalb von Quotes'
+  if (SENSITIVE_PATH.test(c)) return 'Zugriff auf sensible Datei (.env/Keys/DB) — Approval erforderlich'
+  if (masked.includes('|')) return 'Pipe-Segment nicht auf der Auto-Approve-Liste'
+  return 'Nicht auf der Auto-Approve-Liste'
 }
 
-function approvalReason(command) {
-  return terminalCommandPolicy(command).reason
+function segIsSafe(seg) {
+  const s = seg.trim()
+  if (!s) return false
+  // find kann ohne Metazeichen Commands ausfuehren -> -exec & Co. sperren
+  if (/^find\b/.test(s) && /-(exec|execdir|delete|ok|okdir)\b/.test(s)) return false
+  if (SAFE_PATTERNS.some(re => re.test(s))) return true
+  return userAllowedPrefixes().some(p => typeof p === 'string' && p.length >= 3 && !NEVER_ALLOW.test(p) && s.startsWith(p))
 }
 
 const SENSITIVE_PATH = /(^|[\s'"/=])(\.env|\.git-credentials|id_rsa|id_ed25519|\.pem|\.key|credentials|secrets?|\.aws|\.ssh|shadow|\.hermes|\.openclaw|auto-approve\.json|echolink\.db|\.npmrc)/i
@@ -295,6 +320,23 @@ function looksLikeExfil(url) {
     if (/^(127\.|10\.|192\.168\.|169\.254\.|172\.(1[6-9]|2[0-9]|3[01])\.|localhost$|\[?::1)/i.test(u.hostname)) return true
   } catch { return true }
   return false
+}
+
+function isSafeCommand(cmd) {
+  const c = (cmd || '').trim()
+  if (!c) return false
+  // Single-quote-Inhalte sind in der Shell literal -> maskieren, dann pruefen
+  let masked = c.replace(/'[^']*'/g, 'Q')
+  // Uebriggebliebene quote = unbalanciert -> lieber Approval
+  if (masked.includes("'")) return false
+  // &&-, ||- und ;-Chaining wie Pipes behandeln: als Segment-Trenner normalisieren
+  masked = masked.replace(/&&|\|\||;/g, '|')
+  // Restliche Metazeichen bleiben hart gesperrt (einzelnes & = Backgrounding)
+  if (/[&><`$\n\\]/.test(masked)) return false
+  // Zugriff auf sensible Pfade -> nie auto-approven (Anti-Exfiltration)
+  if (SENSITIVE_PATH.test(c)) return false
+  // Ok, wenn JEDES Segment mit einem freigegebenen Command beginnt
+  return masked.split('|').every(segIsSafe)
 }
 
 const CHAT_LIMITS = {
@@ -525,7 +567,6 @@ async function executeTool(
   if (name === 'terminal') {
     const command = args.command
     const description = args.description || command
-    const commandPolicy = terminalCommandPolicy(command)
     const operation = createTerminalOperation({
       userId: requestContext.userId,
       conversationId,
@@ -533,11 +574,11 @@ async function executeTool(
       toolCallId: toolCall.id,
       command,
       description,
-      requiresApproval: !commandPolicy.readOnly
+      requiresApproval: !isSafeCommand(command)
     })
 
     // Harmlose read-only Commands laufen ohne Approval durch
-    if (commandPolicy.readOnly) {
+    if (isSafeCommand(command)) {
       res.write(`data: ${JSON.stringify({ tool: 'terminal', status: 'running', query: command })}\n\n`)
       const completed = operation.status === 'queued'
         ? await executeTerminalOperation(operation.id)
@@ -3028,11 +3069,15 @@ router.get('/models/list', requireAuth, async (req, res) => {
   }
 })
 
+// "Immer erlauben": Command-Prefix in die User-Allowlist aufnehmen
+// Destruktive Commands duerfen NIE auf die Auto-Approve-Liste — egal was der User klickt
+const NEVER_ALLOW = /^(rm|rmdir|mv|dd|mkfs|shred|shutdown|reboot|halt|poweroff|kill|killall|pkill|chmod|chown|truncate|userdel|groupdel|fdisk|parted|wipefs|iptables|ufw|bash|sh|zsh|python3?|perl|ruby|node|npx|curl|wget)\b|^(pm2 (delete|kill|flush))|^(git (push|reset|checkout|clean|rebase))|^(docker (rm|rmi|kill|prune|system|exec|run|compose))|^(npm (uninstall|remove))\b/
+
 router.post('/allowlist', requireAuth, (req, res) => {
   const prefix = (req.body?.prefix || '').trim()
   if (prefix.length < 3 || prefix.length > 80) return res.status(400).json({ error: 'Prefix 3-80 Zeichen' })
   if (/[;&|><`$\n\\'"]/.test(prefix)) return res.status(400).json({ error: 'Keine Metazeichen im Prefix' })
-  if (NEVER_AUTO_APPROVE.test(prefix)) return res.status(400).json({ error: 'Destruktive Commands koennen nicht dauerhaft freigegeben werden' })
+  if (NEVER_ALLOW.test(prefix)) return res.status(400).json({ error: 'Destruktive Commands koennen nicht dauerhaft freigegeben werden' })
   const list = userAllowedPrefixes()
   if (!list.includes(prefix)) {
     list.push(prefix)
