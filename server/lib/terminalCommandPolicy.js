@@ -22,20 +22,6 @@ const DANGEROUS_AWK = /\bsystem\s*\(|\b(?:getline|close)\s*\(|\||(?:^|[^<])>(?![
 const WRITE_SQL = /\b(?:alter|attach|backup|begin|commit|create|delete|detach|drop|insert|load_extension|reindex|release|replace|rollback|savepoint|update|vacuum)\b|\.\s*(?:backup|clone|dump|import|load|once|output|read|restore|save|shell|system)/i
 const READ_ONLY_PRAGMA = /^(?:application_id|collation_list|compile_options|database_list|encoding|foreign_key_check|foreign_key_list|foreign_keys|freelist_count|function_list|index_info|index_list|index_xinfo|integrity_check|journal_mode|module_list|page_count|page_size|pragma_list|quick_check|schema_version|table_info|table_list|table_xinfo|user_version)$/i
 const READ_ONLY_SQLITE_DOT_COMMAND = /^\.(?:databases|indexes|schema|tables)(?:\s|$)/i
-const SAFE_PYTHON_MODULES = new Set([
-  'collections', 'datetime', 'hashlib', 'json', 'math', 'pathlib', 're',
-  'statistics', 'sys'
-])
-const FORBIDDEN_PYTHON = [
-  /\b(?:breakpoint|compile|delattr|eval|exec|getattr|globals|locals|setattr|vars|__import__)\s*\(/,
-  /\b(?:aiohttp|ctypes|ftplib|http\.client|multiprocessing|requests|shutil|socket|subprocess|urllib)\b/,
-  /\bopen\s*\(/,
-  /\bpathlib\.(?:Path|PurePath)\([^\n]*\)\.(?:chmod|hardlink_to|link_to|lchmod|mkdir|open|rename|replace|rmdir|symlink_to|touch|unlink|write_bytes|write_text)\b/,
-  /\.(?:chmod|hardlink_to|link_to|lchmod|mkdir|open|rename|replace|rmdir|symlink_to|touch|unlink|write_bytes|write_text)\b/,
-  /\b(?:os|posix)\.(?:chmod|chown|exec\w*|fork|kill|link|lchown|makedirs|mkdir|popen|remove|removedirs|rename|renames|replace|rmdir|spawn\w*|symlink|system|truncate|unlink)\s*\(/,
-  /\bsys\.modules\b/,
-  /\b__\w+__\b/
-]
 
 export const NEVER_AUTO_APPROVE = /^(?:rm|rmdir|mv|cp|install|touch|dd|mkfs|shred|shutdown|reboot|halt|poweroff|kill|killall|pkill|chmod|chown|truncate|useradd|userdel|usermod|groupadd|groupdel|fdisk|parted|wipefs|iptables|nft|ufw|tee|xargs|eval|source|exec|bash|sh|zsh|python3?|perl|ruby|node|npx|curl|wget)\b|^(?:pm2\s+(?:delete|kill|flush|restart|reload|start|stop))\b|^(?:git\s+(?:add|apply|am|checkout|cherry-pick|clean|commit|fetch|merge|pull|push|rebase|reset|restore|revert|switch|tag))\b|^(?:docker\s+(?:build|compose|container|exec|image|kill|network|pull|push|restart|rm|rmi|run|start|stop|system\s+prune|volume\s+(?:create|prune|rm)))\b|^(?:npm\s+(?:install|uninstall|remove|run|start|stop|restart|publish))\b/i
 
@@ -263,114 +249,6 @@ function unwrapBash(command) {
   return lines.slice(0, -1).join('\n')
 }
 
-function pythonBodyIsReadOnly(body) {
-  if (FORBIDDEN_PYTHON.some(pattern => pattern.test(body))) return false
-
-  for (const match of body.matchAll(/^\s*import\s+([^#\n]+)$/gm)) {
-    const modules = match[1].split(',').map(value =>
-      value.trim().split(/\s+as\s+/i)[0].split('.')[0]
-    )
-    if (modules.some(module => !SAFE_PYTHON_MODULES.has(module))) return false
-  }
-
-  for (const match of body.matchAll(/^\s*from\s+([A-Za-z_][A-Za-z0-9_.]*)\s+import\s+/gm)) {
-    if (!SAFE_PYTHON_MODULES.has(match[1].split('.')[0])) return false
-  }
-
-  const imports = body.match(/^\s*(?:from|import)\s+[^\n]+$/gm) || []
-  const recognizedImports = [
-    ...body.matchAll(/^\s*import\s+[^#\n]+$/gm),
-    ...body.matchAll(/^\s*from\s+[A-Za-z_][A-Za-z0-9_.]*\s+import\s+[^\n]+$/gm)
-  ]
-  return imports.length === recognizedImports.length
-}
-
-function pythonHeredocInvocationIsReadOnly(command, body) {
-  const words = shellWords(command)
-  if (!words) return false
-  while (words.length && ASSIGNMENT.test(words[0])) words.shift()
-  const executable = words.shift()?.split('/').at(-1)
-  if (!/^python3?$/.test(executable || '') || words[0] !== '-') return false
-  return pythonBodyIsReadOnly(body)
-}
-
-function sanitizeVerifiedHeredocs(source) {
-  const lines = source.split('\n')
-  const output = []
-
-  for (let index = 0; index < lines.length; index += 1) {
-    const line = lines[index]
-    const match = line.match(/^(.*?)(<<-?)\s*(['"]?)([A-Za-z_][A-Za-z0-9_]*)\3\s*$/)
-    if (!match) {
-      output.push(line)
-      continue
-    }
-
-    const command = match[1].trim()
-    const stripTabs = match[2] === '<<-'
-    const marker = match[4]
-    const body = []
-    let end = index + 1
-    for (; end < lines.length; end += 1) {
-      const candidate = stripTabs ? lines[end].replace(/^\t+/, '') : lines[end]
-      if (candidate === marker) break
-      body.push(lines[end])
-    }
-    if (end >= lines.length) return null
-    if (!pythonHeredocInvocationIsReadOnly(command, body.join('\n'))) return null
-
-    output.push('true')
-    index = end
-  }
-
-  return output.join('\n')
-}
-
-function curlIsReadOnly(args) {
-  const urls = []
-  for (let index = 0; index < args.length; index += 1) {
-    const arg = args[index]
-    if (/^\d*[<>]&\d+$/.test(arg)) continue
-    if (arg === '--output' || arg === '-o') {
-      if (args[index + 1] !== '/dev/null') return false
-      index += 1
-      continue
-    }
-    if (arg.startsWith('--output=')) {
-      if (arg !== '--output=/dev/null') return false
-      continue
-    }
-    if (arg === '--request' || arg === '-X') {
-      if (!/^(?:GET|HEAD)$/i.test(args[index + 1] || '')) return false
-      index += 1
-      continue
-    }
-    if (/^--request=/.test(arg)) {
-      if (!/^--request=(?:GET|HEAD)$/i.test(arg)) return false
-      continue
-    }
-    if (arg === '--write-out' || arg === '-w') {
-      if (/%output\{/.test(args[index + 1] || '')) return false
-      index += 1
-      continue
-    }
-    if (arg.startsWith('--write-out=')) {
-      if (/%output\{/.test(arg)) return false
-      continue
-    }
-    if (/^(?:-d|-F|-T|-K|-O|-c)$/.test(arg) ||
-        /^--(?:alt-svc|config|cookie-jar|create-dirs|data(?:-[A-Za-z0-9_-]+)?|dump-header|etag-save|form(?:-[A-Za-z0-9_-]+)?|hsts|libcurl|output-dir|remote-header-name|remote-name|remove-on-error|stderr|trace|trace-ascii|upload-file)(?:=|$)/.test(arg)) {
-      return false
-    }
-    if (/^-[^-]*[dFTKOc]/.test(arg)) return false
-    if (/^https?:\/\//i.test(arg)) urls.push(arg)
-  }
-
-  return urls.length > 0 && urls.every(url =>
-    /^https?:\/\/(?:127\.0\.0\.1|localhost)(?::(?:\d+|\$\{[A-Za-z_][A-Za-z0-9_]*\}))?(?:\/|$)/i.test(url)
-  )
-}
-
 function commandIsReadOnly(words, raw) {
   while (words.length && ASSIGNMENT.test(words[0])) words.shift()
   if (!words.length) return true
@@ -392,7 +270,6 @@ function commandIsReadOnly(words, raw) {
     return true
   }
   if (executable === 'command') return args[0] === '-v' || args[0] === '-V'
-  if (executable === 'curl') return curlIsReadOnly(args)
   if (executable === 'node') return args[0] === '--check' && args.length === 2
   if (executable === 'find') return !DANGEROUS_FIND.test(raw)
   if (executable === 'awk' || executable === 'gawk') return !DANGEROUS_AWK.test(raw)
@@ -454,13 +331,9 @@ export function classifyTerminalCommand(command, options = {}) {
   const original = typeof command === 'string' ? command.trim() : ''
   if (!original) return { readOnly: false, reason: 'Leerer oder ungültiger Befehl' }
 
-  const unwrapped = unwrapBash(original)
-  if (unwrapped === null) {
-    return { readOnly: false, reason: 'Shell-Wrapper konnte nicht sicher analysiert werden' }
-  }
-  const source = sanitizeVerifiedHeredocs(unwrapped)
+  const source = unwrapBash(original)
   if (source === null) {
-    return { readOnly: false, reason: 'Nicht lesendes oder unklares Heredoc' }
+    return { readOnly: false, reason: 'Shell-Wrapper konnte nicht sicher analysiert werden' }
   }
 
   const classifyNested = nested => classifyTerminalCommand(nested)

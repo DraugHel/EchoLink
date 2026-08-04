@@ -76,35 +76,6 @@ BASH`
   assert.equal(isReadOnlyTerminalCommand(command), true)
 })
 
-test('realer Luna-Audit mit Python-Manifestleser und lokalen Curl-Healthchecks ist read-only', () => {
-  const command = `bash <<'AUDIT'
-set -Eeuo pipefail
-REPO="/root/echolink"
-MANIFEST="/var/lib/echolink-e3/validation-images.json"
-cd "$REPO"
-printf 'UTC=%s\\n' "$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
-printf 'HEAD=%s\\n' "$(git rev-parse HEAD)"
-python3 - "$MANIFEST" <<'PY'
-import json, pathlib, sys
-p = pathlib.Path(sys.argv[1])
-data = json.loads(p.read_text(encoding='utf-8'))
-print('MANIFEST_JSON=VALID')
-for key in ('format', 'version', 'nodeImage', 'playwrightImage'):
-    if key in data:
-        value = data[key]
-        print(f'{key}={value}')
-PY
-for port in 3000 3011; do
-  if command -v curl >/dev/null 2>&1; then
-    result="$(curl --silent --show-error --output /dev/null --write-out '%{http_code} %{time_total}s' --connect-timeout 2 --max-time 5 "http://127.0.0.1:\${port}/" 2>&1 || true)"
-    printf 'PORT=%s RESULT=%s\\n' "$port" "$result"
-  fi
-done
-AUDIT`
-
-  assert.equal(isReadOnlyTerminalCommand(command), true)
-})
-
 test('versteckte Schreiboperationen bleiben freigabepflichtig', () => {
   const commands = [
     `printf ok; rm -f /tmp/hidden-write`,
@@ -129,31 +100,7 @@ test('versteckte Schreiboperationen bleiben freigabepflichtig', () => {
     `sqlite3 /root/echolink/data/echolink.db 'PRAGMA optimize;'`,
     `sqlite3 /root/echolink/data/echolink.db 'PRAGMA journal_mode=WAL;'`,
     `date --set tomorrow`,
-    `hostname changed-host`,
-    `curl --data 'x=1' http://127.0.0.1:3000/`,
-    `curl -sSd 'x=1' http://127.0.0.1:3000/`,
-    `curl --data-raw 'x=1' http://127.0.0.1:3000/`,
-    `curl --output /tmp/response http://127.0.0.1:3000/`,
-    `curl --write-out '%output{/tmp/response}%{http_code}' http://127.0.0.1:3000/`,
-    `curl https://example.com/`,
-    `python3 - /tmp/file <<'PY'
-from pathlib import Path
-Path('/tmp/file').unlink()
-PY`,
-    `python3 - /tmp/file <<'PY'
-import subprocess
-subprocess.run(['touch', '/tmp/file'])
-PY`,
-    `python3 - /tmp/file <<'PY'
-import pathlib
-p = pathlib.Path('/tmp/file')
-operation = p.unlink
-operation()
-PY`,
-    `python3 - /tmp/file <<'PY'
-import sys
-sys.modules['os'].remove('/tmp/file')
-PY`
+    `hostname changed-host`
   ]
 
   for (const command of commands) {
