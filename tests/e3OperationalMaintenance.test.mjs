@@ -193,6 +193,26 @@ test('E3 maintenance scripts are repository-owned, dynamic and syntax-valid', ()
     rebind,
     /E3_VALIDATION_BINDING_CURRENT=1/
   )
+  assert.match(
+    rebind,
+    /Same-tree HEAD-Wechsel; Image wird mit neuer HEAD-Bindung gebaut/
+  )
+  assert.match(
+    rebind,
+    /restore_replaced_image_tags/
+  )
+  assert.match(
+    rebind,
+    /restore_manifest_image_tags "\$backup"/
+  )
+  assert.match(
+    rebind,
+    /image inspect --format '\{\{\.Id\}\}' "\$OLD_NODE_DIGEST"/
+  )
+  assert.match(
+    rebind,
+    /image inspect --format '\{\{\.Id\}\}' "\$OLD_PLAYWRIGHT_DIGEST"/
+  )
 
   const residue = fs.readFileSync(residuePath, 'utf8')
   for (const protectedPath of [

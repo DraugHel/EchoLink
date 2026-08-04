@@ -30,6 +30,8 @@ LOCK_FD=9
 BACKUP_MANIFEST=''
 ACTIVE_SWITCHED=0
 ROLLBACK_SWITCHED=0
+NODE_TAG_REPLACED=0
+PLAYWRIGHT_TAG_REPLACED=0
 
 fail() { printf 'FEHLER: %s\n' "$*" >&2; exit 1; }
 require_cmd() { command -v "$1" >/dev/null 2>&1 || fail "Benötigtes Programm fehlt: $1"; }
@@ -165,10 +167,46 @@ PY
     return 1
   }
   cmp -s -- "$backup" "$MANIFEST" || { printf 'Rollback-Manifest stimmt nicht exakt mit Backup überein: %s -> %s\n' "$backup" "$MANIFEST" >&2; return 1; }
+  restore_manifest_image_tags "$backup" || {
+    printf 'Rollback-Images konnten nicht auf die Manifest-Digests zurückgesetzt werden: %s\n' "$backup" >&2
+    return 1
+  }
   ROLLBACK_TMP=''
   ROLLBACK_SWITCHED=0
   ACTIVE_SWITCHED=0
   return 0
+}
+
+restore_manifest_image_tags() {
+  local manifest=$1 values node_tag node_digest playwright_tag playwright_digest
+  local -a fields
+  values=$(node --input-type=module - "$manifest" <<'NODE'
+import fs from 'node:fs'
+const value = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'))
+for (const field of [
+  value.nodeImageTag,
+  value.nodeImageDigest,
+  value.playwrightImageTag,
+  value.playwrightImageDigest
+]) console.log(field)
+NODE
+) || return 1
+  mapfile -t fields <<<"$values"
+  [[ "${#fields[@]}" == 4 ]] || return 1
+  node_tag=${fields[0]}
+  node_digest=${fields[1]}
+  playwright_tag=${fields[2]}
+  playwright_digest=${fields[3]}
+  [[ "$node_tag" =~ ^echolink-e3-node-validator:[0-9a-f]{12}$ ]] || return 1
+  [[ "$playwright_tag" =~ ^echolink-e3-playwright-validator:[0-9a-f]{12}$ ]] || return 1
+  [[ "$node_digest" =~ ^sha256:[0-9a-f]{64}$ ]] || return 1
+  [[ "$playwright_digest" =~ ^sha256:[0-9a-f]{64}$ ]] || return 1
+  "$DOCKER" image inspect "$node_digest" >/dev/null 2>&1 || return 1
+  "$DOCKER" image inspect "$playwright_digest" >/dev/null 2>&1 || return 1
+  "$DOCKER" image tag "$node_digest" "$node_tag" || return 1
+  "$DOCKER" image tag "$playwright_digest" "$playwright_tag" || return 1
+  [[ "$("$DOCKER" image inspect --format '{{.Id}}' "$node_tag")" == "$node_digest" ]] || return 1
+  [[ "$("$DOCKER" image inspect --format '{{.Id}}' "$playwright_tag")" == "$playwright_digest" ]] || return 1
 }
 
 on_exit() {
@@ -180,6 +218,13 @@ on_exit() {
       printf 'ROLLBACK_SUCCESS=%s\n' "$MANIFEST" >&2
     else
       printf 'KRITISCHER FEHLER: Rollback fehlgeschlagen; aktives Manifest und Backup: %s ; %s\n' "$MANIFEST" "$BACKUP_MANIFEST" >&2
+      status=2
+    fi
+  fi
+  if (( status != 0 && (NODE_TAG_REPLACED == 1 || PLAYWRIGHT_TAG_REPLACED == 1) )); then
+    printf 'FEHLER: Same-tree Image-Tags werden auf die gesicherten Digests zurückgesetzt.\n' >&2
+    if ! restore_replaced_image_tags; then
+      printf 'KRITISCHER FEHLER: Same-tree Image-Tag-Rollback fehlgeschlagen.\n' >&2
       status=2
     fi
   fi
@@ -373,18 +418,18 @@ PY
 
 build_images_and_manifest() {
   local common=(--pull --no-cache --build-arg "E3_SOURCE_HEAD=$CURRENT_HEAD" --build-arg "E3_SOURCE_TREE_GIT_SHA=$CURRENT_TREE" --build-arg "E3_SOURCE_TREE_SHA256=$SOURCE_TREE_SHA256")
-  if "$DOCKER" image inspect "$NODE_TAG" >/dev/null 2>&1; then
-    printf 'Vorhandenes Node-Image gefunden; vollständige Identitäts- und Runtime-Prüfung: %s\n' "$NODE_TAG"
-    verify_image "$NODE_TAG" node-validator
-  else
-    "$DOCKER" build "${common[@]}" --file "$CONTEXT_ROOT/docker/e3-validation/node.Dockerfile" --tag "$NODE_TAG" "$CONTEXT_ROOT"
-  fi
-  if "$DOCKER" image inspect "$PLAYWRIGHT_TAG" >/dev/null 2>&1; then
-    printf 'Vorhandenes Playwright-Image gefunden; vollständige Identitäts- und Runtime-Prüfung: %s\n' "$PLAYWRIGHT_TAG"
-    verify_image "$PLAYWRIGHT_TAG" playwright-validator
-  else
-    "$DOCKER" build "${common[@]}" --file "$CONTEXT_ROOT/docker/e3-validation/playwright.Dockerfile" --tag "$PLAYWRIGHT_TAG" "$CONTEXT_ROOT"
-  fi
+  build_or_verify_image \
+    "$NODE_TAG" \
+    node-validator \
+    "$CONTEXT_ROOT/docker/e3-validation/node.Dockerfile" \
+    NODE_TAG_REPLACED \
+    "${common[@]}"
+  build_or_verify_image \
+    "$PLAYWRIGHT_TAG" \
+    playwright-validator \
+    "$CONTEXT_ROOT/docker/e3-validation/playwright.Dockerfile" \
+    PLAYWRIGHT_TAG_REPLACED \
+    "${common[@]}"
   NODE_DIGEST=$("$DOCKER" image inspect --format '{{.Id}}' "$NODE_TAG")
   PLAYWRIGHT_DIGEST=$("$DOCKER" image inspect --format '{{.Id}}' "$PLAYWRIGHT_TAG")
   [[ "$NODE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ && "$PLAYWRIGHT_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] || fail 'Neue Image-Digests sind ungültig'
@@ -392,6 +437,54 @@ build_images_and_manifest() {
   NEW_MANIFEST="$WORK_ROOT/validation-images.json"
   node "$REPO/scripts/e3-write-validation-image-manifest.mjs" "$NEW_MANIFEST" "$CURRENT_HEAD" "$CURRENT_TREE" "$SOURCE_TREE_SHA256" "$NODE_DIGEST" "$PLAYWRIGHT_DIGEST" "$NODE_TAG" "$PLAYWRIGHT_TAG" "$CONTEXT_ROOT"
   check_manifest_file "$NEW_MANIFEST"
+}
+
+build_or_verify_image() {
+  local tag=$1 role=$2 dockerfile=$3 replaced_var=$4
+  shift 4
+  local actual_head actual_role actual_tree actual_tree_sha
+
+  if ! "$DOCKER" image inspect "$tag" >/dev/null 2>&1; then
+    "$DOCKER" build "$@" --file "$dockerfile" --tag "$tag" "$CONTEXT_ROOT"
+    verify_image "$tag" "$role"
+    return
+  fi
+
+  actual_head="$($DOCKER image inspect --format '{{index .Config.Labels "echolink.e3.source-head"}}' "$tag")"
+  if [[ "$actual_head" == "$CURRENT_HEAD" ]]; then
+    printf 'Vorhandenes Image gefunden; vollständige Identitäts- und Runtime-Prüfung: %s\n' "$tag"
+    verify_image "$tag" "$role"
+    return
+  fi
+
+  actual_role="$($DOCKER image inspect --format '{{index .Config.Labels "echolink.e3.image-role"}}' "$tag")"
+  actual_tree="$($DOCKER image inspect --format '{{index .Config.Labels "echolink.e3.source-tree-git-sha"}}' "$tag")"
+  actual_tree_sha="$($DOCKER image inspect --format '{{index .Config.Labels "echolink.e3.source-tree-sha256"}}' "$tag")"
+
+  [[ "$actual_role" == "$role" ]] ||
+    fail "Bestehendes Image besitzt eine fremde Rolle: $tag"
+  [[ "$actual_tree" == "$CURRENT_TREE" ]] ||
+    fail "Bestehendes Image kollidiert mit einem anderen Tree: $tag"
+  [[ "$actual_tree_sha" == "$SOURCE_TREE_SHA256" ]] ||
+    fail "Bestehendes Image kollidiert mit anderen Tree-Bytes: $tag"
+
+  printf 'Same-tree HEAD-Wechsel; Image wird mit neuer HEAD-Bindung gebaut: %s\n' "$tag"
+  "$DOCKER" build "$@" --file "$dockerfile" --tag "$tag" "$CONTEXT_ROOT"
+  printf -v "$replaced_var" '%s' 1
+  verify_image "$tag" "$role"
+}
+
+restore_replaced_image_tags() {
+  local result=0
+  if (( NODE_TAG_REPLACED == 1 )); then
+    "$DOCKER" image tag "$OLD_NODE_DIGEST" "$OLD_NODE_TAG" || result=1
+    [[ "$($DOCKER image inspect --format '{{.Id}}' "$OLD_NODE_TAG" 2>/dev/null)" == "$OLD_NODE_DIGEST" ]] || result=1
+  fi
+  if (( PLAYWRIGHT_TAG_REPLACED == 1 )); then
+    "$DOCKER" image tag "$OLD_PLAYWRIGHT_DIGEST" "$OLD_PLAYWRIGHT_TAG" || result=1
+    [[ "$($DOCKER image inspect --format '{{.Id}}' "$OLD_PLAYWRIGHT_TAG" 2>/dev/null)" == "$OLD_PLAYWRIGHT_DIGEST" ]] || result=1
+  fi
+  return "$result"
 }
 
 verify_image() {
@@ -495,8 +588,8 @@ PY
 
 verify_after() {
   [[ "$(sha256sum "$BACKUP_MANIFEST" | awk '{print $1}')" == "$OLD_MANIFEST_SHA" ]] || fail 'Altes Manifest-Backup wurde verändert'
-  [[ "$($DOCKER image inspect --format '{{.Id}}' "$OLD_NODE_TAG")" == "$OLD_NODE_DIGEST" ]] || fail 'Altes Node-Image wurde verändert'
-  [[ "$($DOCKER image inspect --format '{{.Id}}' "$OLD_PLAYWRIGHT_TAG")" == "$OLD_PLAYWRIGHT_DIGEST" ]] || fail 'Altes Playwright-Image wurde verändert'
+  [[ "$($DOCKER image inspect --format '{{.Id}}' "$OLD_NODE_DIGEST")" == "$OLD_NODE_DIGEST" ]] || fail 'Altes Node-Image wurde verändert'
+  [[ "$($DOCKER image inspect --format '{{.Id}}' "$OLD_PLAYWRIGHT_DIGEST")" == "$OLD_PLAYWRIGHT_DIGEST" ]] || fail 'Altes Playwright-Image wurde verändert'
   node --input-type=module - "$CURRENT_HEAD" "$CURRENT_TREE" <<'NODE'
 import {
   loadValidationImageManifest
