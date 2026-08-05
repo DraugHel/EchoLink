@@ -232,6 +232,12 @@ normale Runtime-Anbindung:
 - **scripts/e3-validation-image-smoke.mjs /
   e3-write-validation-image-manifest.mjs**: fester realer Profilsmoke und
   atomare Manifestpublikation.
+- **scripts/e3-prune-validation-storage.sh**: lock-geschützte Retention nach
+  erfolgreichem Rebind. Sie schützt die aktive und genau eine vorherige
+  Validator-Generation, entfernt ausschließlich ältere E3-Validator-Images
+  und Rollback-Manifeste und leert den wegen `--no-cache` regenerierbaren
+  Docker-Build-Cache. Aktive Images und fremde Docker-Images bleiben
+  unangetastet.
 - CI verwendet nun exakt Node `24.18.0`; Docker-Runtimes verlangen zusätzlich
   explizit `apparmor=docker-default`.
 

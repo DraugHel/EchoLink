@@ -159,6 +159,10 @@ test('E3 maintenance scripts are repository-owned, dynamic and syntax-valid', ()
     'bash scripts/e3-clean-runtime-residue.sh'
   )
   assert.equal(
+    packageJson.scripts['e3:cleanup:validation-storage'],
+    'bash scripts/e3-prune-validation-storage.sh'
+  )
+  assert.equal(
     packageJson.scripts['e3:cleanup:chat-storage'],
     'node scripts/e3-clean-chat-workspace-storage.mjs'
   )
@@ -171,12 +175,17 @@ test('E3 maintenance scripts are repository-owned, dynamic and syntax-valid', ()
     root,
     'scripts/e3-clean-runtime-residue.sh'
   )
+  const storageRetentionPath = path.join(
+    root,
+    'scripts/e3-prune-validation-storage.sh'
+  )
   const chatCleanupPath = path.join(
     root,
     'scripts/e3-clean-chat-workspace-storage.mjs'
   )
 
   execFileSync('/bin/bash', ['-n', rebindPath])
+  execFileSync('/bin/bash', ['-n', storageRetentionPath])
   execFileSync('/bin/bash', ['-n', residuePath])
   execFileSync(process.execPath, ['--check', chatCleanupPath])
 
@@ -188,6 +197,47 @@ test('E3 maintenance scripts are repository-owned, dynamic and syntax-valid', ()
   assert.match(
     rebind,
     /CURRENT_HEAD=\$head/
+  )
+
+  const storageRetention = fs.readFileSync(
+    storageRetentionPath,
+    'utf8'
+  )
+  assert.match(
+    storageRetention,
+    /echolink\.e3\.image-role=node-validator/
+  )
+  assert.match(
+    storageRetention,
+    /echolink\.e3\.image-role=playwright-validator/
+  )
+  assert.match(
+    storageRetention,
+    /protect_manifest_images "\$MANIFEST" 1/
+  )
+  assert.match(
+    storageRetention,
+    /protect_manifest_images "\$PREVIOUS_MANIFEST" 0/
+  )
+  assert.match(
+    storageRetention,
+    /"\$DOCKER" builder prune --force/
+  )
+  assert.match(
+    storageRetention,
+    /unlink "\$target"/
+  )
+  assert.match(
+    storageRetention,
+    /if \[\[ "\$MODE" == --apply \]\]; then[\s\S]*status --porcelain=v1 --untracked-files=all/
+  )
+  assert.equal(
+    storageRetention.includes('docker system prune'),
+    false
+  )
+  assert.equal(
+    storageRetention.includes('docker image prune'),
+    false
   )
   assert.match(
     rebind,
@@ -242,10 +292,16 @@ test('deploy keeps enabled E3 validation bound before restarting production', ()
   const restartIndex = deploy.indexOf(
     'echo "===== NEUSTART ====="'
   )
+  const retentionIndex = deploy.indexOf(
+    'npm run e3:cleanup:validation-storage -- --apply'
+  )
 
   assert.equal(rebindIndex >= 0, true)
+  assert.equal(retentionIndex >= 0, true)
   assert.equal(restartIndex >= 0, true)
   assert.equal(rebindIndex < restartIndex, true)
+  assert.equal(rebindIndex < retentionIndex, true)
+  assert.equal(retentionIndex < restartIndex, true)
   assert.match(
     deploy,
     /E3_CHAT_TOOLS_ENABLED/
