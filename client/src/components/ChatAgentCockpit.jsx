@@ -27,11 +27,11 @@ export default function ChatAgentCockpit({
   onResume,
   onDismiss
 }) {
-  const [expanded, setExpanded] = useState(!mobile)
+  const [expanded, setExpanded] = useState(false)
 
   useEffect(() => {
-    setExpanded(!mobile)
-  }, [run?.id, mobile])
+    setExpanded(false)
+  }, [run?.id])
 
   if (!run) return null
 
