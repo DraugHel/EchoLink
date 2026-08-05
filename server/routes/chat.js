@@ -64,6 +64,7 @@ import {
   listE3PendingApprovals,
   readE3ExportPackage
 } from '../lib/e3Tools.js'
+import { chatToolIterationLimit } from '../lib/toolLimits.js'
 import { OLLAMA_URL, streamOllama } from '../providers/ollama.js'
 import { OPENAI_KEY, ZAI_KEY, KIMI_KEY, DEEPSEEK_KEY, streamZai, streamKimi, streamDeepSeek, splitSystemTimeNote } from '../providers/openai-compatible.js'
 import { ANTHROPIC_KEY, streamAnthropic } from '../providers/anthropic.js'
@@ -242,7 +243,7 @@ function gmailActionCard(
       formatGmailSendDraftPreview(action)
   }
 }
-const MAX_TOOL_ITERATIONS = 25
+const MAX_TOOL_ITERATIONS = chatToolIterationLimit()
 
 // --- Skills (progressive disclosure): Index immer, Volltext per cat oder /trigger ---
 const SKILLS_DIR = '/root/echolink/skills'
@@ -1462,9 +1463,10 @@ Use these as background context. If these memories fully answer the request, ans
   const e3ToolPolicy = `[E3 source-editing policy:
 - When the user asks to change EchoLink source or repository files and E3 tools are available, inspect the relevant source read-only and use e3_prepare_change with a small exact operation list.
 - Do not ask for a natural-language confirmation before e3_prepare_change. The application presents the hash-bound Approve/Deny card after all fixed validation profiles pass.
-- E3 approval in this bridge creates a verified export package only.
-- E3 never applies, commits, pushes, deploys, or restarts PM2.
-- Never describe an E3 export as already applied to the productive repository.]`
+- E3 approval creates the verified export package and authorizes you to finish the requested change yourself through the terminal tool.
+- After approval, continue in the same chat: verify the exact session, export SHA-256, approval, base commit, candidate manifest and clean Git baseline; apply only that approved export; run appropriate checks; commit; push; deploy; and perform final Git, runtime, health and hash verification.
+- Do not hand the approved export to an architect, do not merely explain manual commands, and do not ask for a second confirmation. Destructive terminal commands remain blocked by the terminal policy.
+- Never describe an E3 export as applied, pushed or deployed until the corresponding terminal output proves it. If a step fails, do not repeat it blindly; inspect the actual output and finish with the precise status and recovery requirement.]`
 
   if (e3ToolsEnabled()) {
     systemContent = systemContent

@@ -101,7 +101,7 @@ export const E3_TOOLS = Object.freeze([
         'Use only when the user explicitly asks to modify EchoLink code or repository files. ' +
         'Inspect the relevant source first with read-only tools, then submit a small exact operation list. ' +
         'E3 creates an isolated workspace, records preimages, freezes a deterministic candidate, runs all eight required validation profiles, and presents the exact diff for application approval. ' +
-        'Approval creates a verified export package only and does not apply the change; this first bridge never writes to the productive repository, commits, pushes, deploys, or restarts PM2. ' +
+        'Approval creates a verified export package and authorizes you to continue the requested change yourself through the terminal tool: verify every binding, apply only that export, check, commit, push, deploy, and perform final verification. ' +
         'Do not ask for natural-language confirmation before calling this tool because the application presents its own Approve/Deny card after successful validation.',
       parameters: {
         type: 'object',
@@ -693,7 +693,7 @@ export function e3ApprovalActionRequest(
       } and froze the reviewed bytes.`,
     command: formatE3ApprovalPreview(result),
     reason:
-      'Approve creates the verified E3 export package. It does not modify the productive repository.',
+      'Approve creates the verified E3 export package and authorizes Luna to apply, commit, push, deploy and verify it herself through the terminal.',
     type: 'e3',
     source: 'chat',
     ...(restored ? { restored: true } : {})
@@ -741,7 +741,7 @@ export function formatE3ApprovalPreview(result) {
       ? '\n[preview truncated; the approval remains bound to the full patch hash]'
       : '',
     '',
-    'Approve creates a verified export package only. It does not apply, commit, push, deploy, or restart PM2.'
+    'Approve creates the verified export package and authorizes Luna to continue herself through the terminal: verify all bindings, apply only this export, check, commit, push, deploy and finally verify. No architect handoff or second confirmation is required.'
   ].filter(value => value !== '').join('\n')
 }
 
@@ -783,11 +783,12 @@ export function formatE3ToolResult(result) {
     lines.push(
       `Export SHA-256: ${result.export.packageSha256}`,
       `Download: ${result.export.downloadUrl}`,
-      'The productive repository was not modified.'
+      'The productive repository has not been modified yet.',
+      'Continue now through the terminal tool: verify the exact session, export, approval, base and candidate bindings; apply only this export; check; commit; push; deploy; and perform final verification. Do not hand off to an architect and do not ask for another confirmation.'
     )
   } else if (result.status === 'READY_FOR_REVIEW') {
     lines.push(
-      'The validated diff is waiting for the application Approve/Deny card. Approval exports the patch but does not apply it.'
+      'The validated diff is waiting for the application Approve/Deny card. Approval authorizes Luna to export it and then finish the exact change herself through the terminal.'
     )
   }
   return lines.join('\n')

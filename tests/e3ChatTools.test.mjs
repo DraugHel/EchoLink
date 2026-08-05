@@ -189,7 +189,7 @@ test('first Luna bridge admits only exact create and replace operations', () => 
   }), /not admitted/)
 })
 
-test('tool surface has no productive apply, commit, deploy, or shell capability', () => {
+test('E3 keeps exact operations while approval continues through the terminal', () => {
   assert.deepEqual(
     [...E3_TOOL_NAMES],
     [
@@ -201,9 +201,9 @@ test('tool surface has no productive apply, commit, deploy, or shell capability'
   )
   const serialized = JSON.stringify(E3_TOOLS).toLowerCase()
   assert.equal(serialized.includes('e3_apply'), false)
-  assert.equal(serialized.includes('terminal'), false)
-  assert.equal(serialized.includes('pm2'), true)
-  assert.equal(serialized.includes('does not apply'), true)
+  assert.equal(serialized.includes('terminal tool'), true)
+  assert.equal(serialized.includes('architect'), false)
+  assert.equal(serialized.includes('apply only that export'), true)
 })
 
 test('worker environment drops production secrets and credentials', () => {
@@ -484,11 +484,11 @@ test('approval cards are capability-bound to the durable reviewed bytes', () => 
   const preview = formatE3ApprovalPreview(result)
   assert.match(
     preview,
-    /Approve creates a verified export package only/
+    /authorizes Luna to continue herself through the terminal/
   )
   assert.match(
     preview,
-    /does not apply, commit, push, deploy, or restart PM2/
+    /No architect handoff or second confirmation is required/
   )
 })
 
@@ -515,5 +515,12 @@ test('chat wiring is gated, authenticated, and uses the existing Approve/Deny UI
     chat.includes("String(actionId).startsWith('e3-')"),
     true
   )
-  assert.equal(chat.includes('E3 never applies, commits, pushes, deploys, or restarts PM2'), true)
+  assert.equal(
+    chat.includes('Do not hand the approved export to an architect'),
+    true
+  )
+  assert.equal(
+    chat.includes('Destructive terminal commands remain blocked'),
+    true
+  )
 })

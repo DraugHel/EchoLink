@@ -30,10 +30,17 @@ import {
 } from '../providers/openai-compatible.js'
 import { streamAnthropic } from '../providers/anthropic.js'
 import { streamResponses } from '../providers/openai-responses.js'
+import {
+  scheduledAgentTimeoutMs,
+  scheduledAgentToolCallLimit,
+  scheduledAgentToolIterationLimit
+} from './toolLimits.js'
 
-const MAX_TOOL_ITERATIONS = 16
-const MAX_TOOL_CALLS = 24
-const AGENT_TIMEOUT_MS = 6 * 60 * 1000
+const MAX_TOOL_ITERATIONS =
+  scheduledAgentToolIterationLimit()
+const MAX_TOOL_CALLS =
+  scheduledAgentToolCallLimit()
+const AGENT_TIMEOUT_MS = scheduledAgentTimeoutMs()
 const CONTROL_POLL_MS = 750
 
 export class AgentRunCancelledError extends Error {
