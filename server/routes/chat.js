@@ -285,7 +285,13 @@ function terminalCommandPolicy(command) {
 }
 
 function approvalReason(command) {
-  return terminalCommandPolicy(command).reason
+  const policy = terminalCommandPolicy(command)
+  if (!policy.destructive) return policy.reason
+
+  return [
+    `Destruktiver Terminalbefehl wurde angehalten: ${policy.reason}.`,
+    'Er wird nur nach deiner ausdrücklichen Freigabe exakt so ausgeführt.'
+  ].join(' ')
 }
 
 const SENSITIVE_PATH = /(^|[\s'"/=])(\.env|\.git-credentials|id_rsa|id_ed25519|\.pem|\.key|credentials|secrets?|\.aws|\.ssh|shadow|\.hermes|\.openclaw|auto-approve\.json|echolink\.db|\.npmrc)/i
@@ -532,18 +538,6 @@ async function executeTool(
     const description = args.description || command
     const commandPolicy = terminalCommandPolicy(command)
 
-    if (commandPolicy.destructive) {
-      const message =
-        `Blocked destructive terminal command: ${commandPolicy.reason}`
-      res.write(`data: ${JSON.stringify({
-        tool: 'terminal',
-        status: 'error',
-        query: command,
-        error: message
-      })}\n\n`)
-      return message
-    }
-
     const operation = createTerminalOperation({
       userId: requestContext.userId,
       conversationId,
@@ -551,8 +545,38 @@ async function executeTool(
       toolCallId: toolCall.id,
       command,
       description,
-      requiresApproval: false
+      requiresApproval: commandPolicy.destructive
     })
+
+    if (operation.status === 'awaiting_approval') {
+      return new Promise(resolve => {
+        const actionId = operation.action_id
+        pendingTerminalActions.set(actionId, {
+          operationId: operation.id,
+          command,
+          conversationId,
+          resolve
+        })
+
+        setTimeout(() => {
+          if (!pendingTerminalActions.has(actionId)) return
+          pendingTerminalActions.delete(actionId)
+          const expired = getTerminalOperation(operation.id)
+          resolve(formatTerminalOperationResult(expired))
+        }, 5 * 60 * 1000 + 250)
+
+        res.write(`data: ${JSON.stringify({
+          actionRequest: true,
+          actionId,
+          description:
+            `Destruktiver Befehl angehalten: ${description}`,
+          command,
+          reason: approvalReason(command),
+          type: 'shell',
+          source: 'chat'
+        })}\n\n`)
+      })
+    }
 
     res.write(`data: ${JSON.stringify({
       tool: 'terminal',
@@ -583,7 +607,7 @@ async function executeTool(
     const result = formatTerminalOperationResult(completed)
     res.write(`data: ${JSON.stringify({
       tool: 'terminal',
-      status: completed.status === 'succeeded' ? 'done' : 'error',
+      status: completed.status === 'failed' ? 'error' : 'done',
       query: command
     })}\n\n`)
     return result
@@ -1264,15 +1288,31 @@ router.post('/:conversationId', requireAuth, async (req, res) => {
       }
     } catch (error) {
       if (error?.name !== 'AbortError') {
+        const reason =
+          'Terminal-Handoff konnte nicht sicher abgeschlossen werden. ' +
+          'Der Befehl wird nicht erneut ausgeführt.'
+        const conclusion =
+          'Ich konnte den Auftrag nicht vollständig abschließen. ' +
+          `Grund: ${reason}`
         console.error(JSON.stringify({
           level: 'error',
           event: 'terminal_handoff_wait_failed',
           requestId,
           error: error?.message || String(error)
         }))
+        db.prepare(
+          'INSERT INTO messages (conversation_id, role, content) VALUES (?, ?, ?)'
+        ).run(convo.id, 'assistant', conclusion)
+        db.prepare(
+          'UPDATE conversations SET updated_at = unixepoch() WHERE id = ?'
+        ).run(convo.id)
         res.write(`data: ${JSON.stringify({
-          error:
-            'Terminal-Handoff konnte nicht sicher abgeschlossen werden. Der Befehl wird nicht erneut ausgeführt.'
+          token: conclusion
+        })}\n\n`)
+        res.write(`data: ${JSON.stringify({
+          done: true,
+          completedWithIssue: true,
+          reason
         })}\n\n`)
       }
 
@@ -2029,6 +2069,44 @@ Use these as background context. If these memories fully answer the request, ans
   let allContent = ''
   let accThinking = ''
   let aggregateTokenUsage = null
+  let responseCompleted = false
+  const persistIncompleteConclusion = reason => {
+    const cleanPartial = allContent
+      .replace(/<think>[\s\S]*?<\/think>/g, '')
+      .trim()
+    const cleanReason = String(
+      reason || 'Unbekannter interner Fehler'
+    )
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 500)
+    const conclusion =
+      `Ich konnte den Auftrag nicht vollständig abschließen. ` +
+      `Grund: ${cleanReason}`
+    const finalContent = cleanPartial
+      ? `${cleanPartial}\n\n${conclusion}`
+      : conclusion
+    const streamedSuffix = cleanPartial
+      ? `\n\n${conclusion}`
+      : conclusion
+
+    db.prepare(
+      'INSERT INTO messages (conversation_id, role, content) VALUES (?, ?, ?)'
+    ).run(convo.id, 'assistant', finalContent)
+    db.prepare(
+      'UPDATE conversations SET updated_at = unixepoch() WHERE id = ?'
+    ).run(convo.id)
+
+    res.write(`data: ${JSON.stringify({
+      token: streamedSuffix
+    })}\n\n`)
+    res.write(`data: ${JSON.stringify({
+      done: true,
+      completedWithIssue: true,
+      reason: cleanReason
+    })}\n\n`)
+  }
+
   try {
     let iterations = 0
     let workingMessages = [...ollamaMessages]
@@ -2116,6 +2194,7 @@ Use these as background context. If these memories fully answer the request, ans
         }
         if (terminalDone) {
           res.write('data: ' + JSON.stringify({ done: true }) + '\n\n')
+          responseCompleted = true
           break
         }
         continue // Next iteration with tool results
@@ -2125,6 +2204,18 @@ Use these as background context. If these memories fully answer the request, ans
       const THINK_TAG_RE = /<think>([\s\S]*?)<\/think>/g
       const thinkTagMatch = allContent.match(THINK_TAG_RE)
       let cleanResponse = allContent.replace(THINK_TAG_RE, '').trim()
+      let completionIssue = ''
+
+      if (!cleanResponse) {
+        completionIssue =
+          'Das Modell hat keine Abschlussantwort geliefert.'
+        cleanResponse =
+          'Ich konnte den Auftrag nicht vollständig abschließen. ' +
+          `Grund: ${completionIssue}`
+        res.write(`data: ${JSON.stringify({
+          token: cleanResponse
+        })}\n\n`)
+      }
 
       // Deduplicate: prefer native thinking, only fall back to tags
       let allThinking = accThinking.trim()
@@ -2176,6 +2267,12 @@ Use these as background context. If these memories fully answer the request, ans
           JSON.stringify({
             done: true,
             context: contextMeta,
+            ...(completionIssue
+              ? {
+                  completedWithIssue: true,
+                  reason: completionIssue
+                }
+              : {}),
             ...(aggregateTokenUsage
               ? { tokens: aggregateTokenUsage }
               : {})
@@ -2192,20 +2289,21 @@ Use these as background context. If these memories fully answer the request, ans
         ).catch(err => console.error('Memory update failed:', err.message))
       }
 
+      responseCompleted = true
       break
     }
 
-    if (iterations >= MAX_TOOL_ITERATIONS) {
-      res.write(`data: ${JSON.stringify({ error: 'Max tool iterations reached' })}\n\n`)
-      const partial = allContent.replace(/<think>[\s\S]*?<\/think>/g, '').trim()
+    if (
+      !responseCompleted &&
+      iterations >= MAX_TOOL_ITERATIONS
+    ) {
       if (
         !clientDisconnected &&
-        !isChatRequestCancelled(activeRequest) &&
-        partial
+        !isChatRequestCancelled(activeRequest)
       ) {
-        db.prepare('INSERT INTO messages (conversation_id, role, content) VALUES (?, ?, ?)')
-          .run(convo.id, 'assistant', partial + '\n\n*[abgebrochen: Tool-Limit erreicht]*')
-        res.write('data: ' + JSON.stringify({ done: true }) + '\n\n')
+        persistIncompleteConclusion(
+          'Das feste Limit für Tool-Schritte wurde erreicht.'
+        )
       }
     }
   } catch (err) {
@@ -2224,11 +2322,26 @@ Use these as background context. If these memories fully answer the request, ans
         !clientDisconnected &&
         !isChatRequestCancelled(activeRequest)
       ) {
-        res.write(`data: ${JSON.stringify({ error: err.message })}\n\n`)
-        const partial = allContent.replace(/<think>[\s\S]*?<\/think>/g, '').trim()
-        if (partial) {
-          db.prepare('INSERT INTO messages (conversation_id, role, content) VALUES (?, ?, ?)')
-            .run(convo.id, 'assistant', partial + '\n\n*[abgebrochen: ' + err.message.slice(0, 120) + ']*')
+        try {
+          persistIncompleteConclusion(err.message)
+        } catch (completionError) {
+          console.error(
+            'Chat conclusion persistence failed:',
+            completionError
+          )
+          const reason = String(
+            err.message || 'Unbekannter interner Fehler'
+          ).slice(0, 500)
+          res.write(`data: ${JSON.stringify({
+            token:
+              'Ich konnte den Auftrag nicht vollständig ' +
+              `abschließen. Grund: ${reason}`
+          })}\n\n`)
+          res.write(`data: ${JSON.stringify({
+            done: true,
+            completedWithIssue: true,
+            reason
+          })}\n\n`)
         }
       }
     }

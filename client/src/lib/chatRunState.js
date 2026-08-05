@@ -343,6 +343,35 @@ export function finishChatRun(
   return updated
 }
 
+export function finishChatRunWithIssue(
+  run,
+  reason,
+  finishedAt = unixNow()
+) {
+  if (!run || run.status !== 'running') return run
+
+  const detail = compactText(
+    reason || 'Der Auftrag wurde mit einem Hinweis abgeschlossen.',
+    1_000
+  )
+
+  return updateWithEvent(run, {
+    status: 'success',
+    phase: 'success',
+    currentStep: 4,
+    progress: 'Chat-Auftrag mit Begründung abgeschlossen',
+    controlState: 'finished',
+    error: null,
+    finishedAt
+  }, {
+    type: 'completed',
+    message: 'Chat-Auftrag mit Begründung abgeschlossen',
+    detail,
+    stepIndex: 4,
+    createdAt: finishedAt
+  })
+}
+
 export function cancelChatRun(
   run,
   finishedAt = unixNow()

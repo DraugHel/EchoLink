@@ -323,14 +323,28 @@ test('Agentenarbeit ohne Löschen bleibt automatisch ausführbar', () => {
   }
 })
 
-test('Chat verdrahtet normale Terminalarbeit ohne Approval und blockiert Destruktives vorher', () => {
+test('Chat führt normale Terminalarbeit automatisch aus und fragt nur bei Destruktion', () => {
   const source = readFileSync(
     new URL('../server/routes/chat.js', import.meta.url),
     'utf8'
   )
 
-  assert.match(source, /if \(commandPolicy\.destructive\)/)
-  assert.match(source, /requiresApproval:\s*false/)
+  assert.match(
+    source,
+    /requiresApproval:\s*commandPolicy\.destructive/
+  )
+  assert.match(
+    source,
+    /operation\.status === 'awaiting_approval'/
+  )
+  assert.match(
+    source,
+    /Destruktiver Befehl angehalten:/
+  )
+  assert.doesNotMatch(
+    source,
+    /Blocked destructive terminal command/
+  )
   assert.doesNotMatch(
     source,
     /requiresApproval:\s*!commandPolicy\.readOnly/

@@ -6,6 +6,7 @@ import {
   cancelChatRun,
   createChatRun,
   finishChatRun,
+  finishChatRunWithIssue,
   markChatRunTool,
   markChatRunWriting,
   shouldShowChatRun
@@ -87,6 +88,53 @@ test('Abgebrochener Chat-Run ist cancelled und nicht failed', () => {
   assert.equal(run.phase, 'cancelled')
   assert.equal(run.controlState, 'cancelled')
   assert.equal(run.error, null)
+})
+
+test('Fehlerabschluss bleibt eine begründete Abschlussnachricht statt failed', () => {
+  const run = finishChatRunWithIssue(
+    createChatRun({
+      id: 'a_issue',
+      content: 'Prüfe den Systemstatus.',
+      startedAt: 300
+    }),
+    'Terminalbefehl wurde blockiert',
+    310
+  )
+
+  assert.equal(run.status, 'success')
+  assert.equal(run.phase, 'success')
+  assert.equal(
+    run.progress,
+    'Chat-Auftrag mit Begründung abgeschlossen'
+  )
+  assert.equal(run.events.at(-1).type, 'completed')
+  assert.match(
+    run.events.at(-1).detail,
+    /Terminalbefehl wurde blockiert/
+  )
+})
+
+test('Toolfehler brechen den Chatstream nicht ab und Serverfehler erhalten eine Abschlussnachricht', () => {
+  const client = fs.readFileSync(
+    new URL('../client/src/pages/Chat.jsx', import.meta.url),
+    'utf8'
+  )
+  const server = fs.readFileSync(
+    new URL('../server/routes/chat.js', import.meta.url),
+    'utf8'
+  )
+
+  assert.match(
+    client,
+    /if \(json\.error && !json\.tool\)/
+  )
+  assert.doesNotMatch(
+    client,
+    /if \(json\.error\) \{\s*throw/
+  )
+  assert.match(client, /showLocalIssueConclusion\(json\.error\)/)
+  assert.match(server, /persistIncompleteConclusion\(err\.message\)/)
+  assert.match(server, /completedWithIssue:\s*true/)
 })
 
 test('Worker speichert geplante Abbrüche als cancelled und loggt sie normal', () => {

@@ -13,7 +13,6 @@ import {
   attachPendingChatActions,
   chatReconnectDelayMs,
   chatReconnectingContent,
-  chatStreamApplicationError,
   clearChatReconnectContent,
   removeResolvedChatAction,
   shouldReloadResolvedE3Action
@@ -1180,11 +1179,16 @@ export default function Chat({ user, onLogout }) {
       updateTrackedChatRun(updater)
     }
 
-    const completeTrackedChatRun = () => {
+    const completeTrackedChatRun = issue => {
       if (!trackChatRun || chatRunSettled) return
       chatRunSettled = true
       updateTrackedChatRun(current =>
-        chatRunState.finishChatRun(current)
+        issue
+          ? chatRunState.finishChatRunWithIssue(
+              current,
+              issue
+            )
+          : chatRunState.finishChatRun(current)
       )
     }
 
@@ -1196,12 +1200,28 @@ export default function Chat({ user, onLogout }) {
       )
     }
 
-    const failTrackedChatRun = error => {
-      if (!trackChatRun || chatRunSettled) return
-      chatRunSettled = true
-      updateTrackedChatRun(current =>
-        chatRunState.failChatRun(current, error)
+    const showLocalIssueConclusion = error => {
+      const reason = String(
+        error?.message || error || 'Unbekannter Fehler'
       )
+      const conclusion =
+        'Ich konnte den Auftrag nicht vollständig ' +
+        `abschließen. Grund: ${reason}`
+      assistantContent += assistantContent.trim()
+        ? `\n\n${conclusion}`
+        : conclusion
+      preserveLocalConclusion = true
+      setMessages(prev => prev.map(m =>
+        m.id === assistantId
+          ? {
+              ...m,
+              content: assistantContent,
+              streaming: false,
+              toolStatus: null
+            }
+          : m
+      ))
+      completeTrackedChatRun(reason)
     }
 
     if (trackChatRun) {
@@ -1235,6 +1255,7 @@ export default function Chat({ user, onLogout }) {
     setStreaming(true)
 
     let assistantContent = ''
+    let preserveLocalConclusion = false
     let continuationCheckpoints = Array.isArray(resumeCheckpoints)
       ? [...resumeCheckpoints]
       : []
@@ -1351,7 +1372,11 @@ export default function Chat({ user, onLogout }) {
           ))
         }
         if (json.done) {
-          completeTrackedChatRun()
+          completeTrackedChatRun(
+            json.completedWithIssue
+              ? json.reason || 'Abschluss mit Hinweis'
+              : ''
+          )
           setLunaLiveContext(null)
 
           const normalized = json.tokens ? {
@@ -1423,8 +1448,8 @@ export default function Chat({ user, onLogout }) {
             }
           }))
         }
-        if (json.error) {
-          throw chatStreamApplicationError(json.error)
+        if (json.error && !json.tool) {
+          showLocalIssueConclusion(json.error)
         }
         if (json.actionRequest) {
           ensureTrackedChatRun(current =>
@@ -1484,16 +1509,8 @@ export default function Chat({ user, onLogout }) {
           m.id === assistantId ? { ...m, streaming: false, content: assistantContent || '_(stopped)_' } : m
         ))
       } else if (err.retryable === false) {
-        failTrackedChatRun(err)
         // Client-, Auth- oder Validierungsfehler werden durch einen Retry nicht besser.
-        setMessages(prev => prev.map(m =>
-          m.id === assistantId ? {
-            ...m,
-            content: `Error: ${err.message}`,
-            streaming: false,
-            retryFailed: true
-          } : m
-        ))
+        showLocalIssueConclusion(err)
       } else {
         // Netzwerk-, Rate-Limit- und Serverfehler duerfen erneut versucht werden.
         while (retryCount < maxRetries && streamGenerationRef.current === myGeneration) {
@@ -1529,15 +1546,9 @@ export default function Chat({ user, onLogout }) {
               break
             }
             if (retryErr.retryable === false || retryCount >= maxRetries) {
-              failTrackedChatRun(retryErr)
-              setMessages(prev => prev.map(m =>
-                m.id === assistantId ? {
-                  ...m,
-                  content: `Connection error: ${retryErr.message || err.message}`,
-                  streaming: false,
-                  retryFailed: true
-                } : m
-              ))
+              showLocalIssueConclusion(
+                retryErr.message || err.message
+              )
               break
             }
           }
@@ -1569,7 +1580,23 @@ export default function Chat({ user, onLogout }) {
             activeConvo.id,
             { refresh: true }
           )
-          setMessages(msgs)
+          if (
+            preserveLocalConclusion &&
+            assistantContent.trim()
+          ) {
+            setMessages([
+              ...msgs,
+              {
+                id: assistantId,
+                role: 'assistant',
+                content: assistantContent,
+                streaming: false,
+                localConclusion: true
+              }
+            ])
+          } else {
+            setMessages(msgs)
+          }
         } catch {}
       }
       // Refocus input so user can keep typing without clicking
