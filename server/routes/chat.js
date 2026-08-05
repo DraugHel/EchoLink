@@ -70,14 +70,17 @@ import { OPENAI_KEY, ZAI_KEY, KIMI_KEY, DEEPSEEK_KEY, streamZai, streamKimi, str
 import { ANTHROPIC_KEY, streamAnthropic } from '../providers/anthropic.js'
 import { streamResponses } from '../providers/openai-responses.js'
 import {
-  abortChatRequest,
+  attachChatResponse,
   assertAbortSignalActive,
   assertChatRequestActive,
   cancelChatRequest,
+  completeChatRequest,
+  createChatResponseSink,
+  findChatRequest,
   isChatRequestCancelled,
   isValidChatRequestId,
   registerChatRequest,
-  unregisterChatRequest
+  waitForChatRequest
 } from '../lib/chatCancellation.js'
 import {
   approveTerminalOperation,
@@ -181,6 +184,18 @@ function prepareChatSseResponse(res) {
   res.setHeader('Content-Type', 'text/event-stream')
   res.setHeader('Cache-Control', 'no-cache')
   res.setHeader('Connection', 'keep-alive')
+}
+
+function chatRequestPayloadHash(content, attachments) {
+  return crypto
+    .createHash('sha256')
+    .update(JSON.stringify({
+      content: String(content || ''),
+      attachments: Array.isArray(attachments)
+        ? attachments
+        : []
+    }))
+    .digest('hex')
 }
 
 export function mergeTokenUsage(total, current) {
@@ -1229,6 +1244,73 @@ router.post('/:conversationId', requireAuth, async (req, res) => {
     return res.status(400).json({ error: 'Empty message' })
   }
 
+  const payloadHash = chatRequestPayloadHash(
+    content,
+    attachments
+  )
+  const existingRequest = findChatRequest({
+    userId: req.session.userId,
+    conversationId: convo.id,
+    requestId
+  })
+
+  if (existingRequest) {
+    if (existingRequest.payloadHash !== payloadHash) {
+      return res.status(409).json({
+        error:
+          'Chat-Request-ID wurde bereits für einen anderen Inhalt verwendet'
+      })
+    }
+
+    prepareChatSseResponse(res)
+
+    if (existingRequest.state !== 'running') {
+      res.write(`data: ${JSON.stringify({
+        done: true,
+        restored: true,
+        completedWithIssue:
+          existingRequest.state !== 'completed',
+        ...(existingRequest.state !== 'completed'
+          ? {
+              reason:
+                `Der frühere Lauf endete mit Status ${existingRequest.state}.`
+            }
+          : {})
+      })}\n\n`)
+      return res.end()
+    }
+
+    const detachResponse = attachChatResponse(
+      existingRequest.entry,
+      res
+    )
+    let resolveClosed
+    const closed = new Promise(resolve => {
+      resolveClosed = resolve
+    })
+    const onReconnectedStreamClose = () => {
+      detachResponse()
+      resolveClosed('closed')
+    }
+
+    req.once('aborted', onReconnectedStreamClose)
+    res.once('close', onReconnectedStreamClose)
+    res.write(': chat-run-reattached\n\n')
+
+    await Promise.race([
+      waitForChatRequest(existingRequest.entry),
+      closed
+    ])
+
+    req.off('aborted', onReconnectedStreamClose)
+    res.off('close', onReconnectedStreamClose)
+    detachResponse()
+    if (!res.writableEnded && !res.destroyed) {
+      res.end()
+    }
+    return
+  }
+
   let terminalHandoffOperations =
     listTerminalOperationsForRequest({
       userId: req.session.userId,
@@ -2037,8 +2119,16 @@ Use these as background context. If these memories fully answer the request, ans
     userId: req.session.userId,
     conversationId: convo.id,
     requestId,
-    controller: abortController
+    controller: abortController,
+    payloadHash
   })
+  const detachResponse = attachChatResponse(
+    activeRequest,
+    res
+  )
+  const chatStream = createChatResponseSink(
+    activeRequest
+  )
   const playwrightSession =
     createPlaywrightToolSession({
       signal: abortController.signal,
@@ -2049,13 +2139,13 @@ Use these as background context. If these memories fully answer the request, ans
   const onDisconnect = () => {
     if (res.writableEnded) return
     clientDisconnected = true
+    detachResponse()
     detachPendingE3ActionsForRequest({
       pendingActions: pendingE3Actions,
       userId: req.session.userId,
       conversationId: convo.id,
       requestId
     })
-    abortChatRequest(activeRequest)
   }
 
   req.on('aborted', onDisconnect)
@@ -2099,10 +2189,10 @@ Use these as background context. If these memories fully answer the request, ans
       'UPDATE conversations SET updated_at = unixepoch() WHERE id = ?'
     ).run(convo.id)
 
-    res.write(`data: ${JSON.stringify({
+    chatStream.write(`data: ${JSON.stringify({
       token: streamedSuffix
     })}\n\n`)
-    res.write(`data: ${JSON.stringify({
+    chatStream.write(`data: ${JSON.stringify({
       done: true,
       completedWithIssue: true,
       reason: cleanReason
@@ -2137,7 +2227,7 @@ Use these as background context. If these memories fully answer the request, ans
         providerModel,
         workingMessages,
         options,
-        res,
+        chatStream,
         abortController.signal
       )
       aggregateTokenUsage =
@@ -2167,7 +2257,7 @@ Use these as background context. If these memories fully answer the request, ans
           assertChatRequestActive(activeRequest)
           const result = await executeTool(
             tc,
-            res,
+            chatStream,
             convo.id,
             abortController.signal,
             checkpointCache,
@@ -2195,7 +2285,7 @@ Use these as background context. If these memories fully answer the request, ans
           })
         }
         if (terminalDone) {
-          res.write('data: ' + JSON.stringify({ done: true }) + '\n\n')
+          chatStream.write('data: ' + JSON.stringify({ done: true }) + '\n\n')
           responseCompleted = true
           break
         }
@@ -2214,7 +2304,7 @@ Use these as background context. If these memories fully answer the request, ans
         cleanResponse =
           'Ich konnte den Auftrag nicht vollständig abschließen. ' +
           `Grund: ${completionIssue}`
-        res.write(`data: ${JSON.stringify({
+        chatStream.write(`data: ${JSON.stringify({
           token: cleanResponse
         })}\n\n`)
       }
@@ -2226,10 +2316,7 @@ Use these as background context. If these memories fully answer the request, ans
       }
 
       // Never persist or publish after an explicit cancellation.
-      if (
-        !clientDisconnected &&
-        !isChatRequestCancelled(activeRequest)
-      ) {
+      if (!isChatRequestCancelled(activeRequest)) {
         db.prepare('INSERT INTO messages (conversation_id, role, content, think, usage) VALUES (?, ?, ?, ?, ?)')
           .run(convo.id, 'assistant', cleanResponse, allThinking || '', aggregateTokenUsage ? JSON.stringify({
             prompt_tokens:
@@ -2264,7 +2351,7 @@ Use these as background context. If these memories fully answer the request, ans
           }) : '')
         db.prepare('UPDATE conversations SET updated_at = unixepoch() WHERE id = ?').run(convo.id)
 
-        res.write(
+        chatStream.write(
           'data: ' +
           JSON.stringify({
             done: true,
@@ -2300,7 +2387,6 @@ Use these as background context. If these memories fully answer the request, ans
       iterations >= MAX_TOOL_ITERATIONS
     ) {
       if (
-        !clientDisconnected &&
         !isChatRequestCancelled(activeRequest)
       ) {
         persistIncompleteConclusion(
@@ -2320,10 +2406,7 @@ Use these as background context. If these memories fully answer the request, ans
       )
     } else {
       console.error('Chat error:', err)
-      if (
-        !clientDisconnected &&
-        !isChatRequestCancelled(activeRequest)
-      ) {
+      if (!isChatRequestCancelled(activeRequest)) {
         try {
           persistIncompleteConclusion(err.message)
         } catch (completionError) {
@@ -2334,12 +2417,12 @@ Use these as background context. If these memories fully answer the request, ans
           const reason = String(
             err.message || 'Unbekannter interner Fehler'
           ).slice(0, 500)
-          res.write(`data: ${JSON.stringify({
+          chatStream.write(`data: ${JSON.stringify({
             token:
               'Ich konnte den Auftrag nicht vollständig ' +
               `abschließen. Grund: ${reason}`
           })}\n\n`)
-          res.write(`data: ${JSON.stringify({
+          chatStream.write(`data: ${JSON.stringify({
             done: true,
             completedWithIssue: true,
             reason
@@ -2349,11 +2432,18 @@ Use these as background context. If these memories fully answer the request, ans
     }
   }
 
-  await playwrightSession.close()
-  req.off('aborted', onDisconnect)
-  res.off('close', onDisconnect)
-  unregisterChatRequest(activeRequest)
-  res.end()
+  try {
+    await playwrightSession.close()
+  } finally {
+    req.off('aborted', onDisconnect)
+    res.off('close', onDisconnect)
+    completeChatRequest(
+      activeRequest,
+      isChatRequestCancelled(activeRequest)
+        ? 'cancelled'
+        : 'completed'
+    )
+  }
 })
 
 // Approve a pending terminal or calendar action

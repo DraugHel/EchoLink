@@ -3,8 +3,12 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import {
   activeChatRequestCount,
+  attachChatResponse,
   assertChatRequestActive,
   cancelChatRequest,
+  completeChatRequest,
+  createChatResponseSink,
+  findChatRequest,
   registerChatRequest,
   unregisterChatRequest
 } from '../server/lib/chatCancellation.js'
@@ -67,6 +71,70 @@ test('eine neue Registrierung mit gleicher ID beendet den alten Lauf', () => {
   assert.equal(activeChatRequestCount(), 1)
   unregisterChatRequest(second)
   assert.equal(activeChatRequestCount(), 0)
+})
+
+test('mobiler Stream darf sich lösen und wieder anhängen ohne Luna abzubrechen', () => {
+  const controller = new AbortController()
+  const entry = registerChatRequest({
+    userId: 9,
+    conversationId: 13,
+    requestId: 'mobile-background-request',
+    controller,
+    payloadHash: 'payload-one'
+  })
+  const first = {
+    chunks: [],
+    writableEnded: false,
+    destroyed: false,
+    write(chunk) {
+      this.chunks.push(chunk)
+      return true
+    },
+    end() {
+      this.writableEnded = true
+    }
+  }
+  const detachFirst = attachChatResponse(entry, first)
+  const stream = createChatResponseSink(entry)
+
+  stream.write('first')
+  detachFirst()
+  stream.write('while-backgrounded')
+
+  assert.equal(controller.signal.aborted, false)
+  assert.deepEqual(first.chunks, ['first'])
+
+  const second = {
+    chunks: [],
+    writableEnded: false,
+    destroyed: false,
+    write(chunk) {
+      this.chunks.push(chunk)
+      return true
+    },
+    end() {
+      this.writableEnded = true
+    }
+  }
+  attachChatResponse(entry, second)
+  stream.write('after-reconnect')
+
+  assert.deepEqual(second.chunks, ['after-reconnect'])
+  assert.equal(completeChatRequest(entry), true)
+  assert.equal(second.writableEnded, true)
+  assert.equal(activeChatRequestCount(), 0)
+  assert.deepEqual(
+    findChatRequest({
+      userId: 9,
+      conversationId: 13,
+      requestId: 'mobile-background-request'
+    }),
+    {
+      state: 'completed',
+      payloadHash: 'payload-one',
+      entry: null
+    }
+  )
 })
 
 
@@ -145,5 +213,17 @@ test('Composer-Stop sendet die Request-ID an den Server und Server speichert nac
   assert.match(
     chatRoute,
     /executeTool\([\s\S]*abortController\.signal/
+  )
+  assert.match(
+    chatRoute,
+    /const onDisconnect = \(\) => \{[\s\S]*detachResponse\(\)[\s\S]*detachPendingE3ActionsForRequest/
+  )
+  assert.doesNotMatch(
+    chatRoute,
+    /const onDisconnect = \(\) => \{[\s\S]{0,600}abortChatRequest\(activeRequest\)/
+  )
+  assert.match(
+    chatRoute,
+    /if \(!isChatRequestCancelled\(activeRequest\)\) \{[\s\S]*INSERT INTO messages/
   )
 })

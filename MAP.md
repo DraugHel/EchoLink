@@ -400,7 +400,14 @@ Prompt-Cache-Telemetrie), `POST /allowlist`
 
 ### server/lib/chatCancellation.js (~120 Z.)
 Registry aktiver Chat-Requests (userId+conversationId+requestId → AbortController).
-register/unregister/cancel/assertActive. In-Memory — pro Prozess.
+Ein Verbindungsabbruch löst nur den konkreten SSE-Subscriber und beendet den
+Luna-Lauf nicht mehr. Derselbe requestId kann sich innerhalb desselben
+Serverprozesses wieder an den laufenden Stream anhängen; bereits abgeschlossene
+IDs bleiben 30 Minuten als inhaltsgebundener Replay-Schutz erhalten. Nur der
+explizite Cancel-Endpunkt setzt den AbortController. Die Modellantwort wird auch
+ohne verbundenen Browser vollständig persistiert und beim Wiederöffnen aus der
+Conversation geladen. In-Memory — pro Prozess; PM2-/Deploy-Handoffs für
+Terminaloperationen bleiben zusätzlich über `terminalOperations.js` dauerhaft.
 
 ### server/lib/chatCheckpoints.js
 Phase 2A für das **normale Chat-Cockpit**: normalisiert maximal 24 abgeschlossene
