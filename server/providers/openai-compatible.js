@@ -160,7 +160,10 @@ async function streamOpenAICompatible(providerName, endpoint, key, model, messag
   const tokenUsage = usage ? {
     promptTokens: usage.prompt_tokens || 0,
     completionTokens: usage.completion_tokens || 0,
-    totalTokens: usage.total_tokens || ((usage.prompt_tokens || 0) + (usage.completion_tokens || 0))
+    totalTokens: usage.total_tokens || ((usage.prompt_tokens || 0) + (usage.completion_tokens || 0)),
+    cachedTokens: usage.prompt_cache_hit_tokens || 0,
+    cacheWriteTokens: usage.prompt_cache_miss_tokens || 0,
+    cacheObserved: usage.prompt_cache_hit_tokens !== undefined || usage.prompt_cache_miss_tokens !== undefined
   } : null
   return { fullContent, fullThinking, toolCalls, tokenUsage }
 }
