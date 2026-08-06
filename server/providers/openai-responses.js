@@ -72,6 +72,30 @@ export function normalizeResponsesUsage(usage) {
   }
 }
 
+export function isRetryableResponsesStatus(status) {
+  const value = Number(status)
+  return (
+    value === 408 ||
+    value === 429 ||
+    value >= 500
+  )
+}
+
+function annotateResponsesStreamError(
+  error,
+  {
+    retryable = false,
+    partialOutput = false
+  } = {}
+) {
+  const resolved = error instanceof Error
+    ? error
+    : new Error(String(error || 'OpenAI Responses stream error'))
+  resolved.retryable = retryable === true
+  resolved.partialOutput = partialOutput === true
+  return resolved
+}
+
 // Internes Format -> Responses-API-Input. Assistant-Messages mit _raw
 // (Items aus vorheriger Responses-Iteration, inkl. Reasoning) gehen verbatim zurueck —
 // nur so bleibt die Denkkette ueber Tool-Calls hinweg erhalten.
@@ -260,15 +284,30 @@ export async function streamResponses(model, messages, options, res, abortSignal
     } } : {})
     // Reasoning-Modelle lehnen temperature/top_p ab -> bewusst weggelassen
   }
-  const r = await fetch(RESPONSES_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${OPENAI_KEY}` },
-    body: JSON.stringify(body),
-    signal: abortSignal
-  })
+  let r
+  try {
+    r = await fetch(RESPONSES_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${OPENAI_KEY}` },
+      body: JSON.stringify(body),
+      signal: abortSignal
+    })
+  } catch (error) {
+    if (error?.name === 'AbortError') throw error
+    throw annotateResponsesStreamError(error, {
+      retryable: true,
+      partialOutput: false
+    })
+  }
   if (!r.ok) {
     const errBody = await r.text()
-    throw new Error(`OpenAI Responses ${r.status}: ${errBody.slice(0, 200)}`)
+    throw annotateResponsesStreamError(
+      new Error(`OpenAI Responses ${r.status}: ${errBody.slice(0, 200)}`),
+      {
+        retryable: isRetryableResponsesStatus(r.status),
+        partialOutput: false
+      }
+    )
   }
 
   let fullContent = '', fullThinking = ''
@@ -276,29 +315,55 @@ export async function streamResponses(model, messages, options, res, abortSignal
   let buf = ''
   const decoder = new TextDecoder()
 
-  for await (const chunk of r.body) {
-    buf += decoder.decode(chunk, { stream: true })
-    const lines = buf.split('\n')
-    buf = lines.pop()
-    for (const line of lines) {
-      if (!line.startsWith('data:')) continue
-      const payload = line.slice(5).trim()
-      if (!payload || payload === '[DONE]') continue
-      let ev
-      try { ev = JSON.parse(payload) } catch { continue }
-      if (ev.type === 'response.output_text.delta' && ev.delta) {
-        fullContent += ev.delta
-        res.write(`data: ${JSON.stringify({ token: ev.delta })}\n\n`)
-      } else if (ev.type === 'response.reasoning_summary_text.delta' && ev.delta) {
-        fullThinking += ev.delta
-        res.write(`data: ${JSON.stringify({ think: ev.delta })}\n\n`)
-      } else if (ev.type === 'response.completed') {
-        rawOutput = ev.response?.output || null
-        usage = ev.response?.usage || null
-      } else if (ev.type === 'response.failed' || ev.type === 'error') {
-        throw new Error(ev.response?.error?.message || ev.message || 'OpenAI Responses stream error')
+  try {
+    for await (const chunk of r.body) {
+      buf += decoder.decode(chunk, { stream: true })
+      const lines = buf.split('\n')
+      buf = lines.pop()
+      for (const line of lines) {
+        if (!line.startsWith('data:')) continue
+        const payload = line.slice(5).trim()
+        if (!payload || payload === '[DONE]') continue
+        let ev
+        try { ev = JSON.parse(payload) } catch { continue }
+        if (ev.type === 'response.output_text.delta' && ev.delta) {
+          fullContent += ev.delta
+          res.write(`data: ${JSON.stringify({ token: ev.delta })}\n\n`)
+        } else if (ev.type === 'response.reasoning_summary_text.delta' && ev.delta) {
+          fullThinking += ev.delta
+          res.write(`data: ${JSON.stringify({ think: ev.delta })}\n\n`)
+        } else if (ev.type === 'response.completed') {
+          rawOutput = ev.response?.output || null
+          usage = ev.response?.usage || null
+        } else if (ev.type === 'response.failed' || ev.type === 'error') {
+          const providerError = ev.response?.error || ev.error || {}
+          const message = providerError.message || ev.message || 'OpenAI Responses stream error'
+          const code = String(providerError.code || providerError.type || '')
+          throw annotateResponsesStreamError(
+            new Error(message),
+            {
+              retryable:
+                message === 'OpenAI Responses stream error' ||
+                code === 'server_error' ||
+                code === 'rate_limit_exceeded',
+              partialOutput: Boolean(fullContent || fullThinking)
+            }
+          )
+        }
       }
     }
+  } catch (error) {
+    if (error?.name === 'AbortError') throw error
+    if (error?.retryable === true || error?.retryable === false) {
+      error.partialOutput = Boolean(
+        error.partialOutput || fullContent || fullThinking
+      )
+      throw error
+    }
+    throw annotateResponsesStreamError(error, {
+      retryable: true,
+      partialOutput: Boolean(fullContent || fullThinking)
+    })
   }
 
   const toolCalls = (rawOutput || []).filter(it => it.type === 'function_call').map(it => {

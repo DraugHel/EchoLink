@@ -4,9 +4,19 @@ import { readFile } from 'node:fs/promises'
 import {
   buildPromptCacheKey,
   normalizeResponsesUsage,
+  isRetryableResponsesStatus,
   supportsPromptCacheConfig,
   toResponsesInput
 } from '../server/providers/openai-responses.js'
+
+test('Responses retries only transient HTTP statuses', () => {
+  assert.equal(isRetryableResponsesStatus(408), true)
+  assert.equal(isRetryableResponsesStatus(429), true)
+  assert.equal(isRetryableResponsesStatus(500), true)
+  assert.equal(isRetryableResponsesStatus(503), true)
+  assert.equal(isRetryableResponsesStatus(400), false)
+  assert.equal(isRetryableResponsesStatus(401), false)
+})
 
 test('Responses trennt stabilen System-Prefix von späterem Laufzeitkontext', () => {
   const converted = toResponsesInput([

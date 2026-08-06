@@ -13,6 +13,7 @@ import {
   attachPendingChatActions,
   chatReconnectDelayMs,
   chatReconnectingContent,
+  chatStreamApplicationError,
   clearChatReconnectContent,
   removeResolvedChatAction,
   shouldReloadResolvedE3Action,
@@ -1450,7 +1451,7 @@ export default function Chat({ user, onLogout }) {
           }))
         }
         if (json.error && !json.tool) {
-          showLocalIssueConclusion(json.error)
+          throw chatStreamApplicationError(json.error)
         }
         if (json.actionRequest) {
           ensureTrackedChatRun(current =>

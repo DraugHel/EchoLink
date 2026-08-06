@@ -112,6 +112,7 @@ import {
 } from '../lib/e3ApprovalCompletion.js'
 
 const router = Router()
+const MAX_PROVIDER_STREAM_RETRIES = 3
 const pendingTerminalActions = new Map()
 const pendingCalendarActions = new Map()
 const pendingGmailActions = new Map()
@@ -2221,19 +2222,53 @@ Use these as background context. If these memories fully answer the request, ans
         workingMessages = splitSystemTimeNote(workingMessages)
       }
       assertChatRequestActive(activeRequest)
+      let streamResult
+      let providerRetryAttempt = 0
+      while (true) {
+        try {
+          streamResult = await streamFn(
+            providerModel,
+            workingMessages,
+            options,
+            chatStream,
+            abortController.signal
+          )
+          break
+        } catch (error) {
+          if (
+            error?.retryable !== true ||
+            error?.partialOutput === true ||
+            providerRetryAttempt >= MAX_PROVIDER_STREAM_RETRIES
+          ) {
+            throw error
+          }
+          providerRetryAttempt += 1
+          const delayMs = Math.min(
+            750 * Math.pow(2, providerRetryAttempt - 1),
+            3_000
+          )
+          console.warn(JSON.stringify({
+            level: 'warn',
+            event: 'provider_stream_retry',
+            providerModel,
+            requestId,
+            attempt: providerRetryAttempt,
+            maxAttempts: MAX_PROVIDER_STREAM_RETRIES,
+            delayMs,
+            error: error?.message || String(error)
+          }))
+          await new Promise(resolve => setTimeout(resolve, delayMs))
+          assertChatRequestActive(activeRequest)
+        }
+      }
+
       const {
         fullContent,
         fullThinking,
         toolCalls,
         tokenUsage,
         rawOutput
-      } = await streamFn(
-        providerModel,
-        workingMessages,
-        options,
-        chatStream,
-        abortController.signal
-      )
+      } = streamResult
       aggregateTokenUsage =
         mergeTokenUsage(
           aggregateTokenUsage,

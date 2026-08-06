@@ -128,11 +128,12 @@ test('Toolfehler brechen den Chatstream nicht ab und Serverfehler erhalten eine 
     client,
     /if \(json\.error && !json\.tool\)/
   )
-  assert.doesNotMatch(
+  assert.match(
     client,
-    /if \(json\.error\) \{\s*throw/
+    /throw chatStreamApplicationError\(json\.error\)/
   )
-  assert.match(client, /showLocalIssueConclusion\(json\.error\)/)
+  assert.match(server, /MAX_PROVIDER_STREAM_RETRIES\s*=\s*3/)
+  assert.match(server, /error\?\.partialOutput === true/)
   assert.match(server, /persistIncompleteConclusion\(err\.message\)/)
   assert.match(server, /completedWithIssue:\s*true/)
 })
