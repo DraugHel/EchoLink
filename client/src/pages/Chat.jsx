@@ -2389,28 +2389,27 @@ export default function Chat({ user, onLogout }) {
             <div style={styles.emptyChat}><p>Start the conversation below.</p></div>
           )}
 
-          {showScrollBtn && (
+          <div ref={messagesEndRef} />
+        </div>
+
+        {showScrollBtn && (
+          <div
+            className="echolink-scroll-dock"
+            aria-label="Chat-Navigation"
+          >
             <button
+              type="button"
+              className="echolink-scroll-button"
               onClick={scrollToBottom}
-              style={{
-                position: 'fixed', left: 8, bottom: 150,
-                width: 44, height: 44, minWidth: 44, minHeight: 44, borderRadius: '50%',
-                background: 'var(--bg2)', border: '1px solid var(--border)',
-                color: 'var(--text2)', cursor: 'pointer',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
-                zIndex: 10, flexShrink: 0
-              }}
               title="Scroll to bottom"
+              aria-label="Zum Ende scrollen"
             >
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                 <polyline points="6 9 12 15 18 9"/>
               </svg>
             </button>
-          )}
-
-          <div ref={messagesEndRef} />
-        </div>
+          </div>
+        )}
 
         {activeConvo && !streaming && messages.length > 0 && (
           <div
