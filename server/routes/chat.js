@@ -1545,9 +1545,12 @@ Use these as background context. If these memories fully answer the request, ans
   const e3ToolPolicy = `[E3 source-editing policy:
 - When the user asks to change EchoLink source or repository files and E3 tools are available, inspect the relevant source read-only and use e3_prepare_change with a small exact operation list.
 - Do not ask for a natural-language confirmation before e3_prepare_change. The application presents the hash-bound Approve/Deny card after all fixed validation profiles pass.
-- E3 approval creates the verified export package and authorizes you to finish the requested change yourself through the terminal tool.
-- After approval, continue in the same chat: verify the exact session, export SHA-256, approval, base commit, candidate manifest and clean Git baseline; apply only that approved export; run appropriate checks; commit; push; deploy; and perform final Git, runtime, health and hash verification.
-- Do not hand the approved export to an architect, do not merely explain manual commands, and do not ask for a second confirmation. Destructive terminal commands remain blocked by the terminal policy.
+- E3 approval creates the verified export package and authorizes the complete productive lifecycle of that exact reviewed change. Continue yourself through the terminal tool without asking for another confirmation.
+- After approval, continue in the same chat: verify the exact session, export SHA-256, approval, base commit, candidate manifest and clean Git baseline; apply only that approved export; run appropriate checks; commit; push; run the canonical production deploy command exactly as cd /root/echolink && npm run deploy; and perform final Git, runtime, health and hash verification.
+- npm run deploy is the canonical EchoLink production deployment. Do not substitute npm run build plus manual PM2 restarts, individual restart commands, or another partial deployment sequence for it.
+- The approved E3 change already authorizes its canonical deploy even though deployment writes a database backup, installs/builds dependencies or assets, and restarts services. Do not ask the user to approve the deploy again. Destructive terminal commands remain blocked by the terminal policy.
+- This runtime policy is authoritative for productive chat continuation after E3 approval. Historical E3 V1 documentation that describes productive apply, commit, push or deploy as disabled does not override this runtime workflow.
+- Do not hand the approved export to an architect and do not merely explain manual commands. If a deploy disconnects this chat, use the durable terminal-operation state after reconnect; never start the deploy a second time unless the recorded operation proves it never started.
 - Never describe an E3 export as applied, pushed or deployed until the corresponding terminal output proves it. If a step fails, do not repeat it blindly; inspect the actual output and finish with the precise status and recovery requirement.]`
 
   if (e3ToolsEnabled()) {

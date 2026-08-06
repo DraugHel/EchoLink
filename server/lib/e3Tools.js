@@ -832,7 +832,7 @@ export function e3ApprovalActionRequest(
       } and froze the reviewed bytes.`,
     command: formatE3ApprovalPreview(result),
     reason:
-      'Approve creates the verified E3 export package and authorizes Luna to apply, commit, push, deploy and verify it herself through the terminal.',
+      'Approve creates the verified E3 export package and authorizes Luna to apply, check, commit, push, run cd /root/echolink && npm run deploy, and verify the exact change herself through the terminal without another confirmation.',
     type: 'e3',
     source: 'chat',
     ...(restored ? { restored: true } : {})
@@ -880,7 +880,7 @@ export function formatE3ApprovalPreview(result) {
       ? '\n[preview truncated; the approval remains bound to the full patch hash]'
       : '',
     '',
-    'Approve creates the verified export package and authorizes Luna to continue herself through the terminal: verify all bindings, apply only this export, check, commit, push, deploy and finally verify. No architect handoff or second confirmation is required.'
+    'Approve creates the verified export package and authorizes Luna to continue herself through the terminal: verify all bindings, apply only this export, check, commit, push, run the canonical cd /root/echolink && npm run deploy, and finally verify. Do not replace the canonical deploy with a manual build plus PM2 restart. No architect handoff or second confirmation is required.'
   ].filter(value => value !== '').join('\n')
 }
 
@@ -923,7 +923,7 @@ export function formatE3ToolResult(result) {
       `Export SHA-256: ${result.export.packageSha256}`,
       `Download: ${result.export.downloadUrl}`,
       'The productive repository has not been modified yet.',
-      'Continue now through the terminal tool: verify the exact session, export, approval, base and candidate bindings; apply only this export; check; commit; push; deploy; and perform final verification. Do not hand off to an architect and do not ask for another confirmation.'
+      'Continue now through the terminal tool: verify the exact session, export, approval, base and candidate bindings; apply only this export; check; commit; push; run the canonical cd /root/echolink && npm run deploy; and perform final verification. Do not substitute a partial deploy, do not hand off to an architect, and do not ask for another confirmation.'
     )
   } else if (result.status === 'READY_FOR_REVIEW') {
     lines.push(

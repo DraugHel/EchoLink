@@ -565,6 +565,14 @@ test('approval cards are capability-bound to the durable reviewed bytes', () => 
     preview,
     /No architect handoff or second confirmation is required/
   )
+  assert.match(
+    preview,
+    /cd \/root\/echolink && npm run deploy/
+  )
+  assert.match(
+    preview,
+    /Do not replace the canonical deploy with a manual build plus PM2 restart/
+  )
 })
 
 test('chat wiring is gated, authenticated, and uses the existing Approve/Deny UI', () => {
@@ -590,12 +598,19 @@ test('chat wiring is gated, authenticated, and uses the existing Approve/Deny UI
     chat.includes("String(actionId).startsWith('e3-')"),
     true
   )
-  assert.equal(
-    chat.includes('Do not hand the approved export to an architect'),
-    true
-  )
-  assert.equal(
-    chat.includes('Destructive terminal commands remain blocked'),
-    true
-  )
+  assert.equal(chat.includes(
+    'cd /root/echolink && npm run deploy'
+  ), true)
+  assert.equal(chat.includes(
+    'Do not substitute npm run build plus manual PM2 restarts'
+  ), true)
+  assert.equal(chat.includes(
+    'Do not ask the user to approve the deploy again'
+  ), true)
+  assert.equal(chat.includes(
+    'Historical E3 V1 documentation'
+  ), true)
+  assert.equal(chat.includes(
+    'Destructive terminal commands remain blocked'
+  ), true)
 })
