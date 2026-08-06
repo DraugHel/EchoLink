@@ -2462,7 +2462,7 @@ router.post(
           actionId,
           req.session.userId
         )
-        settleE3ActionCompletion({
+        const completion = settleE3ActionCompletion({
           pendingActions: pendingE3Actions,
           actionId,
           db,
@@ -2474,7 +2474,8 @@ router.post(
           type: 'e3',
           sessionId: result.sessionId,
           status: result.status,
-          export: result.export
+          export: result.export,
+          continued: completion.continued
         })
       } catch (error) {
         return res.status(

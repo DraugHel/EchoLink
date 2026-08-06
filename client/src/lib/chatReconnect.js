@@ -102,6 +102,16 @@ export function shouldReloadResolvedE3Action(
   )
 }
 
+export function shouldResumeResolvedE3Action(
+  approvalResult
+) {
+  return (
+    approvalResult?.type === 'e3' &&
+    approvalResult?.success === true &&
+    approvalResult?.continued === false
+  )
+}
+
 export function attachPendingChatActions(
   messages,
   actionRequests

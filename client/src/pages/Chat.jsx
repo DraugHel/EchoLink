@@ -15,7 +15,8 @@ import {
   chatReconnectingContent,
   clearChatReconnectContent,
   removeResolvedChatAction,
-  shouldReloadResolvedE3Action
+  shouldReloadResolvedE3Action,
+  shouldResumeResolvedE3Action
 } from '../lib/chatReconnect.js'
 import {
   getLunaToolKind,
@@ -1614,6 +1615,7 @@ export default function Chat({ user, onLogout }) {
       if (!response.ok) {
         throw await readResponseError(response)
       }
+      const approvalResult = await response.json()
       const clearResolvedAction = () => {
         setMessages(prev =>
           removeResolvedChatAction(
@@ -1651,6 +1653,18 @@ export default function Chat({ user, onLogout }) {
         setChatRun(current =>
           chatRunState.markChatRunApproval(current, true)
         )
+      }
+
+      if (shouldResumeResolvedE3Action(approvalResult)) {
+        const lastUser = [...messages]
+          .reverse()
+          .find(message => message.role === 'user')
+        if (!lastUser?.content?.trim()) {
+          throw new Error(
+            'E3 approval succeeded, but the original user request could not be restored for automatic continuation.'
+          )
+        }
+        await sendMessage(lastUser.content, true)
       }
     } catch (err) {
       console.error('Approve error:', err)

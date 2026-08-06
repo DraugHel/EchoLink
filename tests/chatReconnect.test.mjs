@@ -10,7 +10,8 @@ import {
   clearChatReconnectContent,
   removeResolvedChatAction,
   resolveChatActionRequests,
-  shouldReloadResolvedE3Action
+  shouldReloadResolvedE3Action,
+  shouldResumeResolvedE3Action
 } from '../client/src/lib/chatReconnect.js'
 
 test('Reconnect besitzt ein begrenztes längeres Zeitfenster', () => {
@@ -147,6 +148,33 @@ test('nur wiederhergestellte E3-Karten laden den autoritativen Verlauf neu', () 
     shouldReloadResolvedE3Action({
       type: 'shell',
       restored: true
+    }),
+    false
+  )
+})
+
+test('E3 approval resumes automatically only when no live model request continued', () => {
+  assert.equal(
+    shouldResumeResolvedE3Action({
+      success: true,
+      type: 'e3',
+      continued: false
+    }),
+    true
+  )
+  assert.equal(
+    shouldResumeResolvedE3Action({
+      success: true,
+      type: 'e3',
+      continued: true
+    }),
+    false
+  )
+  assert.equal(
+    shouldResumeResolvedE3Action({
+      success: true,
+      type: 'shell',
+      continued: false
     }),
     false
   )

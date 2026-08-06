@@ -602,6 +602,9 @@ test('chat wiring is gated, authenticated, and uses the existing Approve/Deny UI
     'cd /root/echolink && npm run deploy'
   ), true)
   assert.equal(chat.includes(
+    'continued: completion.continued'
+  ), true)
+  assert.equal(chat.includes(
     'first read /root/echolink/MAP.md'
   ), true)
   assert.equal(chat.includes(
