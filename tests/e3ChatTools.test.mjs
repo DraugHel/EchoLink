@@ -20,6 +20,7 @@ import {
   e3SessionIdFromAction,
   formatE3ApprovalPreview,
   parseE3ApprovalActionId,
+  prepareE3ChangeWithManifestRepair,
   safeE3WorkerEnvironment,
   verifyE3ApprovalActionId
 } from '../server/lib/e3Tools.js'
@@ -227,6 +228,80 @@ test('worker environment drops production secrets and credentials', () => {
   assert.equal(env.OPENAI_API_KEY, undefined)
   assert.equal(env.GITHUB_TOKEN, undefined)
   assert.equal(env.DATABASE_URL, undefined)
+})
+
+test('stale E3 manifest triggers one hardened rebind and one prepare retry', async () => {
+  const calls = []
+  const stale = new Error('stale validator binding')
+  stale.code = 'E3_CHAT_MANIFEST_STALE'
+  let attempts = 0
+
+  const result = await prepareE3ChangeWithManifestRepair(
+    { requestId: 'repair-request' },
+    {
+      workerFn: async command => {
+        calls.push(`worker:${command}`)
+        attempts += 1
+        if (attempts === 1) throw stale
+        return { status: 'READY_FOR_REVIEW' }
+      },
+      rebindFn: async () => {
+        calls.push('rebind')
+        return { rebound: true }
+      }
+    }
+  )
+
+  assert.deepEqual(calls, [
+    'worker:prepare',
+    'rebind',
+    'worker:prepare'
+  ])
+  assert.equal(result.status, 'READY_FOR_REVIEW')
+})
+
+test('E3 manifest repair retries at most once and never masks other failures', async () => {
+  const stale = new Error('still stale')
+  stale.code = 'E3_CHAT_MANIFEST_STALE'
+  let staleAttempts = 0
+  let rebinds = 0
+
+  await assert.rejects(
+    prepareE3ChangeWithManifestRepair(
+      { requestId: 'still-stale-request' },
+      {
+        workerFn: async () => {
+          staleAttempts += 1
+          throw stale
+        },
+        rebindFn: async () => {
+          rebinds += 1
+        }
+      }
+    ),
+    error => error === stale
+  )
+  assert.equal(staleAttempts, 2)
+  assert.equal(rebinds, 1)
+
+  const unrelated = new Error('unsafe baseline')
+  unrelated.code = 'E3_CHAT_BASELINE_UNSAFE'
+  let unrelatedRebinds = 0
+  await assert.rejects(
+    prepareE3ChangeWithManifestRepair(
+      { requestId: 'unsafe-request' },
+      {
+        workerFn: async () => {
+          throw unrelated
+        },
+        rebindFn: async () => {
+          unrelatedRebinds += 1
+        }
+      }
+    ),
+    error => error === unrelated
+  )
+  assert.equal(unrelatedRebinds, 0)
 })
 
 test('real E3 services prepare, validate, review, export and clean without touching source', t => {

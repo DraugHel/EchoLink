@@ -17,6 +17,12 @@ const WORKER_PATH =
 const WORKER_CWD = '/root/echolink'
 const MAX_WORKER_OUTPUT_BYTES = 4 * 1024 * 1024
 const WORKER_TIMEOUT_MS = 45 * 60 * 1000
+const VALIDATOR_REBIND_PATH =
+  '/root/echolink/scripts/e3-rebind-validation-images.sh'
+const VALIDATOR_REBIND_TIMEOUT_MS = 30 * 60 * 1000
+const MAX_REBIND_DIAGNOSTIC_BYTES = 64 * 1024
+
+let validatorRebindPromise = null
 
 export const E3_TOOL = Object.freeze({
   PREPARE_CHANGE: 'e3_prepare_change',
@@ -317,6 +323,137 @@ export function runE3Worker(
   })
 }
 
+export function runE3ValidationRebind({
+  spawnFn = spawn,
+  timeoutMs = VALIDATOR_REBIND_TIMEOUT_MS,
+  env = process.env
+} = {}) {
+  return new Promise((resolve, reject) => {
+    const child = spawnFn(
+      '/bin/bash',
+      [VALIDATOR_REBIND_PATH],
+      {
+        cwd: WORKER_CWD,
+        env: safeE3WorkerEnvironment(env),
+        detached: true,
+        stdio: ['ignore', 'pipe', 'pipe']
+      }
+    )
+    let stdout = ''
+    let stderr = ''
+    let settled = false
+
+    const appendTail = (current, chunk) => {
+      const next = current + chunk.toString('utf8')
+      if (
+        Buffer.byteLength(next, 'utf8') <=
+        MAX_REBIND_DIAGNOSTIC_BYTES
+      ) {
+        return next
+      }
+      return Buffer.from(next, 'utf8')
+        .subarray(-MAX_REBIND_DIAGNOSTIC_BYTES)
+        .toString('utf8')
+    }
+
+    const finish = callback => value => {
+      if (settled) return
+      settled = true
+      clearTimeout(timeout)
+      callback(value)
+    }
+    const succeed = finish(resolve)
+    const fail = finish(reject)
+
+    const timeout = setTimeout(() => {
+      try {
+        process.kill(-child.pid, 'SIGTERM')
+      } catch {}
+      setTimeout(() => {
+        try {
+          process.kill(-child.pid, 'SIGKILL')
+        } catch {}
+      }, 5000).unref?.()
+      const error = new Error(
+        'E3 validator rebind exceeded its fixed execution window'
+      )
+      error.code = 'E3_CHAT_VALIDATOR_REBIND_TIMEOUT'
+      fail(error)
+    }, timeoutMs)
+    timeout.unref?.()
+
+    child.stdout.on('data', chunk => {
+      stdout = appendTail(stdout, chunk)
+    })
+    child.stderr.on('data', chunk => {
+      stderr = appendTail(stderr, chunk)
+    })
+    child.once('error', fail)
+    child.once('close', exitCode => {
+      if (settled) return
+      if (exitCode !== 0) {
+        const detail = (stderr || stdout)
+          .trim()
+          .slice(-4000)
+        const error = new Error(
+          detail ||
+          `E3 validator rebind exited with code ${exitCode}`
+        )
+        error.code = 'E3_CHAT_VALIDATOR_REBIND_FAILED'
+        fail(error)
+        return
+      }
+      succeed(Object.freeze({ rebound: true }))
+    })
+  })
+}
+
+function ensureE3ValidationRebind(rebindFn) {
+  if (!validatorRebindPromise) {
+    validatorRebindPromise = Promise.resolve()
+      .then(() => rebindFn())
+      .finally(() => {
+        validatorRebindPromise = null
+      })
+  }
+  return validatorRebindPromise
+}
+
+export async function prepareE3ChangeWithManifestRepair(
+  input,
+  {
+    workerFn = runE3Worker,
+    rebindFn = runE3ValidationRebind,
+    workerOptions = {}
+  } = {}
+) {
+  try {
+    return await workerFn(
+      'prepare',
+      input,
+      workerOptions
+    )
+  } catch (error) {
+    if (error?.code !== E3_CHAT_ERROR.MANIFEST_STALE) {
+      throw error
+    }
+  }
+
+  // The repository-owned rebind script is itself fail-closed: it requires
+  // clean main == origin/main, the validator lock and an exact current tree.
+  // Therefore a stale binding may be repaired without weakening baseline
+  // validation. Concurrent chat requests share the same rebuild.
+  await ensureE3ValidationRebind(rebindFn)
+
+  // Retry exactly once. A still-stale manifest is a real failure and must
+  // surface instead of entering a repair loop.
+  return workerFn(
+    'prepare',
+    input,
+    workerOptions
+  )
+}
+
 function canonicalToolJson(value) {
   const canonical = item => {
     if (Array.isArray(item)) return item.map(canonical)
@@ -384,8 +521,7 @@ export async function executeE3Tool(
   }
   const envelope = requestEnvelope(context)
   if (name === E3_TOOL.PREPARE_CHANGE) {
-    return runE3Worker(
-      'prepare',
+    return prepareE3ChangeWithManifestRepair(
       {
         ...envelope,
         requestId: prepareToolRequestId(
@@ -395,7 +531,10 @@ export async function executeE3Tool(
         summary: args?.summary,
         operations: args?.operations
       },
-      options
+      {
+        rebindFn: options.rebindFn,
+        workerOptions: options
+      }
     )
   }
   if (name === E3_TOOL.GET_SESSION) {
