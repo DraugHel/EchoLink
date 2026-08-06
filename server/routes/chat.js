@@ -1543,7 +1543,8 @@ Use these as background context. If these memories fully answer the request, ans
 
 
   const e3ToolPolicy = `[E3 source-editing policy:
-- When the user asks to change EchoLink source or repository files and E3 tools are available, inspect the relevant source read-only and use e3_prepare_change with a small exact operation list.
+- When the user asks to change EchoLink source or repository files and E3 tools are available, first read /root/echolink/MAP.md and use it as the repository map before inspecting the relevant source read-only and using e3_prepare_change with a small exact operation list.
+- Keep MAP.md accurate as part of the same E3 change when the requested change materially changes project structure, component ownership, routes or services, operational or deployment paths, or another statement in the map. Do not update MAP.md for implementation details that leave the map accurate.
 - Do not ask for a natural-language confirmation before e3_prepare_change. The application presents the hash-bound Approve/Deny card after all fixed validation profiles pass.
 - E3 approval creates the verified export package and authorizes the complete productive lifecycle of that exact reviewed change. Continue yourself through the terminal tool without asking for another confirmation.
 - After approval, continue in the same chat: verify the exact session, export SHA-256, approval, base commit, candidate manifest and clean Git baseline; apply only that approved export; run appropriate checks; commit; push; run the canonical production deploy command exactly as cd /root/echolink && npm run deploy; and perform final Git, runtime, health and hash verification.

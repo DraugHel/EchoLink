@@ -105,7 +105,8 @@ export const E3_TOOLS = Object.freeze([
       description:
         'Prepare a requested EchoLink source change through E3. ' +
         'Use only when the user explicitly asks to modify EchoLink code or repository files. ' +
-        'Inspect the relevant source first with read-only tools, then submit a small exact operation list. ' +
+        'Before inspecting source, read /root/echolink/MAP.md and use it as the repository map. Then inspect the relevant source with read-only tools and submit a small exact operation list. ' +
+        'If the requested change materially changes project structure, component ownership, routes or services, operational or deployment paths, or another statement in MAP.md, include the corresponding MAP.md update in the same E3 change. Do not churn MAP.md for implementation details that leave the map accurate. ' +
         'E3 creates an isolated workspace, records preimages, freezes a deterministic candidate, runs all eight required validation profiles, and presents the exact diff for application approval. ' +
         'Approval creates a verified export package and authorizes you to continue the requested change yourself through the terminal tool: verify every binding, apply only that export, check, commit, push, deploy, and perform final verification. ' +
         'Do not ask for natural-language confirmation before calling this tool because the application presents its own Approve/Deny card after successful validation.',

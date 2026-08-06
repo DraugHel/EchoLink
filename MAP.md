@@ -1,7 +1,17 @@
 # EchoLink — Code Map
 
-> Lebendige Karte des Projekts. Stand: 2026-07-30. Bei größeren Umbauten aktualisieren.
+> Lebendige Karte des Projekts. Stand: 2026-08-06. Bei größeren Umbauten aktualisieren.
 > Zeilenzahlen sind Richtwerte — sie veralten. Muster und Verantwortlichkeiten bleiben.
+
+## Pflege-Regel für Luna/E3
+
+- Vor jedem EchoLink-Source-Change zuerst diese `MAP.md` lesen und als Karte für
+  die anschließende gezielte Source-Inspektion verwenden.
+- Wenn ein Change Projektstruktur, Komponenten-Verantwortung, Routen/Services,
+  Betriebs- oder Deploypfade oder andere Aussagen dieser Karte materiell ändert,
+  `MAP.md` im selben E3-Change passend aktualisieren.
+- Reine Implementierungsdetails, die keine Aussage dieser Karte verändern,
+  erzeugen kein künstliches `MAP.md`-Update.
 
 ## Überblick
 
