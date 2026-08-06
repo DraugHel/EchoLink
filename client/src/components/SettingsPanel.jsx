@@ -333,6 +333,9 @@ export default function SettingsPanel({
                     <option value="high">
                       Hoch
                     </option>
+                    <option value="max">
+                      Maximum
+                    </option>
                   </select>
                 </Field>
               </section>
