@@ -68,6 +68,8 @@ Tabellen:
 - `push_subscriptions` (Web-Push-Endpunkte pro User)
 - `google_oauth_accounts` (Tokens, Scopes, primary-Flag)
 - `memory_items` (type, scope, status, content, importance, confidence, Fingerprints)
+- `memory_embeddings` (lokale, modell-/dimensions- und Source-SHA-gebundene
+  Float32-Vektoren pro strukturierter Memory; Cascade-Delete)
 - Shift-System: `shift_imports`, `shift_import_items`, `shift_import_pages`,
   `shift_calendar_events`, `shift_sync_runs`, `shift_sync_actions`, `shift_settings`
 Migrationen: defensive try/catch ALTER TABLEs beim Boot.
@@ -503,10 +505,17 @@ Frontend: TaskPanel.jsx + AgentRunCockpit.jsx.
 
 ## Backend — Memory
 
-- **lib/memoryItems.js** (~935 Z.): Strukturiertes Memory. Types: profile|preference|
-  project|instruction|episodic|temporary|persona|legacy|fact. Status: active|superseded|
-  archived. selectMemoryItemsForContext (Scoring/Retrieval, limit 10, 6000 chars),
-  formatMemoryItemsForPrompt.
+- **lib/memoryItems.js**: Strukturiertes Memory. Types: profile|preference|project|
+  instruction|episodic|temporary|persona|legacy|fact. Status: active|superseded|
+  archived. `selectMemoryItemsForContext` fusioniert die bestehende lexikalische
+  Relevanz mit lokaler semantischer Ähnlichkeit; das Promptlimit bleibt bei 10
+  Memories und 6000 Zeichen.
+- **lib/memoryEmbeddingCore.js / memoryEmbeddingClient.js / memoryEmbeddings.js**:
+  lokaler EmbeddingGemma-Client gegen Ollamas `/api/embed`, kanonische Query-/
+  Dokument-Prompts, normalisierte Float32-BLOBs, Source-SHA-Prüfung, hybrides
+  Ranking und Circuit-Breaker. Ollama-Fehler brechen keinen Chat ab, sondern
+  verwenden den lexikalischen Retriever. `scripts/memory-embeddings-backfill.mjs`
+  zieht vorhandene aktive Memories kontrolliert nach.
 - **routes/memory.js** (~921 Z.): CRUD /api/memory/items + extractMemory(userId, convoId,
   model) — ruft runMemoryModel (JSON-Extraktion aus Verlauf), Dedup via Fingerprint/
   Token-Ähnlichkeit (findSimilarMemory), applyStructuredMemories. Legacy: users.memory-Text

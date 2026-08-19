@@ -1,4 +1,10 @@
 import db from '../db.js'
+import {
+  hybridMemoryScore
+} from './memoryEmbeddingCore.js'
+import {
+  semanticScoresForMemoryItems
+} from './memoryEmbeddings.js'
 
 export const MEMORY_TYPES = new Set([
   'profile',
@@ -709,11 +715,7 @@ function memoryTokens(value) {
   ]
 }
 
-function memoryRetrievalScore(
-  item,
-  queryTokens,
-  conversationId
-) {
+function memoryRetrievalScore(item, queryTokens) {
   const text = String(item.content || '')
     .toLowerCase()
     .normalize('NFKD')
@@ -733,24 +735,7 @@ function memoryRetrievalScore(
     token => text.includes(token)
   ).length
 
-  const conversationScope =
-    `conversation:${conversationId}`
-
-  const exactConversation =
-    item.scope === conversationScope
-
-  const globalStanding =
-    item.scope === 'global' &&
-    item.type === 'instruction' &&
-    item.metadata?.alwaysInclude === true
-
-  // Projekt-, Persona- und normale Fakten nur laden,
-  // wenn sie tatsächlich zur aktuellen Frage passen.
-  if (
-    overlap === 0 &&
-    !exactConversation &&
-    !globalStanding
-  ) {
+  if (overlap === 0) {
     return -1000
   }
 
@@ -758,14 +743,6 @@ function memoryRetrievalScore(
     overlap * 20 +
     Number(item.importance || 0) * 0.25 +
     Number(item.confidence || 0) * 10
-
-  if (exactConversation) {
-    score += 50
-  }
-
-  if (globalStanding) {
-    score += 20
-  }
 
   if (
     item.scope.startsWith('project:') &&
@@ -796,7 +773,7 @@ function memoryRetrievalScore(
   return score
 }
 
-export function selectMemoryItemsForContext(
+export async function selectMemoryItemsForContext(
   userId,
   query,
   options = {}
@@ -850,26 +827,103 @@ export function selectMemoryItemsForContext(
     LIMIT 250
   `).all(cleanUserId)
 
-  const queryTokens =
-    memoryTokens(query)
+  const recentContext =
+    String(options.recentContext || '').trim()
 
-  const ranked = rows
-    .map(row => {
-      const item = mapItem(row)
+  const currentWords =
+    String(query || '').match(/[\p{L}\p{N}]+/gu) || []
+
+  const lexicalQuery =
+    recentContext &&
+    (
+      String(query || '').length < 120 ||
+      currentWords.length < 8
+    )
+      ? `${query}\n${recentContext}`
+      : query
+
+  const queryTokens = memoryTokens(lexicalQuery)
+
+  const items = rows.map(mapItem)
+  const semanticScores =
+    await semanticScoresForMemoryItems(
+      items,
+      query,
+      {
+        recentContext,
+        signal: options.signal
+      }
+    )
+
+  const configuredThreshold = Number(
+    process.env.MEMORY_EMBEDDING_SIMILARITY_THRESHOLD
+  )
+
+  const semanticThreshold =
+    Number.isFinite(configuredThreshold)
+      ? Math.min(0.9, Math.max(0.2, configuredThreshold))
+      : 0.45
+
+  const conversationScope =
+    `conversation:${conversationId}`
+
+  const ranked = items
+    .map(item => {
+      const lexicalScore =
+        memoryRetrievalScore(
+          item,
+          queryTokens
+        )
+
+      const semanticSimilarity =
+        semanticScores.get(item.id)
+
+      const exactConversation =
+        item.scope === conversationScope
+
+      const globalStanding =
+        item.scope === 'global' &&
+        item.type === 'instruction' &&
+        item.metadata?.alwaysInclude === true
+
+      const retrievalScore =
+        hybridMemoryScore({
+          lexicalScore,
+          semanticSimilarity,
+          semanticThreshold,
+          exactConversation,
+          globalStanding
+        })
 
       return {
         ...item,
-        retrievalScore:
-          memoryRetrievalScore(
-            item,
-            queryTokens,
-            conversationId
-          )
+        lexicalScore:
+          lexicalScore >= 18
+            ? lexicalScore
+            : null,
+        semanticSimilarity:
+          Number.isFinite(semanticSimilarity)
+            ? semanticSimilarity
+            : null,
+        retrievalMode:
+          lexicalScore >= 18 &&
+          Number.isFinite(semanticSimilarity) &&
+          semanticSimilarity >= semanticThreshold
+            ? 'hybrid'
+            : lexicalScore >= 18
+              ? 'lexical'
+              : Number.isFinite(semanticSimilarity) &&
+                semanticSimilarity >= semanticThreshold
+                ? 'semantic'
+                : exactConversation || globalStanding
+                  ? 'pinned'
+                  : 'none',
+        retrievalScore
       }
     })
     .filter(
       item =>
-        item.retrievalScore >= 18
+        Number.isFinite(item.retrievalScore)
     )
     .sort(
       (a, b) =>

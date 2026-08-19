@@ -15,6 +15,9 @@ fs.mkdirSync(path.dirname(DB_PATH), { recursive: true })
 
 const db = new Database(DB_PATH)
 
+// All schema relations use explicit FK actions; make SQLite enforce them.
+db.pragma('foreign_keys = ON')
+
 db.exec(`
   PRAGMA journal_mode = WAL;
 
@@ -248,6 +251,42 @@ db.exec(`
     idx_memory_items_expires
     ON memory_items(
       expires_at
+    );
+
+  CREATE TABLE IF NOT EXISTS memory_embeddings (
+    memory_id INTEGER NOT NULL,
+    model TEXT NOT NULL,
+    dimensions INTEGER NOT NULL
+      CHECK (
+        dimensions >= 32
+        AND dimensions <= 4096
+      ),
+    source_sha256 TEXT NOT NULL
+      CHECK (
+        length(source_sha256) = 64
+        AND source_sha256 NOT GLOB '*[^0-9a-f]*'
+      ),
+    vector BLOB NOT NULL,
+    created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
+
+    PRIMARY KEY (
+      memory_id,
+      model,
+      dimensions
+    ),
+
+    FOREIGN KEY (memory_id)
+      REFERENCES memory_items(id)
+      ON DELETE CASCADE
+  );
+
+  CREATE INDEX IF NOT EXISTS
+    idx_memory_embeddings_model
+    ON memory_embeddings(
+      model,
+      dimensions,
+      memory_id
     );
 `);
 

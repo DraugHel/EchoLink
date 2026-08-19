@@ -10,6 +10,9 @@ import {
   updateMemoryItem
 } from '../lib/memoryItems.js'
 import { runDeepSeekMemory } from '../lib/deepseekMemory.js'
+import {
+  refreshMemoryEmbeddingsByIds
+} from '../lib/memoryEmbeddings.js'
 
 const router = Router()
 const OLLAMA_URL = process.env.OLLAMA_URL || 'http://localhost:11434'
@@ -320,7 +323,7 @@ router.get('/items/:itemId', requireAuth, (req, res) => {
 })
 
 // Manuelle Einzel-Memory anlegen
-router.post('/items', requireAuth, (req, res) => {
+router.post('/items', requireAuth, async (req, res) => {
   try {
     const item = createMemoryItem(
       req.session.userId,
@@ -344,9 +347,19 @@ router.post('/items', requireAuth, (req, res) => {
       }
     )
 
+    const embedding =
+      await refreshMemoryEmbeddingsByIds(
+        req.session.userId,
+        [item.id]
+      )
+
     res.status(201).json({
       ok: true,
-      item
+      item,
+      embedding: {
+        indexed: embedding.indexed,
+        reason: embedding.reason
+      }
     })
   } catch (error) {
     sendItemError(res, error)
@@ -354,7 +367,7 @@ router.post('/items', requireAuth, (req, res) => {
 })
 
 // Einzelne Memory bearbeiten
-router.patch('/items/:itemId', requireAuth, (req, res) => {
+router.patch('/items/:itemId', requireAuth, async (req, res) => {
   try {
     const item = updateMemoryItem(
       req.session.userId,
@@ -362,9 +375,19 @@ router.patch('/items/:itemId', requireAuth, (req, res) => {
       req.body || {}
     )
 
+    const embedding =
+      await refreshMemoryEmbeddingsByIds(
+        req.session.userId,
+        [item.id]
+      )
+
     res.json({
       ok: true,
-      item
+      item,
+      embedding: {
+        indexed: embedding.indexed,
+        reason: embedding.reason
+      }
     })
   } catch (error) {
     sendItemError(res, error)
@@ -917,10 +940,20 @@ Rules for legacyMarkdown:
     activeItems
   })
 
+  const embedding =
+    await refreshMemoryEmbeddingsByIds(
+      userId,
+      structured.itemIds
+    )
+
   return {
     ok: true,
     memory: newMemory,
-    structured
+    structured,
+    embedding: {
+      indexed: embedding.indexed,
+      reason: embedding.reason
+    }
   }
 }
 

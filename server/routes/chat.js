@@ -1460,15 +1460,38 @@ router.post('/:conversationId', requireAuth, async (req, res) => {
   // Activity-Timestamp bumpen
   db.prepare('UPDATE conversations SET updated_at = unixepoch() WHERE id = ?').run(convo.id)
 
-  // System prompt with structured retrieval and legacy fallback
-const selectedMemoryItems =
-    selectMemoryItemsForContext(
+  const recentMemoryRows = db.prepare(`
+    SELECT content
+    FROM messages
+    WHERE conversation_id = ?
+      AND role = 'user'
+      AND trim(content) <> ''
+    ORDER BY id DESC
+    LIMIT 3
+  `).all(convo.id)
+
+  const recentMemoryContext = recentMemoryRows
+    .filter((row, index) =>
+      !(
+        index === 0 &&
+        String(row.content || '').trim() === String(content || '').trim()
+      )
+    )
+    .slice(0, 2)
+    .reverse()
+    .map(row => row.content)
+    .join('\n')
+
+  // System prompt with hybrid semantic + lexical memory retrieval.
+  const selectedMemoryItems =
+    await selectMemoryItemsForContext(
       req.session.userId,
       content || '',
       {
         conversationId: convo.id,
         limit: 10,
-        maxChars: 6000
+        maxChars: 6000,
+        recentContext: recentMemoryContext
       }
     )
 
@@ -1489,7 +1512,16 @@ const selectedMemoryItems =
         scope: item.scope,
         score: Math.round(
           item.retrievalScore
-        )
+        ),
+        mode: item.retrievalMode,
+        lexicalScore:
+          item.lexicalScore === null
+            ? null
+            : Math.round(item.lexicalScore),
+        semanticSimilarity:
+          item.semanticSimilarity === null
+            ? null
+            : Number(item.semanticSimilarity.toFixed(3))
       }))
     )
   }

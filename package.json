@@ -15,6 +15,7 @@
     "e3:cleanup:validation-storage": "bash scripts/e3-prune-validation-storage.sh",
     "e3:cleanup:residue": "bash scripts/e3-clean-runtime-residue.sh",
     "e3:cleanup:chat-storage": "node scripts/e3-clean-chat-workspace-storage.mjs",
+    "memory:embeddings:backfill": "node scripts/memory-embeddings-backfill.mjs",
     "deploy": "bash scripts/deploy.sh",
     "mcp:web": "node server/mcp/webServer.js",
     "mcp:web:smoke": "node scripts/mcp-web-smoke.js",
