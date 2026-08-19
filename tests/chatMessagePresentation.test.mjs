@@ -23,6 +23,15 @@ test('chat bubbles and message actions use the shared polished presentation', ()
   assert.match(stylesheet, /\.msg-action-btn\s*\{[^}]*width:\s*30px/s)
   assert.match(stylesheet, /@media \(hover: none\)[\s\S]*width:\s*32px/)
   assert.match(stylesheet, /\.msg-action-btn\.is-copied/)
+
+  const userBubbleStart = stylesheet.indexOf('.msg-bubble-user {')
+  const assistantBubbleStart = stylesheet.indexOf('.msg-bubble-assistant {')
+  const userBubble = stylesheet.slice(userBubbleStart, assistantBubbleStart)
+
+  assert.ok(userBubbleStart >= 0)
+  assert.ok(assistantBubbleStart > userBubbleStart)
+  assert.match(userBubble, /border:\s*2px solid color-mix\(/)
+  assert.match(userBubble, /var\(--user-text\) 30%/)
 })
 
 test('message presentation remains theme-variable driven', () => {

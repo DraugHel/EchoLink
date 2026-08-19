@@ -188,10 +188,15 @@ a { color: var(--accent); text-decoration: none; }
       color-mix(in srgb, var(--user-bubble) 94%, white) 0%,
       color-mix(in srgb, var(--user-bubble) 82%, var(--bg)) 100%
     );
-  border: 1px solid color-mix(in srgb, var(--user-bubble) 70%, white);
+  border: 2px solid color-mix(
+    in srgb,
+    var(--user-text) 30%,
+    var(--user-bubble)
+  );
   border-radius: 16px 16px 5px 16px !important;
   box-shadow:
-    0 10px 28px rgba(0, 0, 0, 0.18),
+    0 12px 30px rgba(0, 0, 0, 0.2),
+    0 0 0 1px color-mix(in srgb, var(--user-bubble) 24%, transparent),
     inset 0 1px rgba(255, 255, 255, 0.16);
 }
 
@@ -219,7 +224,15 @@ a { color: var(--accent); text-decoration: none; }
 }
 
 .msg-bubble-user:hover {
-  border-color: color-mix(in srgb, var(--user-bubble) 58%, white);
+  border-color: color-mix(
+    in srgb,
+    var(--user-text) 42%,
+    var(--user-bubble)
+  );
+  box-shadow:
+    0 14px 38px rgba(0, 0, 0, 0.24),
+    0 0 0 1px color-mix(in srgb, var(--user-bubble) 38%, transparent),
+    inset 0 1px rgba(255, 255, 255, 0.18);
 }
 
 .msg-user-timestamp,
