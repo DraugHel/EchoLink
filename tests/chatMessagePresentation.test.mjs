@@ -11,13 +11,14 @@ const stylesheet = fs.readFileSync(
   'utf8'
 )
 
-test('chat messages use the redesigned hierarchy and quiet footer actions', () => {
+test('chat messages use layered cards and compact footer controls', () => {
   assert.match(messageSource, /msg-bubble-user/)
   assert.match(messageSource, /msg-bubble-assistant/)
   assert.match(messageSource, /msg-footer-user/)
   assert.match(messageSource, /msg-footer-assistant/)
   assert.match(messageSource, /msg-actions-user/)
   assert.match(messageSource, /msg-actions-assistant/)
+  assert.match(messageSource, /className="msg-avatar"/)
   assert.match(messageSource, /msg-action-danger/)
   assert.match(messageSource, /aria-label="Nachricht löschen"/)
   assert.match(messageSource, /aria-label="Antwort löschen"/)
@@ -41,11 +42,14 @@ test('chat messages use the redesigned hierarchy and quiet footer actions', () =
   assert.ok(footerStart > assistantRailStart)
   assert.match(userBubble, /border:\s*1px solid color-mix\(/)
   assert.doesNotMatch(userBubble, /border:\s*2px/)
-  assert.match(stylesheet, /\.msg-bubble-assistant::before\s*\{[^}]*width:\s*3px/s)
+  assert.match(userBubble, /radial-gradient\(/)
+  assert.match(userBubble, /backdrop-filter:\s*blur\(14px\)/)
+  assert.match(stylesheet, /\.msg-bubble-user::before\s*\{[^}]*height:\s*2px/s)
+  assert.match(stylesheet, /\.msg-bubble-assistant::before\s*\{[^}]*width:\s*4px/s)
   assert.match(stylesheet, /\.msg-footer-assistant\s*\{[^}]*border-top:/s)
-  assert.match(actions, /background:\s*transparent/)
-  assert.match(actions, /border:\s*0/)
-  assert.doesNotMatch(actions, /border-radius:/)
+  assert.match(actions, /background:\s*color-mix\(/)
+  assert.match(actions, /border:\s*1px solid color-mix\(/)
+  assert.match(actions, /border-radius:\s*999px/)
 })
 
 test('message presentation remains theme-variable driven', () => {

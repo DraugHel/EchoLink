@@ -204,9 +204,9 @@ function Message({ role, content, streaming, images, think, toolStatus, actionRe
       className="fade-in"
     >
       {!isUser && (
-        <div style={styles.avatar}>
-          <svg width="14" height="14" viewBox="0 0 32 32" fill="none">
-            <rect width="32" height="32" rx="8" fill="var(--accent)"/>
+        <div style={styles.avatar} className="msg-avatar">
+          <svg width="16" height="16" viewBox="0 0 32 32" fill="none">
+            <rect width="32" height="32" rx="10" fill="var(--accent)"/>
             <path d="M8 22 L14 10 L20 18 L24 14" stroke="#0d0d0d" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
             <circle cx="24" cy="14" r="2" fill="#0d0d0d"/>
           </svg>
@@ -944,14 +944,13 @@ function CodeBlock({ lang, code }) {
 const styles = {
   wrap: { display: 'flex', gap: 10, marginBottom: 20, alignItems: 'flex-start', maxWidth: 820, width: '100%', marginLeft: 'auto', marginRight: 'auto' },
   avatar: {
-    width: 28, height: 28, borderRadius: 8, flexShrink: 0,
+    width: 34, height: 34, borderRadius: 12, flexShrink: 0,
     display: 'flex', alignItems: 'center', justifyContent: 'center',
-    background: 'var(--green-bg)', border: '1px solid var(--green-dim)',
     marginTop: 2
   },
-  bubble: { maxWidth: '78%', borderRadius: 14, padding: '14px 16px', fontSize: 15, lineHeight: 1.65, minWidth: 0 },
+  bubble: { maxWidth: '76%', borderRadius: 14, padding: '15px 17px', fontSize: 15, lineHeight: 1.65, minWidth: 0 },
   userBubble: {
-    color: 'var(--user-text, #0d0d0d)',
+    color: 'var(--text)',
     fontWeight: 400
   },
   aiBubble: {
@@ -1028,14 +1027,14 @@ const styles = {
   },
   thinkWrap: {
     marginBottom: 10,
-    borderRadius: 8,
-    border: '1px solid var(--border)',
+    borderRadius: 12,
+    border: '1px solid color-mix(in srgb, var(--border2) 72%, transparent)',
     overflow: 'hidden'
   },
   thinkToggle: {
     width: '100%', textAlign: 'left',
     padding: '7px 12px', fontSize: 12,
-    color: 'var(--text2)', background: 'var(--bg4)',
+    color: 'var(--text2)', background: 'color-mix(in srgb, var(--bg4) 82%, transparent)',
     cursor: 'pointer', fontFamily: 'var(--font-mono)',
     display: 'flex', alignItems: 'center',
     border: 'none'
