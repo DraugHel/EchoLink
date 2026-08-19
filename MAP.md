@@ -603,7 +603,8 @@ Pipeline: Foto/PDF des Dienstplans → Vision-OCR → Prüf-UI → Google-Calend
   normalen Chat-Runs.
 - **lib/push.js**: SW-Registrierung + Subscription. **lib/templates.jsx**: Avatar-SVGs
   (corsn/echo/dev...).
-- **components/**: Message.jsx (Markdown, Tool-Blöcke, Terminal-Bündelung), MessageInput,
+- **components/**: Message.jsx (Markdown, Tool-Blöcke, Terminal-Bündelung sowie
+  themenvariable Chat-Bubbles und zugängliche Copy/Edit/Delete-Aktionsleisten), MessageInput,
   Sidebar, SettingsPanel, MemoryPanel, TaskPanel, AgentRunCockpit (Run-Detail mit Plan/
   Events), ChatAgentCockpit (bei abgebrochenem Research-Run: „Fortsetzen ab X Checkpoints“),
   TerminalTimeline (**Terminal:**-Messages), SystemStatusPanel inklusive Watchtower-

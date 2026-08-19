@@ -212,33 +212,36 @@ function Message({ role, content, streaming, images, think, toolStatus, actionRe
           </svg>
         </div>
       )}
-      <div className="msg-bubble" style={{ ...styles.bubble, ...(isUser ? styles.userBubble : styles.aiBubble) }}>
+      <div
+        className={`msg-bubble ${isUser ? 'msg-bubble-user' : 'msg-bubble-assistant'}`}
+        style={{ ...styles.bubble, ...(isUser ? styles.userBubble : styles.aiBubble) }}
+      >
         {isUser
           ? (
             <>
               <div style={{ ...styles.msgHeader, marginBottom: 4, justifyContent: 'space-between' }}>
                 {timeStr && !streaming && showTime && (
-                  <div style={{ fontSize: 10, color: 'rgba(13,13,13,0.45)', fontFamily: 'var(--font-mono)' }}>{timeStr}</div>
+                  <div className="msg-user-timestamp">{timeStr}</div>
                 )}
-                <div className="msg-actions" style={{ display: 'flex', gap: 4 }}>
+                <div className="msg-actions msg-actions-user">
                   {onDelete && !editing && (
-                    <button style={{ ...styles.copyBtn, color: 'rgba(13,13,13,0.4)' }}
-                      onClick={() => onDelete(id)} title="Delete message">
+                    <button className="msg-action-btn msg-action-btn-user msg-action-danger"
+                      onClick={() => onDelete(id)} title="Nachricht löschen" aria-label="Nachricht löschen">
                       <TrashIcon />
                     </button>
                   )}
                   {onEdit && !editing && (
-                    <button style={{ ...styles.copyBtn, color: 'rgba(13,13,13,0.4)' }}
-                      onClick={() => { setEditText(content || ''); onEdit(id) }} title="Edit message">
+                    <button className="msg-action-btn msg-action-btn-user"
+                      onClick={() => { setEditText(content || ''); onEdit(id) }} title="Nachricht bearbeiten" aria-label="Nachricht bearbeiten">
                       <EditIcon />
                     </button>
                   )}
-                  <button style={{ ...styles.copyBtn, color: userCopied ? 'var(--green)' : 'rgba(13,13,13,0.4)' }}
+                  <button className={`msg-action-btn msg-action-btn-user ${userCopied ? 'is-copied' : ''}`}
                     onClick={async () => {
                       try { await navigator.clipboard.writeText(content) }
                       catch { const t = document.createElement('textarea'); t.value = content; document.body.appendChild(t); t.select(); document.execCommand('copy'); document.body.removeChild(t) }
                       setUserCopied(true); setTimeout(() => setUserCopied(false), 1500)
-                    }} title="Copy message">
+                    }} title={userCopied ? 'Kopiert' : 'Nachricht kopieren'} aria-label={userCopied ? 'Nachricht kopiert' : 'Nachricht kopieren'}>
                     {userCopied ? <CheckIcon /> : <CopyIcon />}
                   </button>
                 </div>
@@ -254,9 +257,7 @@ function Message({ role, content, streaming, images, think, toolStatus, actionRe
                 <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: content ? 8 : 0 }}>
                   {fileAttachments.map(att => (
                     <a key={att.filename} href={`/api/uploads/${att.filename}`} download={att.originalName}
-                      style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 10px',
-                        background: 'rgba(13,13,13,0.15)', borderRadius: 6, fontSize: 13,
-                        color: '#0d0d0d', textDecoration: 'none', fontFamily: 'var(--font-mono)' }}>
+                      className="msg-user-file">
                       📄 {att.originalName}
                     </a>
                   ))}
@@ -273,23 +274,14 @@ function Message({ role, content, streaming, images, think, toolStatus, actionRe
                       if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); onSaveEdit(id, editText) }
                     }}
                     autoFocus
-                    style={{
-                      width: '100%', minHeight: 60, resize: 'vertical',
-                      background: 'rgba(13,13,13,0.08)', border: '1px solid rgba(13,13,13,0.2)',
-                      borderRadius: 6, padding: '8px 10px', fontSize: 14,
-                      color: '#0d0d0d', fontFamily: 'var(--font-mono)', outline: 'none',
-                    }}
+                    className="msg-edit-textarea"
                   />
-                  <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
-                    <button onClick={onCancelEdit}
-                      style={{ padding: '4px 10px', fontSize: 12, border: 'none', borderRadius: 6,
-                        background: 'rgba(13,13,13,0.1)', color: '#0d0d0d', cursor: 'pointer' }}>
-                      Cancel
+                  <div className="msg-edit-actions">
+                    <button className="msg-edit-btn msg-edit-cancel" onClick={onCancelEdit}>
+                      Abbrechen
                     </button>
-                    <button onClick={() => onSaveEdit(id, editText)}
-                      style={{ padding: '4px 10px', fontSize: 12, border: 'none', borderRadius: 6,
-                        background: 'var(--accent)', color: '#0d0d0d', cursor: 'pointer', fontWeight: 600 }}>
-                      Save
+                    <button className="msg-edit-btn msg-edit-save" onClick={() => onSaveEdit(id, editText)}>
+                      Speichern
                     </button>
                   </div>
                 </div>
@@ -301,7 +293,7 @@ function Message({ role, content, streaming, images, think, toolStatus, actionRe
           : (
             <div style={styles.markdown}>
               {timeStr && !streaming && showTime && (
-                <div style={{ fontSize: 10, color: 'var(--text3)', marginBottom: 4, fontFamily: 'var(--font-mono)' }}>{timeStr}</div>
+                <div className="msg-assistant-timestamp">{timeStr}</div>
               )}
               {toolStatus && (
                 <div style={styles.toolStatus}>
@@ -361,21 +353,23 @@ function Message({ role, content, streaming, images, think, toolStatus, actionRe
                   </div>
                 )
               })}
-              <div className="msg-actions" style={styles.msgHeader}>
-                <button style={{ ...styles.copyBtn, color: copied ? 'var(--green)' : 'var(--text3)' }}
+              <div className="msg-actions msg-actions-assistant">
+                <button className={`msg-action-btn msg-action-btn-assistant ${copied ? 'is-copied' : ''}`}
                   onClick={async () => {
                     try { await navigator.clipboard.writeText(content) }
                     catch { const t = document.createElement('textarea'); t.value = content; document.body.appendChild(t); t.select(); document.execCommand('copy'); document.body.removeChild(t) }
                     setCopied(true); setTimeout(() => setCopied(false), 1500)
                   }}
-                  title="Copy response"
+                  title={copied ? 'Kopiert' : 'Antwort kopieren'}
+                  aria-label={copied ? 'Antwort kopiert' : 'Antwort kopieren'}
                 >
                   {copied ? <CheckIcon /> : <CopyIcon />}
                 </button>
                 {onDelete && (
-                  <button style={{ ...styles.copyBtn, color: 'var(--text3)' }}
+                  <button className="msg-action-btn msg-action-btn-assistant msg-action-danger"
                     onClick={() => onDelete(id)}
-                    title="Delete message"
+                    title="Antwort löschen"
+                    aria-label="Antwort löschen"
                   >
                     <TrashIcon />
                   </button>
@@ -839,22 +833,22 @@ const XIcon2 = () => (
 )
 
 const TrashIcon = () => (
-  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
   </svg>
 )
 const CopyIcon = () => (
-  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
   </svg>
 )
 const CheckIcon = () => (
-  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
     <polyline points="20 6 9 17 4 12"/>
   </svg>
 )
 const EditIcon = () => (
-  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
     <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
   </svg>
@@ -951,16 +945,11 @@ const styles = {
   },
   bubble: { maxWidth: '80%', borderRadius: 12, padding: '12px 16px', fontSize: 15, lineHeight: 1.65, minWidth: 0 },
   userBubble: {
-    background: 'var(--user-bubble, var(--accent))',
     color: 'var(--user-text, #0d0d0d)',
-    borderBottomRightRadius: 4,
     fontWeight: 400
   },
   aiBubble: {
-    background: 'var(--bg3)',
-    border: '1px solid var(--border)',
     color: 'var(--text)',
-    borderBottomLeftRadius: 4,
     width: '100%',
     maxWidth: '100%'
   },
@@ -1034,12 +1023,6 @@ const styles = {
   msgHeader: {
     display: 'flex', justifyContent: 'flex-end',
     marginBottom: 4
-  },
-  copyBtn: {
-    background: 'none', border: 'none', cursor: 'pointer',
-    padding: '2px 4px', borderRadius: 4,
-    transition: 'color var(--transition)',
-    display: 'flex', alignItems: 'center'
   },
   thinkWrap: {
     marginBottom: 10,

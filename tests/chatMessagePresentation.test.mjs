@@ -1,0 +1,54 @@
+import assert from 'node:assert/strict'
+import fs from 'node:fs'
+import test from 'node:test'
+
+const messageSource = fs.readFileSync(
+  new URL('../client/src/components/Message.jsx', import.meta.url),
+  'utf8'
+)
+const stylesheet = fs.readFileSync(
+  new URL('../client/src/index.css', import.meta.url),
+  'utf8'
+)
+
+test('chat bubbles and message actions use the shared polished presentation', () => {
+  assert.match(messageSource, /msg-bubble-user/)
+  assert.match(messageSource, /msg-bubble-assistant/)
+  assert.match(messageSource, /msg-actions-user/)
+  assert.match(messageSource, /msg-actions-assistant/)
+  assert.match(messageSource, /msg-action-danger/)
+  assert.match(messageSource, /aria-label="Nachricht löschen"/)
+  assert.match(messageSource, /aria-label="Antwort löschen"/)
+
+  assert.match(stylesheet, /\.msg-action-btn\s*\{[^}]*width:\s*30px/s)
+  assert.match(stylesheet, /@media \(hover: none\)[\s\S]*width:\s*32px/)
+  assert.match(stylesheet, /\.msg-action-btn\.is-copied/)
+})
+
+test('message presentation remains theme-variable driven', () => {
+  for (const theme of [
+    ':root',
+    'html.theme-sakura',
+    'html.theme-void',
+    'html.theme-blossom',
+    'html.theme-tokyo-night'
+  ]) {
+    assert.match(stylesheet, new RegExp(theme.replace('.', '\\.')))
+  }
+
+  const presentationStart = stylesheet.indexOf('.msg-bubble {')
+  const presentationEnd = stylesheet.indexOf('.echo-wave')
+  const presentation = stylesheet.slice(
+    presentationStart,
+    presentationEnd
+  )
+
+  assert.ok(presentationStart >= 0)
+  assert.ok(presentationEnd > presentationStart)
+  assert.match(presentation, /var\(--user-bubble\)/)
+  assert.match(presentation, /var\(--user-text\)/)
+  assert.match(presentation, /var\(--accent\)/)
+  assert.match(presentation, /var\(--bg3\)/)
+  assert.match(presentation, /var\(--border2\)/)
+  assert.doesNotMatch(presentation, /color:\s*#0d0d0d/)
+})
