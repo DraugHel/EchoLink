@@ -5,6 +5,10 @@ import {
   formatMemoryItemsForPrompt,
   selectMemoryItemsForContext
 } from '../lib/memoryItems.js'
+import {
+  isRecallOnlyRequest,
+  recallRuntimeInstruction
+} from '../lib/memoryRecallPolicy.js'
 import { extractUrls, fetchAllUrls } from '../lib/fetchUrl.js'
 import { UPLOAD_DIR, extractTextFromFile } from './uploads.js'
 import {
@@ -1460,6 +1464,9 @@ router.post('/:conversationId', requireAuth, async (req, res) => {
   // Activity-Timestamp bumpen
   db.prepare('UPDATE conversations SET updated_at = unixepoch() WHERE id = ?').run(convo.id)
 
+  const recallOnlyRequest =
+    isRecallOnlyRequest(content)
+
   const recentMemoryRows = db.prepare(`
     SELECT content
     FROM messages
@@ -1491,13 +1498,22 @@ router.post('/:conversationId', requireAuth, async (req, res) => {
         conversationId: convo.id,
         limit: 10,
         maxChars: 6000,
-        recentContext: recentMemoryContext
+        recentContext: recentMemoryContext,
+        recallOnly: recallOnlyRequest
       }
     )
 
   const structuredMemory =
     formatMemoryItemsForPrompt(
       selectedMemoryItems
+    )
+
+  const hasRecallMatch =
+    selectedMemoryItems.some(item =>
+      item.retrievalMode === 'semantic' ||
+      item.retrievalMode === 'lexical' ||
+      item.retrievalMode === 'hybrid' ||
+      item.scope === `conversation:${convo.id}`
     )
 
   if (
@@ -1560,6 +1576,10 @@ router.post('/:conversationId', requireAuth, async (req, res) => {
 ${structuredMemory}
 Use these as background context. If these memories fully answer the request, answer directly and do not call tools merely to verify them. Do not mention memory IDs or metadata unless the user explicitly asks.]`
       : ''
+
+  const recallRuntimeBlock = recallOnlyRequest
+    ? recallRuntimeInstruction({ hasRecallMatch })
+    : ''
 
 
   const calendarToolPolicy = `[Calendar tool policy:
@@ -1984,6 +2004,7 @@ Use these as background context. If these memories fully answer the request, ans
     fullHistory.map(message => ({ ...message }))
   const runtimeContext = [
     structuredRuntimeBlock,
+    recallRuntimeBlock,
     `[${timeNote}]`
   ].filter(Boolean).join('\n\n')
 
@@ -2192,7 +2213,8 @@ Use these as background context. If these memories fully answer the request, ans
     temperature: convo.temperature,
     top_k: convo.top_k,
     top_p: convo.top_p,
-    reasoningEffort: convo.reasoning_effort || ''
+    reasoningEffort: convo.reasoning_effort || '',
+    tools: recallOnlyRequest ? [] : undefined
   }
 
   let allContent = ''

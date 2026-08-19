@@ -12,8 +12,10 @@ import {
   hybridMemoryScore,
   memoryEmbeddingQuery,
   memoryEmbeddingSource,
+  memorySemanticThreshold,
   normalizeEmbedding,
-  sha256Text
+  sha256Text,
+  shouldUseRecentMemoryContext
 } from '../server/lib/memoryEmbeddingCore.js'
 import {
   createOllamaEmbeddingClient
@@ -28,6 +30,39 @@ test('short memory queries include recent conversational context', () => {
   assert.match(query, /^task: search result \| query: okay go/)
   assert.match(query, /Recent conversation context:/)
   assert.match(query, /semantic memory retrieval/)
+})
+
+test('explicit recall queries do not inherit unrelated recent context', () => {
+  const query = memoryEmbeddingQuery(
+    'Weißt du mein Schichtmodell noch?',
+    'The previous message only discussed the Termius package name.'
+  )
+
+  assert.equal(
+    shouldUseRecentMemoryContext('Weißt du mein Schichtmodell noch?'),
+    false
+  )
+  assert.doesNotMatch(query, /Termius package/)
+  assert.match(query, /Schichtmodell/)
+})
+
+test('recall uses the measured semantic boundary without weakening normal turns', () => {
+  assert.equal(
+    memorySemanticThreshold('0.45'),
+    0.45
+  )
+  assert.equal(
+    memorySemanticThreshold('0.45', { recallOnly: true }),
+    0.28
+  )
+  assert.ok(hybridMemoryScore({
+    lexicalScore: -1000,
+    semanticSimilarity: 0.335,
+    semanticThreshold: memorySemanticThreshold(
+      '0.45',
+      { recallOnly: true }
+    )
+  }) > 0)
 })
 
 test('standalone memory queries do not inherit stale context', () => {
@@ -190,6 +225,8 @@ test('database and chat wire semantic retrieval without changing prompt caps', (
   assert.match(chat, /maxChars: 6000/)
   assert.match(memoryItems, /semanticScoresForMemoryItems/)
   assert.match(memoryItems, /hybridMemoryScore/)
+  assert.match(memoryItems, /recallOnly:\s*options\.recallOnly === true/)
+  assert.match(chat, /recallOnly:\s*recallOnlyRequest/)
 })
 
 test('SQLite integration stores, retrieves, invalidates and cascades embeddings', () => {
@@ -252,12 +289,37 @@ test('SQLite integration stores, retrieves, invalidates and cascades embeddings'
       importance: 70,
       confidence: 1
     })
+    const shiftModel = createMemoryItem(userId, {
+      type: 'profile',
+      scope: 'global',
+      content: 'Arbeitet bei Novartis im Schichtmodell 04–12, 12–20 und 20–04 Uhr.',
+      importance: 65,
+      confidence: 0.7
+    })
 
     const indexed = await refreshMemoryEmbeddingsByIds(
       userId,
-      [storage.id, music.id]
+      [storage.id, music.id, shiftModel.id]
     )
-    if (indexed.indexed !== 2) throw new Error('index count mismatch')
+    if (indexed.indexed !== 3) throw new Error('index count mismatch')
+
+    const recalledShift = await selectMemoryItemsForContext(
+      userId,
+      'weißt du mein schichtmodell noch?',
+      {
+        conversationId: 0,
+        limit: 10,
+        maxChars: 6000,
+        recentContext: 'The previous turn only discussed com.termmius.Termius.',
+        recallOnly: true
+      }
+    )
+    if (recalledShift[0]?.id !== shiftModel.id) {
+      throw new Error('literal recall missed the stored shift model')
+    }
+    if (recalledShift[0]?.lexicalScore === null) {
+      throw new Error('literal recall did not retain its lexical match')
+    }
 
     const selected = await selectMemoryItemsForContext(
       userId,

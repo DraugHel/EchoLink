@@ -1,6 +1,8 @@
 import db from '../db.js'
 import {
-  hybridMemoryScore
+  hybridMemoryScore,
+  memorySemanticThreshold,
+  shouldUseRecentMemoryContext
 } from './memoryEmbeddingCore.js'
 import {
   semanticScoresForMemoryItems
@@ -721,6 +723,11 @@ function memoryRetrievalScore(item, queryTokens) {
     .normalize('NFKD')
     .replace(/\p{M}/gu, '')
 
+  const compactText = text.replace(
+    /[^\p{L}\p{N}]+/gu,
+    ''
+  )
+
   const scopeToken = item.scope.startsWith('project:')
     ? item.scope.slice('project:'.length).toLowerCase()
     : item.scope.startsWith('persona:')
@@ -732,7 +739,11 @@ function memoryRetrievalScore(item, queryTokens) {
     : queryTokens
 
   const overlap = relevantQueryTokens.filter(
-    token => text.includes(token)
+    token =>
+      text.includes(token) ||
+      compactText.includes(
+        token.replace(/[^\p{L}\p{N}]+/gu, '')
+      )
   ).length
 
   if (overlap === 0) {
@@ -830,15 +841,9 @@ export async function selectMemoryItemsForContext(
   const recentContext =
     String(options.recentContext || '').trim()
 
-  const currentWords =
-    String(query || '').match(/[\p{L}\p{N}]+/gu) || []
-
   const lexicalQuery =
     recentContext &&
-    (
-      String(query || '').length < 120 ||
-      currentWords.length < 8
-    )
+    shouldUseRecentMemoryContext(query)
       ? `${query}\n${recentContext}`
       : query
 
@@ -855,14 +860,11 @@ export async function selectMemoryItemsForContext(
       }
     )
 
-  const configuredThreshold = Number(
-    process.env.MEMORY_EMBEDDING_SIMILARITY_THRESHOLD
-  )
-
   const semanticThreshold =
-    Number.isFinite(configuredThreshold)
-      ? Math.min(0.9, Math.max(0.2, configuredThreshold))
-      : 0.45
+    memorySemanticThreshold(
+      process.env.MEMORY_EMBEDDING_SIMILARITY_THRESHOLD,
+      { recallOnly: options.recallOnly === true }
+    )
 
   const conversationScope =
     `conversation:${conversationId}`

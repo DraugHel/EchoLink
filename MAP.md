@@ -513,9 +513,18 @@ Frontend: TaskPanel.jsx + AgentRunCockpit.jsx.
 - **lib/memoryEmbeddingCore.js / memoryEmbeddingClient.js / memoryEmbeddings.js**:
   lokaler EmbeddingGemma-Client gegen Ollamas `/api/embed`, kanonische Query-/
   Dokument-Prompts, normalisierte Float32-BLOBs, Source-SHA-Prüfung, hybrides
-  Ranking und Circuit-Breaker. Ollama-Fehler brechen keinen Chat ab, sondern
-  verwenden den lexikalischen Retriever. `scripts/memory-embeddings-backfill.mjs`
-  zieht vorhandene aktive Memories kontrolliert nach.
+  Ranking und Circuit-Breaker. Nur tatsächlich elliptische Kurzfragen übernehmen
+  den jüngsten Gesprächskontext; eigenständige Recall-Fragen werden davon nicht
+  verwässert. Für intent-geprüfte Recall-Turns gilt die am lokalen Modell gemessene
+  niedrigere Semantikschwelle, während normale Turns ihre strengere Schwelle
+  behalten. Ollama-Fehler brechen keinen Chat ab, sondern verwenden den
+  lexikalischen Retriever. `scripts/memory-embeddings-backfill.mjs` zieht
+  vorhandene aktive Memories kontrolliert nach.
+- **lib/memoryRecallPolicy.js**: Erkennt reine Rückfragen nach früheren
+  Gesprächen/Entscheidungen. Für diesen einzelnen Turn bleiben Tools aus; Luna
+  antwortet ausschließlich aus sichtbarem Verlauf und ausgewählten Memories
+  oder meldet ehrlich, dass kein passender Kontext gespeichert ist. Explizite
+  Prüf-, Such- und Arbeitsaufträge behalten unverändert alle Tools.
 - **routes/memory.js** (~921 Z.): CRUD /api/memory/items + extractMemory(userId, convoId,
   model) — ruft runMemoryModel (JSON-Extraktion aus Verlauf), Dedup via Fingerprint/
   Token-Ähnlichkeit (findSimilarMemory), applyStructuredMemories. Legacy: users.memory-Text

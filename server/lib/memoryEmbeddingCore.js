@@ -6,6 +6,38 @@ const QUERY_PREFIX =
 const DOCUMENT_PREFIX =
   'title: none | text: '
 
+const ELLIPTICAL_QUERY_PATTERNS = [
+  /^(?:ok(?:ay)?|jo|ja|go|weiter|mach(?:\s+das)?|nochmal|erneut)\b/iu,
+  /^(?:und\s+)?(?:das|dies|davon|dazu|damit|daran|darüber|dort)(?:\s+auch)?[?.!]*$/iu,
+  /^(?:was|wie|warum|wieso)\s+(?:ist|war|geht)\s+(?:damit|dort|daran|dabei)[?.!]*$/iu
+]
+
+export function shouldUseRecentMemoryContext(query) {
+  const current = String(query || '').trim()
+
+  return Boolean(
+    current &&
+    ELLIPTICAL_QUERY_PATTERNS.some(pattern => pattern.test(current))
+  )
+}
+
+export function memorySemanticThreshold(
+  configuredValue,
+  { recallOnly = false } = {}
+) {
+  const configured = Number(configuredValue)
+  const threshold = Number.isFinite(configured)
+    ? Math.min(0.9, Math.max(0.2, configured))
+    : 0.45
+
+  // EmbeddingGemma's measured relevant matches on this corpus are commonly
+  // around 0.30–0.40. Recall requests are already intent-gated, so use the
+  // lower measured boundary without weakening ordinary retrieval globally.
+  return recallOnly
+    ? Math.min(threshold, 0.28)
+    : threshold
+}
+
 export function memoryEmbeddingSource(item) {
   const type = String(item?.type || 'fact').trim()
   const scope = String(item?.scope || 'global').trim()
@@ -17,10 +49,9 @@ export function memoryEmbeddingSource(item) {
 export function memoryEmbeddingQuery(query, recentContext = '') {
   const current = String(query || '').trim()
   const context = String(recentContext || '').trim()
-  const words = current.match(/[\p{L}\p{N}]+/gu) || []
   const needsContext =
     context &&
-    (current.length < 120 || words.length < 8)
+    shouldUseRecentMemoryContext(current)
 
   const text = needsContext
     ? `${current}\n\nRecent conversation context:\n${context}`
@@ -182,4 +213,3 @@ export function hybridMemoryScore({
 
   return score
 }
-
