@@ -82,10 +82,11 @@ function formatUsageNumber(value) {
   return Math.round(number).toLocaleString('de-DE')
 }
 
-function Message({ role, content, streaming, images, think, toolStatus, actionRequests, onApprove, onDeny, onAlwaysAllow, usage, id, createdAt, prevCreatedAt, onDelete, editing, onEdit, onSaveEdit, onCancelEdit, retryFailed, onRetry }) {
+function Message({ role, content, streaming, images, think, toolStatus, actionRequests, onApprove, onDeny, onAlwaysAllow, usage, memoryEvidence, id, createdAt, prevCreatedAt, onDelete, editing, onEdit, onSaveEdit, onCancelEdit, retryFailed, onRetry }) {
   const [thinkOpen, setThinkOpen] = useState(false)
   const [termOpen, setTermOpen] = useState(false)
   const [usageOpen, setUsageOpen] = useState(false)
+  const [memoryOpen, setMemoryOpen] = useState(false)
 
   // Terminal-Output-Messages (aus dem chat.js Approve-Handler) erkennen
   const isTerminal = role === 'assistant' && typeof content === 'string'
@@ -454,6 +455,81 @@ function Message({ role, content, streaming, images, think, toolStatus, actionRe
                 >
                   Retry
                 </button>
+              )}
+              {!streaming && Array.isArray(memoryEvidence) && (
+                <div style={styles.memoryEvidenceWrap}>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setMemoryOpen(open => !open)
+                    }
+                    aria-expanded={memoryOpen}
+                    style={styles.memoryEvidenceToggle}
+                  >
+                    <span aria-hidden="true">◆</span>
+                    <span>
+                      {memoryEvidence.length > 0
+                        ? `Memory anzeigen · ${memoryEvidence.length}`
+                        : 'Keine Memory verwendet'}
+                    </span>
+                    {memoryEvidence.length > 0 && (
+                      <span
+                        aria-hidden="true"
+                        style={styles.memoryEvidenceChevron}
+                      >
+                        {memoryOpen ? '▾' : '▸'}
+                      </span>
+                    )}
+                  </button>
+
+                  {memoryOpen && memoryEvidence.length > 0 && (
+                    <div style={styles.memoryEvidenceList}>
+                      <div style={styles.memoryEvidenceIntro}>
+                        Diese Memories waren Teil dieser Modellanfrage.
+                      </div>
+                      {memoryEvidence.map((memory, index) => (
+                        <div
+                          key={`${memory.id}-${index}`}
+                          style={styles.memoryEvidenceCard}
+                        >
+                          <div style={styles.memoryEvidenceMeta}>
+                            <span>{memory.type || 'memory'}</span>
+                            <span>{memory.scope || 'global'}</span>
+                            {memory.retrievalMode && (
+                              <span>
+                                {memory.retrievalMode}
+                              </span>
+                            )}
+                          </div>
+                          <div style={styles.memoryEvidenceContent}>
+                            {memory.content}
+                          </div>
+                          <div style={styles.memoryEvidenceScores}>
+                            {Number.isFinite(memory.semanticSimilarity) && (
+                              <span>
+                                Semantik{' '}
+                                {(memory.semanticSimilarity * 100)
+                                  .toFixed(1)
+                                  .replace('.', ',')}
+                                %
+                              </span>
+                            )}
+                            {Number.isFinite(memory.lexicalScore) && (
+                              <span>
+                                Lexikal {Math.round(memory.lexicalScore)}
+                              </span>
+                            )}
+                            {Number.isFinite(memory.retrievalScore) && (
+                              <span>
+                                Rang {Math.round(memory.retrievalScore)}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
               )}
               {!streaming && usage && (() => {
                 const contextEstimate = Number(
@@ -984,6 +1060,76 @@ const styles = {
     color: 'var(--text2)', background: 'var(--bg3)',
     lineHeight: 1.5, maxHeight: 300, overflowY: 'auto',
     fontFamily: 'var(--font-mono)'
+  },
+  memoryEvidenceWrap: {
+    marginTop: 9,
+    borderRadius: 8,
+    border: '1px solid var(--border)',
+    overflow: 'hidden'
+  },
+  memoryEvidenceToggle: {
+    width: '100%',
+    display: 'flex',
+    alignItems: 'center',
+    gap: 7,
+    padding: '7px 10px',
+    border: 'none',
+    background: 'var(--accent-bg)',
+    color: 'var(--text2)',
+    cursor: 'pointer',
+    fontFamily: 'var(--font-mono)',
+    fontSize: 11,
+    textAlign: 'left'
+  },
+  memoryEvidenceChevron: {
+    marginLeft: 'auto',
+    color: 'var(--accent)'
+  },
+  memoryEvidenceList: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 7,
+    padding: 8,
+    background: 'var(--bg3)'
+  },
+  memoryEvidenceIntro: {
+    padding: '1px 2px 3px',
+    color: 'var(--text3)',
+    fontFamily: 'var(--font-mono)',
+    fontSize: 10,
+    lineHeight: 1.45
+  },
+  memoryEvidenceCard: {
+    minWidth: 0,
+    padding: '8px 9px',
+    border: '1px solid var(--border)',
+    borderLeft: '3px solid var(--accent)',
+    borderRadius: 7,
+    background: 'var(--bg4)'
+  },
+  memoryEvidenceMeta: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: '4px 8px',
+    marginBottom: 5,
+    color: 'var(--accent)',
+    fontFamily: 'var(--font-mono)',
+    fontSize: 10
+  },
+  memoryEvidenceContent: {
+    color: 'var(--text)',
+    fontSize: 12,
+    lineHeight: 1.5,
+    overflowWrap: 'anywhere'
+  },
+  memoryEvidenceScores: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: '4px 10px',
+    marginTop: 6,
+    color: 'var(--text3)',
+    fontFamily: 'var(--font-mono)',
+    fontSize: 9
   },
   cursor: {
     display: 'inline-block', width: 2, height: '1em',

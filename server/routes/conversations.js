@@ -1,6 +1,7 @@
 import { Router } from 'express'
 import { requireAuth } from '../middleware/auth.js'
 import db, { DEFAULT_MODEL } from '../db.js'
+import { parseMemoryEvidence } from '../lib/memoryEvidence.js'
 import { deleteFilesForConvo, deleteFilesForMessage } from './uploads.js'
 
 const router = Router()
@@ -276,13 +277,26 @@ router.get('/:id/messages', requireAuth, (req, res) => {
   if (!convo) return res.status(404).json({ error: 'Not found' })
 
   const messages = db.prepare(`
-    SELECT id, role, content, think, images, usage, created_at FROM messages
+    SELECT
+      id,
+      role,
+      content,
+      think,
+      images,
+      usage,
+      memory_evidence,
+      created_at
+    FROM messages
     WHERE conversation_id = ?
     ORDER BY id ASC
   `).all(convo.id)
   // Parse usage JSON for each message
   for (const m of messages) {
     try { m.usage = m.usage ? JSON.parse(m.usage) : null } catch { m.usage = null }
+    m.memoryEvidence = parseMemoryEvidence(
+      m.memory_evidence
+    )
+    delete m.memory_evidence
   }
   res.json(messages)
 })

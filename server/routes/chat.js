@@ -9,6 +9,10 @@ import {
   isRecallOnlyRequest,
   recallRuntimeInstruction
 } from '../lib/memoryRecallPolicy.js'
+import {
+  createMemoryEvidence,
+  serializeMemoryEvidence
+} from '../lib/memoryEvidence.js'
 import { extractUrls, fetchAllUrls } from '../lib/fetchUrl.js'
 import { UPLOAD_DIR, extractTextFromFile } from './uploads.js'
 import {
@@ -1508,6 +1512,18 @@ router.post('/:conversationId', requireAuth, async (req, res) => {
       selectedMemoryItems
     )
 
+  // Immutable per-answer snapshot of exactly the memories injected below.
+  // It is persisted with the assistant message so later edits to a memory do
+  // not rewrite the historical evidence shown in the chat.
+  const memoryEvidence =
+    createMemoryEvidence(
+      selectedMemoryItems
+    )
+  const memoryEvidenceJson =
+    serializeMemoryEvidence(
+      memoryEvidence
+    )
+
   const hasRecallMatch =
     selectedMemoryItems.some(item =>
       item.retrievalMode === 'semantic' ||
@@ -2187,6 +2203,9 @@ Use these as background context. If these memories fully answer the request, ans
   const chatStream = createChatResponseSink(
     activeRequest
   )
+  chatStream.write(`data: ${JSON.stringify({
+    memoryEvidence
+  })}\n\n`)
   const playwrightSession =
     createPlaywrightToolSession({
       signal: abortController.signal,
@@ -2241,9 +2260,19 @@ Use these as background context. If these memories fully answer the request, ans
       ? `\n\n${conclusion}`
       : conclusion
 
-    db.prepare(
-      'INSERT INTO messages (conversation_id, role, content) VALUES (?, ?, ?)'
-    ).run(convo.id, 'assistant', finalContent)
+    db.prepare(`
+      INSERT INTO messages (
+        conversation_id,
+        role,
+        content,
+        memory_evidence
+      ) VALUES (?, ?, ?, ?)
+    `).run(
+      convo.id,
+      'assistant',
+      finalContent,
+      memoryEvidenceJson
+    )
     db.prepare(
       'UPDATE conversations SET updated_at = unixepoch() WHERE id = ?'
     ).run(convo.id)
@@ -2410,8 +2439,16 @@ Use these as background context. If these memories fully answer the request, ans
 
       // Never persist or publish after an explicit cancellation.
       if (!isChatRequestCancelled(activeRequest)) {
-        db.prepare('INSERT INTO messages (conversation_id, role, content, think, usage) VALUES (?, ?, ?, ?, ?)')
-          .run(convo.id, 'assistant', cleanResponse, allThinking || '', aggregateTokenUsage ? JSON.stringify({
+        db.prepare(`
+          INSERT INTO messages (
+            conversation_id,
+            role,
+            content,
+            think,
+            usage,
+            memory_evidence
+          ) VALUES (?, ?, ?, ?, ?, ?)
+        `).run(convo.id, 'assistant', cleanResponse, allThinking || '', aggregateTokenUsage ? JSON.stringify({
             prompt_tokens:
               aggregateTokenUsage.promptTokens,
             completion_tokens:
@@ -2441,7 +2478,7 @@ Use these as background context. If these memories fully answer the request, ans
               contextMeta.model,
             context_budget_source:
               contextMeta.budgetSource
-          }) : '')
+          }) : '', memoryEvidenceJson)
         db.prepare('UPDATE conversations SET updated_at = unixepoch() WHERE id = ?').run(convo.id)
 
         chatStream.write(

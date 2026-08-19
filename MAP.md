@@ -59,7 +59,8 @@ better-sqlite3, WAL. Export: `db` (default) + `DEFAULT_MODEL` (env, Fallback glm
 Tabellen:
 - `users` (id, username, password_hash bcryptjs, default_system_prompt, memory[legacy])
 - `conversations` (user_id, title, model, system_prompt, reasoning_effort, archived_at)
-- `messages` (conversation_id, role, content, images JSON, usage JSON, think, source_task_id)
+- `messages` (conversation_id, role, content, images JSON, usage JSON, think,
+  source_task_id, unveränderlicher `memory_evidence`-Snapshot pro Modellantwort)
 - `file_extractions` (Cache extrahierter Datei-Inhalte)
 - `scheduled_tasks` (title, prompt, schedule_kind once|interval|cron, schedule_value,
   timezone, task_type reminder|agent, enabled, retention_days, next_run_at, lock-Felder)

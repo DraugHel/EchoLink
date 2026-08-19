@@ -1408,6 +1408,17 @@ export default function Chat({ user, onLogout }) {
             m.id === assistantId ? { ...m, usage: json.usage } : m
           ))
         }
+        if (Array.isArray(json.memoryEvidence)) {
+          setMessages(prev => prev.map(m =>
+            m.id === assistantId
+              ? {
+                  ...m,
+                  memoryEvidence:
+                    json.memoryEvidence
+                }
+              : m
+          ))
+        }
         if (json.done) {
           completeTrackedChatRun(
             json.completedWithIssue
@@ -2396,6 +2407,7 @@ export default function Chat({ user, onLogout }) {
               toolStatus={m.toolStatus}
               actionRequests={m.actionRequests}
               usage={m.usage}
+              memoryEvidence={m.memoryEvidence}
               id={m.id}
               createdAt={m.created_at}
               prevCreatedAt={prev ? prev.created_at : null}
