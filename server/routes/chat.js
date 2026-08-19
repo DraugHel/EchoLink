@@ -6,6 +6,7 @@ import {
   selectMemoryItemsForContext
 } from '../lib/memoryItems.js'
 import {
+  isMemoryInventoryRequest,
   isRecallOnlyRequest,
   recallRuntimeInstruction
 } from '../lib/memoryRecallPolicy.js'
@@ -1468,7 +1469,11 @@ router.post('/:conversationId', requireAuth, async (req, res) => {
   // Activity-Timestamp bumpen
   db.prepare('UPDATE conversations SET updated_at = unixepoch() WHERE id = ?').run(convo.id)
 
+  const memoryInventoryRequest =
+    isMemoryInventoryRequest(content)
+
   const recallOnlyRequest =
+    memoryInventoryRequest ||
     isRecallOnlyRequest(content)
 
   const recentMemoryRows = db.prepare(`
@@ -1503,7 +1508,8 @@ router.post('/:conversationId', requireAuth, async (req, res) => {
         limit: 10,
         maxChars: 6000,
         recentContext: recentMemoryContext,
-        recallOnly: recallOnlyRequest
+        recallOnly: recallOnlyRequest,
+        inventory: memoryInventoryRequest
       }
     )
 
@@ -1529,6 +1535,7 @@ router.post('/:conversationId', requireAuth, async (req, res) => {
       item.retrievalMode === 'semantic' ||
       item.retrievalMode === 'lexical' ||
       item.retrievalMode === 'hybrid' ||
+      item.retrievalMode === 'inventory' ||
       item.scope === `conversation:${convo.id}`
     )
 

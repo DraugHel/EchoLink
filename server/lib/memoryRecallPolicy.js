@@ -13,6 +13,23 @@ const EXPLICIT_INVESTIGATION_PATTERNS = [
   /\b(?:terminal|shell|bash|git|docker|pm2|sqlite|logs?)\b/iu
 ]
 
+const MEMORY_INVENTORY_PATTERNS = [
+  /was[^?\n]{0,40}wei(?:ß|ss)t\s+du[^?\n]{0,40}(?:über|von)\s+mi(?:r|ch)/iu,
+  /welche[^?\n]{0,40}(?:memor(?:y|ies)|erinnerungen|fakten|informationen)[^?\n]{0,60}(?:hast|kennst|speicherst|wei(?:ß|ss)t)/iu,
+  /(?:zeig|zeige|nenn|nenne|liste|zähl|zaehl)\w*[^?\n]{0,80}(?:memor(?:y|ies)|erinnerungen)/iu,
+  /was[^?\n]{0,50}(?:hast\s+du|ist)[^?\n]{0,50}(?:gespeichert|gemerkt)/iu
+]
+
+export function isMemoryInventoryRequest(content) {
+  const text = String(content || '').trim()
+
+  if (!text || text.length > 1000) {
+    return false
+  }
+
+  return MEMORY_INVENTORY_PATTERNS.some(pattern => pattern.test(text))
+}
+
 export function isRecallOnlyRequest(content) {
   const text = String(content || '').trim()
 

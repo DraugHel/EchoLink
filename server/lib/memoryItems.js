@@ -718,14 +718,8 @@ function memoryTokens(value) {
 }
 
 function memoryRetrievalScore(item, queryTokens) {
-  const text = String(item.content || '')
-    .toLowerCase()
-    .normalize('NFKD')
-    .replace(/\p{M}/gu, '')
-
-  const compactText = text.replace(
-    /[^\p{L}\p{N}]+/gu,
-    ''
+  const itemTokens = new Set(
+    memoryTokens(item.content)
   )
 
   const scopeToken = item.scope.startsWith('project:')
@@ -738,15 +732,23 @@ function memoryRetrievalScore(item, queryTokens) {
     ? queryTokens.filter(token => token !== scopeToken)
     : queryTokens
 
-  const overlap = relevantQueryTokens.filter(
-    token =>
-      text.includes(token) ||
-      compactText.includes(
-        token.replace(/[^\p{L}\p{N}]+/gu, '')
-      )
-  ).length
+  const overlappingTokens = relevantQueryTokens.filter(
+    token => itemTokens.has(token)
+  )
+  const overlap = overlappingTokens.length
 
-  if (overlap === 0) {
+  // A longer query normally shares more than one exact word. One distinctive
+  // long word such as "Schichtmodell" is sufficient, but a generic fragment
+  // such as "memory" cannot admit unrelated project memories. Paraphrases
+  // continue to be handled by embeddings.
+  const hasDistinctiveSingleToken =
+    overlappingTokens.some(token => token.length >= 8)
+  const sufficientOverlap =
+    relevantQueryTokens.length < 3
+      ? overlap >= 1
+      : overlap >= 2 || hasDistinctiveSingleToken
+
+  if (!sufficientOverlap) {
     return -1000
   }
 
@@ -850,15 +852,22 @@ export async function selectMemoryItemsForContext(
   const queryTokens = memoryTokens(lexicalQuery)
 
   const items = rows.map(mapItem)
-  const semanticScores =
-    await semanticScoresForMemoryItems(
-      items,
-      query,
-      {
-        recentContext,
-        signal: options.signal
-      }
-    )
+  const inventoryRequest =
+    options.inventory === true
+
+  // A broad inventory request intentionally ranks the active structured
+  // memories themselves. It needs neither an embedding request nor a
+  // semantic threshold to decide whether the user asked for that inventory.
+  const semanticScores = inventoryRequest
+    ? new Map()
+    : await semanticScoresForMemoryItems(
+        items,
+        query,
+        {
+          recentContext,
+          signal: options.signal
+        }
+      )
 
   const semanticThreshold =
     memorySemanticThreshold(
@@ -888,14 +897,21 @@ export async function selectMemoryItemsForContext(
         item.type === 'instruction' &&
         item.metadata?.alwaysInclude === true
 
+      const inventoryScore = inventoryRequest
+        ? Number(item.importance || 0) +
+          Number(item.confidence || 0) * 10
+        : null
+
       const retrievalScore =
-        hybridMemoryScore({
-          lexicalScore,
-          semanticSimilarity,
-          semanticThreshold,
-          exactConversation,
-          globalStanding
-        })
+        inventoryRequest
+          ? inventoryScore
+          : hybridMemoryScore({
+              lexicalScore,
+              semanticSimilarity,
+              semanticThreshold,
+              exactConversation,
+              globalStanding
+            })
 
       return {
         ...item,
@@ -908,7 +924,9 @@ export async function selectMemoryItemsForContext(
             ? semanticSimilarity
             : null,
         retrievalMode:
-          lexicalScore >= 18 &&
+          inventoryRequest
+            ? 'inventory'
+            : lexicalScore >= 18 &&
           Number.isFinite(semanticSimilarity) &&
           semanticSimilarity >= semanticThreshold
             ? 'hybrid'

@@ -321,6 +321,24 @@ test('SQLite integration stores, retrieves, invalidates and cascades embeddings'
       throw new Error('literal recall did not retain its lexical match')
     }
 
+    const inventory = await selectMemoryItemsForContext(
+      userId,
+      'Was weißt du alles über mich?',
+      {
+        conversationId: 0,
+        limit: 10,
+        maxChars: 6000,
+        recallOnly: true,
+        inventory: true
+      }
+    )
+    if (!inventory.some(item => item.id === shiftModel.id)) {
+      throw new Error('broad inventory omitted an active structured memory')
+    }
+    if (!inventory.every(item => item.retrievalMode === 'inventory')) {
+      throw new Error('broad inventory did not preserve its retrieval provenance')
+    }
+
     const selected = await selectMemoryItemsForContext(
       userId,
       'Warum ist die Platte voll?',
@@ -369,6 +387,45 @@ test('SQLite integration stores, retrieves, invalidates and cascades embeddings'
     }
     if (lexicalFallback[0]?.retrievalMode !== 'lexical') {
       throw new Error('embedding outage did not use lexical mode')
+    }
+
+    const gameRelease = createMemoryItem(userId, {
+      type: 'preference',
+      scope: 'global',
+      content: 'Monsters & Memories startet am 1. Oktober 2026 in den Early Access.',
+      importance: 65,
+      confidence: 1
+    })
+    const unrelatedMemoryUi = createMemoryItem(userId, {
+      type: 'project',
+      scope: 'project:echolink',
+      content: 'Die EchoLink-Memory-Card sortiert Einträge nach Erstelldatum.',
+      importance: 90,
+      confidence: 1
+    })
+    const unrelatedCleanup = createMemoryItem(userId, {
+      type: 'episodic',
+      scope: 'project:echolink',
+      content: 'Der Docker-Build-Cache wurde bereinigt und gab 16 GB frei.',
+      importance: 90,
+      confidence: 1
+    })
+
+    const releaseRecall = await selectMemoryItemsForContext(
+      userId,
+      'Wann startet Monsters & Memories im Early Access?',
+      { conversationId: 0, limit: 10, maxChars: 6000 }
+    )
+    if (!releaseRecall.some(item => item.id === gameRelease.id)) {
+      throw new Error('exact game release memory was not selected')
+    }
+    if (
+      releaseRecall.some(item =>
+        item.id === unrelatedMemoryUi.id ||
+        item.id === unrelatedCleanup.id
+      )
+    ) {
+      throw new Error('unrelated project memory leaked through lexical retrieval')
     }
 
     updateMemoryItem(userId, storage.id, {

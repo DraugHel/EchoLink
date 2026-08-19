@@ -116,5 +116,6 @@ test('chat, history API and UI carry memory evidence without a model call', () =
   assert.match(conversations, /parseMemoryEvidence/)
   assert.match(page, /memoryEvidence=\{m\.memoryEvidence\}/)
   assert.match(message, /Memory anzeigen/)
-  assert.match(message, /Keine Memory verwendet/)
+  assert.match(message, /Keine strukturierte Memory geladen/)
+  assert.match(message, /Keine strukturierte Memory geladen/)
 })

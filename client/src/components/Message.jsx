@@ -470,7 +470,7 @@ function Message({ role, content, streaming, images, think, toolStatus, actionRe
                     <span>
                       {memoryEvidence.length > 0
                         ? `Memory anzeigen · ${memoryEvidence.length}`
-                        : 'Keine Memory verwendet'}
+                        : 'Keine strukturierte Memory geladen'}
                     </span>
                     {memoryEvidence.length > 0 && (
                       <span
@@ -485,7 +485,7 @@ function Message({ role, content, streaming, images, think, toolStatus, actionRe
                   {memoryOpen && memoryEvidence.length > 0 && (
                     <div style={styles.memoryEvidenceList}>
                       <div style={styles.memoryEvidenceIntro}>
-                        Diese Memories waren Teil dieser Modellanfrage.
+                        Diese strukturierten Memories waren Teil dieser Modellanfrage.
                       </div>
                       {memoryEvidence.map((memory, index) => (
                         <div

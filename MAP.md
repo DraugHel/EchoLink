@@ -75,6 +75,10 @@ Tabellen:
 - `memory_items` (type, scope, status, content, importance, confidence, Fingerprints)
 - `memory_embeddings` (lokale, modell-/dimensions- und Source-SHA-gebundene
   Float32-Vektoren pro strukturierter Memory; Cascade-Delete)
+- Die Memory-Auswahl kombiniert Embeddings mit exakten normalisierten
+  Worttreffern; längere Lexikalabfragen brauchen zwei gemeinsame Begriffe
+  oder ein markantes langes Wort, damit Teilwörter keine fremden
+  Projekt-Memories einschleusen.
 - Shift-System: `shift_imports`, `shift_import_items`, `shift_import_pages`,
   `shift_calendar_events`, `shift_sync_runs`, `shift_sync_actions`, `shift_settings`
 Migrationen: defensive try/catch ALTER TABLEs beim Boot.
@@ -540,7 +544,10 @@ Frontend: TaskPanel.jsx + AgentRunCockpit.jsx.
   Gesprächen/Entscheidungen. Für diesen einzelnen Turn bleiben Tools aus; Luna
   antwortet ausschließlich aus sichtbarem Verlauf und ausgewählten Memories
   oder meldet ehrlich, dass kein passender Kontext gespeichert ist. Explizite
-  Prüf-, Such- und Arbeitsaufträge behalten unverändert alle Tools.
+  Prüf-, Such- und Arbeitsaufträge behalten unverändert alle Tools. Breite
+  Memory-Inventurfragen wie „Was weißt du über mich?“ laden ohne Embedding-Aufruf
+  die wichtigsten aktiven strukturierten Memories und kennzeichnen ihre Herkunft
+  im Beleg als `inventory`.
 - **routes/memory.js** (~921 Z.): CRUD /api/memory/items + extractMemory(userId, convoId,
   model) — ruft runMemoryModel (JSON-Extraktion aus Verlauf), Dedup via Fingerprint/
   Token-Ähnlichkeit (findSimilarMemory), applyStructuredMemories. Legacy: users.memory-Text

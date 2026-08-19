@@ -3,9 +3,29 @@ import fs from 'node:fs'
 import test from 'node:test'
 
 import {
+  isMemoryInventoryRequest,
   isRecallOnlyRequest,
   recallRuntimeInstruction
 } from '../server/lib/memoryRecallPolicy.js'
+
+test('broad memory inventory requests are recognized explicitly', () => {
+  assert.equal(
+    isMemoryInventoryRequest('Was weißt du alles über mich?'),
+    true
+  )
+  assert.equal(
+    isMemoryInventoryRequest('Welche Memories hast du über mich gespeichert?'),
+    true
+  )
+  assert.equal(
+    isMemoryInventoryRequest('Liste meine Erinnerungen auf.'),
+    true
+  )
+  assert.equal(
+    isMemoryInventoryRequest('Analysiere den Memory-Code.'),
+    false
+  )
+})
 
 test('plain conversation recall is tool-free', () => {
   assert.equal(
@@ -76,6 +96,8 @@ test('chat runtime disables tools only for recall-only requests', () => {
   )
 
   assert.match(source, /isRecallOnlyRequest\(/)
+  assert.match(source, /isMemoryInventoryRequest\(/)
+  assert.match(source, /inventory:\s*memoryInventoryRequest/)
   assert.match(source, /tools:\s*recallOnlyRequest\s*\?\s*\[\]/)
   assert.match(source, /recallRuntimeInstruction\(/)
 })
