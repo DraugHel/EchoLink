@@ -11,9 +11,11 @@ const stylesheet = fs.readFileSync(
   'utf8'
 )
 
-test('chat bubbles and message actions use the shared polished presentation', () => {
+test('chat messages use the redesigned hierarchy and quiet footer actions', () => {
   assert.match(messageSource, /msg-bubble-user/)
   assert.match(messageSource, /msg-bubble-assistant/)
+  assert.match(messageSource, /msg-footer-user/)
+  assert.match(messageSource, /msg-footer-assistant/)
   assert.match(messageSource, /msg-actions-user/)
   assert.match(messageSource, /msg-actions-assistant/)
   assert.match(messageSource, /msg-action-danger/)
@@ -27,11 +29,23 @@ test('chat bubbles and message actions use the shared polished presentation', ()
   const userBubbleStart = stylesheet.indexOf('.msg-bubble-user {')
   const assistantBubbleStart = stylesheet.indexOf('.msg-bubble-assistant {')
   const userBubble = stylesheet.slice(userBubbleStart, assistantBubbleStart)
+  const assistantRailStart = stylesheet.indexOf('.msg-bubble-assistant::before {')
+  const footerStart = stylesheet.indexOf('.msg-footer {')
+  const actionsStart = stylesheet.indexOf('.msg-actions {')
+  const actionsEnd = stylesheet.indexOf('.msg-actions-user {')
+  const actions = stylesheet.slice(actionsStart, actionsEnd)
 
   assert.ok(userBubbleStart >= 0)
   assert.ok(assistantBubbleStart > userBubbleStart)
-  assert.match(userBubble, /border:\s*2px solid color-mix\(/)
-  assert.match(userBubble, /var\(--user-text\) 30%/)
+  assert.ok(assistantRailStart > assistantBubbleStart)
+  assert.ok(footerStart > assistantRailStart)
+  assert.match(userBubble, /border:\s*1px solid color-mix\(/)
+  assert.doesNotMatch(userBubble, /border:\s*2px/)
+  assert.match(stylesheet, /\.msg-bubble-assistant::before\s*\{[^}]*width:\s*3px/s)
+  assert.match(stylesheet, /\.msg-footer-assistant\s*\{[^}]*border-top:/s)
+  assert.match(actions, /background:\s*transparent/)
+  assert.match(actions, /border:\s*0/)
+  assert.doesNotMatch(actions, /border-radius:/)
 })
 
 test('message presentation remains theme-variable driven', () => {

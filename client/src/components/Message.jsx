@@ -219,33 +219,6 @@ function Message({ role, content, streaming, images, think, toolStatus, actionRe
         {isUser
           ? (
             <>
-              <div style={{ ...styles.msgHeader, marginBottom: 4, justifyContent: 'space-between' }}>
-                {timeStr && !streaming && showTime && (
-                  <div className="msg-user-timestamp">{timeStr}</div>
-                )}
-                <div className="msg-actions msg-actions-user">
-                  {onDelete && !editing && (
-                    <button className="msg-action-btn msg-action-btn-user msg-action-danger"
-                      onClick={() => onDelete(id)} title="Nachricht löschen" aria-label="Nachricht löschen">
-                      <TrashIcon />
-                    </button>
-                  )}
-                  {onEdit && !editing && (
-                    <button className="msg-action-btn msg-action-btn-user"
-                      onClick={() => { setEditText(content || ''); onEdit(id) }} title="Nachricht bearbeiten" aria-label="Nachricht bearbeiten">
-                      <EditIcon />
-                    </button>
-                  )}
-                  <button className={`msg-action-btn msg-action-btn-user ${userCopied ? 'is-copied' : ''}`}
-                    onClick={async () => {
-                      try { await navigator.clipboard.writeText(content) }
-                      catch { const t = document.createElement('textarea'); t.value = content; document.body.appendChild(t); t.select(); document.execCommand('copy'); document.body.removeChild(t) }
-                      setUserCopied(true); setTimeout(() => setUserCopied(false), 1500)
-                    }} title={userCopied ? 'Kopiert' : 'Nachricht kopieren'} aria-label={userCopied ? 'Nachricht kopiert' : 'Nachricht kopieren'}>
-                    {userCopied ? <CheckIcon /> : <CopyIcon />}
-                  </button>
-                </div>
-              </div>
               {imgAttachments.length > 0 && (
                 <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: (content || fileAttachments.length > 0) ? 8 : 0 }}>
                   {imgAttachments.map(att => (
@@ -288,13 +261,39 @@ function Message({ role, content, streaming, images, think, toolStatus, actionRe
               ) : (
                 content && <p style={styles.userText}>{content}</p>
               )}
+              {!editing && (
+                <div className="msg-footer msg-footer-user">
+                  {timeStr && !streaming && showTime && (
+                    <div className="msg-user-timestamp">{timeStr}</div>
+                  )}
+                  <div className="msg-actions msg-actions-user">
+                    <button className={`msg-action-btn msg-action-btn-user ${userCopied ? 'is-copied' : ''}`}
+                      onClick={async () => {
+                        try { await navigator.clipboard.writeText(content) }
+                        catch { const t = document.createElement('textarea'); t.value = content; document.body.appendChild(t); t.select(); document.execCommand('copy'); document.body.removeChild(t) }
+                        setUserCopied(true); setTimeout(() => setUserCopied(false), 1500)
+                      }} title={userCopied ? 'Kopiert' : 'Nachricht kopieren'} aria-label={userCopied ? 'Nachricht kopiert' : 'Nachricht kopieren'}>
+                      {userCopied ? <CheckIcon /> : <CopyIcon />}
+                    </button>
+                    {onEdit && (
+                      <button className="msg-action-btn msg-action-btn-user"
+                        onClick={() => { setEditText(content || ''); onEdit(id) }} title="Nachricht bearbeiten" aria-label="Nachricht bearbeiten">
+                        <EditIcon />
+                      </button>
+                    )}
+                    {onDelete && (
+                      <button className="msg-action-btn msg-action-btn-user msg-action-danger"
+                        onClick={() => onDelete(id)} title="Nachricht löschen" aria-label="Nachricht löschen">
+                        <TrashIcon />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
             </>
           )
           : (
             <div style={styles.markdown}>
-              {timeStr && !streaming && showTime && (
-                <div className="msg-assistant-timestamp">{timeStr}</div>
-              )}
               {toolStatus && (
                 <div style={styles.toolStatus}>
                   <span style={styles.toolDot} />
@@ -353,28 +352,6 @@ function Message({ role, content, streaming, images, think, toolStatus, actionRe
                   </div>
                 )
               })}
-              <div className="msg-actions msg-actions-assistant">
-                <button className={`msg-action-btn msg-action-btn-assistant ${copied ? 'is-copied' : ''}`}
-                  onClick={async () => {
-                    try { await navigator.clipboard.writeText(content) }
-                    catch { const t = document.createElement('textarea'); t.value = content; document.body.appendChild(t); t.select(); document.execCommand('copy'); document.body.removeChild(t) }
-                    setCopied(true); setTimeout(() => setCopied(false), 1500)
-                  }}
-                  title={copied ? 'Kopiert' : 'Antwort kopieren'}
-                  aria-label={copied ? 'Antwort kopiert' : 'Antwort kopieren'}
-                >
-                  {copied ? <CheckIcon /> : <CopyIcon />}
-                </button>
-                {onDelete && (
-                  <button className="msg-action-btn msg-action-btn-assistant msg-action-danger"
-                    onClick={() => onDelete(id)}
-                    title="Antwort löschen"
-                    aria-label="Antwort löschen"
-                  >
-                    <TrashIcon />
-                  </button>
-                )}
-              </div>
               {think && (
                 <div style={styles.thinkWrap}>
                   <button style={styles.thinkToggle} onClick={() => setThinkOpen(o => !o)}>
@@ -806,6 +783,35 @@ function Message({ role, content, streaming, images, think, toolStatus, actionRe
                   </div>
                 )
               })()}
+              {!streaming && (
+                <div className="msg-footer msg-footer-assistant">
+                  {timeStr && showTime && (
+                    <div className="msg-assistant-timestamp">{timeStr}</div>
+                  )}
+                  <div className="msg-actions msg-actions-assistant">
+                    <button className={`msg-action-btn msg-action-btn-assistant ${copied ? 'is-copied' : ''}`}
+                      onClick={async () => {
+                        try { await navigator.clipboard.writeText(content) }
+                        catch { const t = document.createElement('textarea'); t.value = content; document.body.appendChild(t); t.select(); document.execCommand('copy'); document.body.removeChild(t) }
+                        setCopied(true); setTimeout(() => setCopied(false), 1500)
+                      }}
+                      title={copied ? 'Kopiert' : 'Antwort kopieren'}
+                      aria-label={copied ? 'Antwort kopiert' : 'Antwort kopieren'}
+                    >
+                      {copied ? <CheckIcon /> : <CopyIcon />}
+                    </button>
+                    {onDelete && (
+                      <button className="msg-action-btn msg-action-btn-assistant msg-action-danger"
+                        onClick={() => onDelete(id)}
+                        title="Antwort löschen"
+                        aria-label="Antwort löschen"
+                      >
+                        <TrashIcon />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           )
         }
@@ -936,14 +942,14 @@ function CodeBlock({ lang, code }) {
 }
 
 const styles = {
-  wrap: { display: 'flex', gap: 10, marginBottom: 16, alignItems: 'flex-start', maxWidth: 820, width: '100%', marginLeft: 'auto', marginRight: 'auto' },
+  wrap: { display: 'flex', gap: 10, marginBottom: 20, alignItems: 'flex-start', maxWidth: 820, width: '100%', marginLeft: 'auto', marginRight: 'auto' },
   avatar: {
     width: 28, height: 28, borderRadius: 8, flexShrink: 0,
     display: 'flex', alignItems: 'center', justifyContent: 'center',
     background: 'var(--green-bg)', border: '1px solid var(--green-dim)',
     marginTop: 2
   },
-  bubble: { maxWidth: '80%', borderRadius: 12, padding: '12px 16px', fontSize: 15, lineHeight: 1.65, minWidth: 0 },
+  bubble: { maxWidth: '78%', borderRadius: 14, padding: '14px 16px', fontSize: 15, lineHeight: 1.65, minWidth: 0 },
   userBubble: {
     color: 'var(--user-text, #0d0d0d)',
     fontWeight: 400
@@ -1019,10 +1025,6 @@ const styles = {
     border: '1px solid var(--danger)',
     fontSize: 12, fontWeight: 600, cursor: 'pointer',
     fontFamily: 'var(--font-mono)', transition: 'all var(--transition)'
-  },
-  msgHeader: {
-    display: 'flex', justifyContent: 'flex-end',
-    marginBottom: 4
   },
   thinkWrap: {
     marginBottom: 10,
