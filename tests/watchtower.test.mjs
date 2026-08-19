@@ -3,7 +3,9 @@ import assert from 'node:assert/strict'
 import Database from 'better-sqlite3'
 import {
   evaluateWatchtowerSnapshot,
-  formatWatchtowerIncident
+  formatWatchtowerIncident,
+  formatWatchtowerRepair,
+  selectWatchtowerAutoHealTargets
 } from '../server/lib/watchtowerCore.js'
 import {
   getWatchtowerStatus,
@@ -72,6 +74,23 @@ function testDb() {
       UNIQUE(user_id, monitor_key),
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     );
+    CREATE TABLE watchtower_repair_state (
+      app_name TEXT PRIMARY KEY,
+      incident_fingerprint TEXT NOT NULL,
+      status TEXT NOT NULL,
+      attempted_at INTEGER NOT NULL,
+      verified_at INTEGER,
+      detail TEXT NOT NULL DEFAULT ''
+    );
+    CREATE TABLE watchtower_repair_history (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      app_name TEXT NOT NULL,
+      incident_fingerprint TEXT NOT NULL,
+      status TEXT NOT NULL,
+      attempted_at INTEGER NOT NULL,
+      verified_at INTEGER NOT NULL,
+      detail TEXT NOT NULL DEFAULT ''
+    );
   `)
   database.prepare(`
     INSERT INTO users (id, default_system_prompt)
@@ -138,6 +157,128 @@ test('Watchtower formatiert Vorfall und Entwarnung ohne Reparaturbehauptung', ()
   assert.match(
     formatWatchtowerIncident(incident, { resolved: true }),
     /Entwarnung/
+  )
+
+  assert.match(
+    formatWatchtowerRepair({
+      appName: 'echolink-mcp-playwright',
+      ok: true
+    }),
+    /Auto-Healing erfolgreich/
+  )
+})
+
+test('Auto-Healing wählt ausschließlich die fest eingebaute sichere Allowlist', () => {
+  const snapshot = healthySnapshot()
+
+  for (const app of snapshot.apps) {
+    app.status = 'stopped'
+  }
+  snapshot.apps.push({
+    name: 'caller-controlled-app',
+    status: 'stopped'
+  })
+
+  assert.deepEqual(
+    selectWatchtowerAutoHealTargets(snapshot, {
+      expectedApps: [
+        ...snapshot.apps.map(app => app.name),
+        'caller-controlled-app'
+      ]
+    }),
+    [
+      'echolink',
+      'echolink-mcp-web',
+      'echolink-mcp-playwright'
+    ]
+  )
+})
+
+test('Auto-Healing startet einen PM2-Prozess einmal und verifiziert ihn', async t => {
+  const database = testDb()
+  t.after(() => database.close())
+  const failed = healthySnapshot()
+  failed.apps.find(
+    app => app.name === 'echolink-mcp-playwright'
+  ).status = 'stopped'
+  const restarted = []
+
+  const run = options => runWatchtowerCycle({
+    database,
+    checkedAt: options.checkedAt,
+    snapshot: options.snapshot,
+    restartApp: async appName => restarted.push(appName),
+    collectSnapshot: async () => healthySnapshot(),
+    settle: async () => {}
+  })
+
+  await run({ snapshot: failed, checkedAt: 100 })
+
+  assert.deepEqual(restarted, ['echolink-mcp-playwright'])
+  const messages = database.prepare(`
+    SELECT content FROM messages ORDER BY id
+  `).all()
+  assert.equal(messages.length, 2)
+  assert.match(messages[0].content, /Kritischer Vorfall/)
+  assert.match(messages[1].content, /Auto-Healing erfolgreich/)
+  assert.equal(getWatchtowerStatus(database, 1).incidents.length, 0)
+  assert.equal(
+    getWatchtowerStatus(database, 1).autoHealing.lastAttempt.status,
+    'succeeded'
+  )
+  assert.equal(
+    database.prepare(`
+      SELECT count(*) AS n FROM watchtower_repair_history
+    `).get().n,
+    1
+  )
+
+  await run({ snapshot: failed, checkedAt: 200 })
+  assert.equal(restarted.length, 1)
+
+  await run({ snapshot: healthySnapshot(), checkedAt: 300 })
+  await run({ snapshot: failed, checkedAt: 400 })
+  assert.equal(restarted.length, 2)
+})
+
+test('fehlgeschlagenes Auto-Healing bleibt bis zu einem gesunden Check gesperrt', async t => {
+  const database = testDb()
+  t.after(() => database.close())
+  const failed = healthySnapshot()
+  failed.apps.find(
+    app => app.name === 'echolink-mcp-web'
+  ).status = 'stopped'
+  let restartCount = 0
+
+  const runFailed = checkedAt => runWatchtowerCycle({
+    database,
+    checkedAt,
+    snapshot: failed,
+    restartApp: async () => {
+      restartCount++
+      throw new Error('simulierter Neustartfehler')
+    },
+    collectSnapshot: async () => failed,
+    settle: async () => {}
+  })
+
+  await runFailed(100)
+  await runFailed(200)
+
+  assert.equal(restartCount, 1)
+  assert.equal(
+    database.prepare(`
+      SELECT status FROM watchtower_repair_state
+      WHERE app_name = 'echolink-mcp-web'
+    `).get().status,
+    'failed'
+  )
+  assert.equal(
+    database.prepare(`
+      SELECT count(*) AS n FROM messages
+      WHERE content LIKE '%Auto-Healing fehlgeschlagen%'
+    `).get().n,
+    1
   )
 })
 

@@ -219,6 +219,11 @@ export default function SystemStatusPanel({
                   {' · '}
                   {(status?.watchtower?.incidents || []).length} offene Vorfälle
                 </span>
+                <span style={styles.watchtowerHealing}>
+                  Auto-Healing: {status?.watchtower?.autoHealing?.enabled
+                    ? 'aktiv · ein Versuch je Ausfall'
+                    : 'pausiert'}
+                </span>
               </div>
             </div>
 
@@ -237,6 +242,22 @@ export default function SystemStatusPanel({
                 <span>{incident.detail}</span>
               </div>
             ))}
+
+            {status?.watchtower?.autoHealing?.lastAttempt && (
+              <div style={styles.watchtowerRepair}>
+                <strong>
+                  Letztes Auto-Healing: {' '}
+                  {status.watchtower.autoHealing.lastAttempt.appName}
+                </strong>
+                <span>
+                  {status.watchtower.autoHealing.lastAttempt.status === 'succeeded'
+                    ? 'Erfolgreich und als online verifiziert'
+                    : status.watchtower.autoHealing.lastAttempt.status === 'failed'
+                      ? 'Fehlgeschlagen · manuelle Prüfung nötig'
+                      : 'Wird verifiziert'}
+                </span>
+              </div>
+            )}
 
             <div style={styles.watchtowerActions}>
               <button
@@ -676,6 +697,11 @@ const styles = {
     color: 'var(--text3)',
     fontSize: 10
   },
+  watchtowerHealing: {
+    color: 'var(--accent)',
+    fontSize: 10,
+    fontWeight: 700
+  },
   watchtowerIncident: {
     display: 'grid',
     gap: 4,
@@ -683,6 +709,16 @@ const styles = {
     border: '1px solid color-mix(in srgb, var(--danger) 45%, var(--border))',
     borderRadius: 9,
     color: 'var(--danger)',
+    fontSize: 10,
+    overflowWrap: 'anywhere'
+  },
+  watchtowerRepair: {
+    display: 'grid',
+    gap: 3,
+    padding: 9,
+    border: '1px solid color-mix(in srgb, var(--accent) 40%, var(--border))',
+    borderRadius: 9,
+    color: 'var(--text2)',
     fontSize: 10,
     overflowWrap: 'anywhere'
   },

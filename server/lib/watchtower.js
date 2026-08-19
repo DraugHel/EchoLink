@@ -6,8 +6,11 @@ import { getMcpRegistryStatus } from './mcpRegistry.js'
 import { sendPushToUser } from './push.js'
 import {
   DEFAULT_WATCHTOWER_APPS,
+  SAFE_WATCHTOWER_AUTO_HEAL_APPS,
   evaluateWatchtowerSnapshot,
-  formatWatchtowerIncident
+  formatWatchtowerIncident,
+  formatWatchtowerRepair,
+  selectWatchtowerAutoHealTargets
 } from './watchtowerCore.js'
 
 const execFileAsync = promisify(execFile)
@@ -41,6 +44,22 @@ function parseExpectedApps(env = process.env) {
   return configured.length > 0
     ? [...new Set(configured)]
     : [...DEFAULT_WATCHTOWER_APPS]
+}
+
+async function restartPm2App(appName) {
+  await execFileAsync(
+    'pm2',
+    ['restart', appName],
+    {
+      timeout: 20_000,
+      maxBuffer: 1024 * 1024,
+      windowsHide: true
+    }
+  )
+}
+
+function waitForRepairSettle() {
+  return new Promise(resolve => setTimeout(resolve, 1_500))
 }
 
 export function ensureWatchtowerSettings(
@@ -268,6 +287,180 @@ export async function collectWatchtowerSnapshot() {
   }
 }
 
+function resetRepairStateForHealthyApps(
+  database,
+  snapshot
+) {
+  if (!Array.isArray(snapshot?.apps)) return
+
+  const clear = database.prepare(`
+    DELETE FROM watchtower_repair_state
+    WHERE app_name = ?
+  `)
+
+  for (const app of snapshot.apps) {
+    if (
+      app?.status === 'online' &&
+      SAFE_WATCHTOWER_AUTO_HEAL_APPS.includes(app.name)
+    ) {
+      clear.run(app.name)
+    }
+  }
+}
+
+function pm2FindingFingerprint(snapshot, expectedApps) {
+  return evaluateWatchtowerSnapshot(snapshot, {
+    expectedApps
+  }).find(item => item.key === 'pm2:required-apps')
+    ?.fingerprint || 'pm2-unhealthy'
+}
+
+async function performWatchtowerRepairs({
+  database,
+  snapshot,
+  expectedApps,
+  checkedAt,
+  restartApp,
+  collectSnapshot,
+  settle
+}) {
+  resetRepairStateForHealthyApps(database, snapshot)
+
+  const targets = selectWatchtowerAutoHealTargets(
+    snapshot,
+    { expectedApps }
+  )
+  const fingerprint = pm2FindingFingerprint(
+    snapshot,
+    expectedApps
+  )
+  const attempted = []
+  const findState = database.prepare(`
+    SELECT * FROM watchtower_repair_state
+    WHERE app_name = ?
+  `)
+  const reserve = database.prepare(`
+    INSERT OR IGNORE INTO watchtower_repair_state (
+      app_name,
+      incident_fingerprint,
+      status,
+      attempted_at,
+      verified_at,
+      detail
+    )
+    VALUES (?, ?, 'attempting', ?, NULL, '')
+  `)
+
+  for (const appName of targets) {
+    if (findState.get(appName)) continue
+
+    const reserved = reserve.run(
+      appName,
+      fingerprint,
+      checkedAt
+    )
+    if (!reserved.changes) continue
+
+    let commandError = null
+
+    try {
+      await restartApp(appName)
+    } catch (error) {
+      commandError = safeError(error)
+    }
+
+    attempted.push({ appName, commandError })
+  }
+
+  if (attempted.length === 0) {
+    return { attempts: [], snapshot }
+  }
+
+  await settle()
+
+  let verifiedSnapshot
+  let verificationError = null
+
+  try {
+    verifiedSnapshot = await collectSnapshot()
+  } catch (error) {
+    verificationError = safeError(error)
+    verifiedSnapshot = snapshot
+  }
+
+  const verifiedApps = new Map(
+    Array.isArray(verifiedSnapshot?.apps)
+      ? verifiedSnapshot.apps.map(app => [app?.name, app])
+      : []
+  )
+  const finish = database.prepare(`
+    UPDATE watchtower_repair_state
+    SET status = ?, verified_at = ?, detail = ?
+    WHERE app_name = ? AND status = 'attempting'
+  `)
+  const record = database.prepare(`
+    INSERT INTO watchtower_repair_history (
+      app_name,
+      incident_fingerprint,
+      status,
+      attempted_at,
+      verified_at,
+      detail
+    )
+    VALUES (?, ?, ?, ?, ?, ?)
+  `)
+  const finalize = database.transaction(({
+    appName,
+    status,
+    detail
+  }) => {
+    const updated = finish.run(
+      status,
+      checkedAt,
+      detail,
+      appName
+    )
+
+    if (updated.changes) {
+      record.run(
+        appName,
+        fingerprint,
+        status,
+        checkedAt,
+        checkedAt,
+        detail
+      )
+    }
+  })
+  const results = attempted.map(attempt => {
+    const online =
+      verifiedApps.get(attempt.appName)?.status === 'online'
+    const ok = !attempt.commandError && online
+    const detail = attempt.commandError ||
+      verificationError ||
+      (online
+        ? 'PM2 meldet den Prozess als online.'
+        : 'PM2 meldet den Prozess nach dem Neustartversuch nicht als online.')
+
+    finalize({
+      appName: attempt.appName,
+      status: ok ? 'succeeded' : 'failed',
+      detail
+    })
+
+    return {
+      appName: attempt.appName,
+      ok,
+      detail
+    }
+  })
+
+  return {
+    attempts: results,
+    snapshot: verifiedSnapshot
+  }
+}
+
 function reconcileUser(
   database,
   setting,
@@ -488,11 +681,57 @@ async function publishEvent(
   }))
 }
 
+async function publishRepairEvent(
+  database,
+  userId,
+  conversation,
+  repair
+) {
+  database.prepare(`
+    INSERT INTO messages (conversation_id, role, content)
+    VALUES (?, 'assistant', ?)
+  `).run(
+    conversation.id,
+    formatWatchtowerRepair(repair)
+  )
+
+  database.prepare(`
+    UPDATE conversations
+    SET updated_at = unixepoch()
+    WHERE id = ?
+  `).run(conversation.id)
+
+  const pushResult = await sendPushToUser(userId, {
+    title: repair.ok
+      ? 'Watchtower: Automatisch behoben'
+      : 'Watchtower: Auto-Healing fehlgeschlagen',
+    body: repair.ok
+      ? `${repair.appName} ist wieder online.`
+      : `${repair.appName} braucht manuelle Prüfung.`,
+    url: `/?conversation=${conversation.id}`,
+    tag: `echolink-watchtower-repair-${repair.appName}`,
+    conversationId: conversation.id
+  })
+
+  console.log(JSON.stringify({
+    level: repair.ok ? 'info' : 'warn',
+    event: 'watchtower_auto_heal',
+    userId,
+    appName: repair.appName,
+    result: repair.ok ? 'succeeded' : 'failed',
+    sent: pushResult.sent,
+    failed: pushResult.failed
+  }))
+}
+
 export async function runWatchtowerCycle({
   database = db,
   snapshot,
   env = process.env,
-  checkedAt = nowSeconds()
+  checkedAt = nowSeconds(),
+  restartApp = restartPm2App,
+  collectSnapshot = collectWatchtowerSnapshot,
+  settle = waitForRepairSettle
 } = {}) {
   const users = database.prepare(`
     SELECT id FROM users ORDER BY id ASC
@@ -502,9 +741,11 @@ export async function runWatchtowerCycle({
     return { users: 0, events: 0 }
   }
 
+  const expectedApps = parseExpectedApps(env)
   const currentSnapshot = snapshot ||
-    await collectWatchtowerSnapshot()
+    await collectSnapshot()
   let eventCount = 0
+  const activeUsers = []
 
   for (const user of users) {
     try {
@@ -519,12 +760,13 @@ export async function runWatchtowerCycle({
         database,
         user.id
       )
+      activeUsers.push({ user, setting, conversation })
       const findings = evaluateWatchtowerSnapshot(
         currentSnapshot,
         {
           diskWarningPercent:
             setting.disk_warning_percent,
-          expectedApps: parseExpectedApps(env)
+          expectedApps
         }
       )
 
@@ -569,6 +811,96 @@ export async function runWatchtowerCycle({
     }
   }
 
+  if (activeUsers.length > 0) {
+    try {
+      const repairRun = await performWatchtowerRepairs({
+        database,
+        snapshot: currentSnapshot,
+        expectedApps,
+        checkedAt,
+        restartApp,
+        collectSnapshot,
+        settle
+      })
+
+      if (repairRun.attempts.length > 0) {
+        for (const context of activeUsers) {
+          for (const repair of repairRun.attempts) {
+            await publishRepairEvent(
+              database,
+              context.user.id,
+              context.conversation,
+              repair
+            )
+            eventCount++
+          }
+        }
+
+        for (const context of activeUsers) {
+          const findings = evaluateWatchtowerSnapshot(
+            repairRun.snapshot,
+            {
+              diskWarningPercent:
+                context.setting.disk_warning_percent,
+              expectedApps
+            }
+          )
+          const events = database.transaction(() =>
+            reconcileUser(
+              database,
+              context.setting,
+              findings,
+              checkedAt
+            )
+          )()
+          const repairedPm2Completely =
+            repairRun.attempts.some(repair => repair.ok) &&
+            !findings.some(
+              finding => finding.key === 'pm2:required-apps'
+            )
+
+          for (const event of events) {
+            if (
+              repairedPm2Completely &&
+              event.type === 'resolved' &&
+              event.key === 'pm2:required-apps'
+            ) {
+              continue
+            }
+
+            await publishEvent(
+              database,
+              context.user.id,
+              context.conversation,
+              event
+            )
+            eventCount++
+          }
+        }
+      }
+    } catch (error) {
+      const message = safeError(error)
+
+      for (const context of activeUsers) {
+        database.prepare(`
+          UPDATE watchtower_settings
+          SET last_error = ?, updated_at = ?
+          WHERE user_id = ?
+        `).run(
+          message,
+          checkedAt,
+          context.user.id
+        )
+      }
+
+      console.error(JSON.stringify({
+        level: 'error',
+        event: 'watchtower_auto_heal_cycle_failed',
+        error: message
+      }))
+    }
+  }
+
   return {
     users: users.length,
     events: eventCount
@@ -594,6 +926,24 @@ export function getWatchtowerStatus(
       CASE severity WHEN 'critical' THEN 0 ELSE 1 END,
       opened_at ASC
   `).all(userId)
+  const lastRepair = database.prepare(`
+    SELECT app_name, status, attempted_at,
+      verified_at, detail
+    FROM (
+      SELECT app_name, status, attempted_at,
+        verified_at, detail, 0 AS source_order
+      FROM watchtower_repair_state
+      WHERE status = 'attempting'
+
+      UNION ALL
+
+      SELECT app_name, status, attempted_at,
+        verified_at, detail, 1 AS source_order
+      FROM watchtower_repair_history
+    )
+    ORDER BY attempted_at DESC, source_order ASC, app_name ASC
+    LIMIT 1
+  `).get()
 
   return {
     enabled: setting ? Boolean(setting.enabled) : true,
@@ -604,6 +954,20 @@ export function getWatchtowerStatus(
     lastCheckAt: setting?.last_check_at || null,
     lastSuccessAt: setting?.last_success_at || null,
     lastError: setting?.last_error || null,
+    autoHealing: {
+      enabled: setting ? Boolean(setting.enabled) : true,
+      policy: 'single-attempt-until-healthy',
+      allowedApps: [...SAFE_WATCHTOWER_AUTO_HEAL_APPS],
+      lastAttempt: lastRepair
+        ? {
+            appName: lastRepair.app_name,
+            status: lastRepair.status,
+            attemptedAt: lastRepair.attempted_at,
+            verifiedAt: lastRepair.verified_at,
+            detail: lastRepair.detail
+          }
+        : null
+    },
     incidents: incidents.map(incident => ({
       key: incident.monitor_key,
       severity: incident.severity,

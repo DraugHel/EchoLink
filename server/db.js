@@ -177,6 +177,33 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_watchtower_incidents_user_status
     ON watchtower_incidents(user_id, status, last_seen_at DESC);
 
+  CREATE TABLE IF NOT EXISTS watchtower_repair_state (
+    app_name TEXT PRIMARY KEY,
+    incident_fingerprint TEXT NOT NULL,
+    status TEXT NOT NULL
+      CHECK(status IN ('attempting', 'succeeded', 'failed')),
+    attempted_at INTEGER NOT NULL,
+    verified_at INTEGER,
+    detail TEXT NOT NULL DEFAULT ''
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_watchtower_repair_state_attempted
+    ON watchtower_repair_state(attempted_at DESC);
+
+  CREATE TABLE IF NOT EXISTS watchtower_repair_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    app_name TEXT NOT NULL,
+    incident_fingerprint TEXT NOT NULL,
+    status TEXT NOT NULL
+      CHECK(status IN ('succeeded', 'failed')),
+    attempted_at INTEGER NOT NULL,
+    verified_at INTEGER NOT NULL,
+    detail TEXT NOT NULL DEFAULT ''
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_watchtower_repair_history_attempted
+    ON watchtower_repair_history(attempted_at DESC, id DESC);
+
 
   CREATE TABLE IF NOT EXISTS google_oauth_accounts (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

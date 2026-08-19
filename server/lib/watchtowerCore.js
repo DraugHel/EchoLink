@@ -5,6 +5,15 @@ export const DEFAULT_WATCHTOWER_APPS = Object.freeze([
   'echolink-mcp-playwright'
 ])
 
+// Code-owned allowlist: these processes can be restarted without changing
+// data or deploying code. The worker is intentionally excluded because it
+// hosts Watchtower itself.
+export const SAFE_WATCHTOWER_AUTO_HEAL_APPS = Object.freeze([
+  'echolink',
+  'echolink-mcp-web',
+  'echolink-mcp-playwright'
+])
+
 function uniqueSorted(values) {
   return [...new Set(values)].sort()
 }
@@ -161,6 +170,26 @@ export function evaluateWatchtowerSnapshot(
   return findings
 }
 
+export function selectWatchtowerAutoHealTargets(
+  snapshot,
+  {
+    expectedApps = DEFAULT_WATCHTOWER_APPS,
+    safeApps = SAFE_WATCHTOWER_AUTO_HEAL_APPS
+  } = {}
+) {
+  if (!Array.isArray(snapshot?.apps)) return []
+
+  const expected = new Set(expectedApps)
+  const byName = new Map(
+    snapshot.apps.map(app => [app?.name, app])
+  )
+
+  return safeApps.filter(name =>
+    expected.has(name) &&
+    byName.get(name)?.status !== 'online'
+  )
+}
+
 export function formatWatchtowerIncident(
   incident,
   { resolved = false } = {}
@@ -187,5 +216,29 @@ export function formatWatchtowerIncident(
     incident.detail,
     '',
     'Watchtower beobachtet weiter und meldet die Entwarnung automatisch. Es wurde nichts gelöscht oder destruktiv verändert.'
+  ].join('\n')
+}
+
+export function formatWatchtowerRepair(repair) {
+  if (repair.ok) {
+    return [
+      '## ✅ Watchtower: Auto-Healing erfolgreich',
+      '',
+      `**Neu gestartet:** ${repair.appName}`,
+      '',
+      'PM2 meldet den Prozess nach dem einmaligen Neustart wieder als online.',
+      '',
+      'Es wurde nichts gelöscht, kein Deploy gestartet und keine Konfiguration verändert.'
+    ].join('\n')
+  }
+
+  return [
+    '## ⚠️ Watchtower: Auto-Healing fehlgeschlagen',
+    '',
+    `**Prozess:** ${repair.appName}`,
+    '',
+    repair.detail || 'Der Prozess war nach dem Neustartversuch nicht online.',
+    '',
+    'Watchtower versucht diesen Ausfall nicht erneut automatisch. Ein neuer Versuch wird erst nach einem nachweislich gesunden Zustand freigegeben.'
   ].join('\n')
 }

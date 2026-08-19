@@ -68,6 +68,8 @@ Tabellen:
 - `push_subscriptions` (Web-Push-Endpunkte pro User)
 - `watchtower_settings` (Pausezustand, eigene Conversation, Check-Metadaten)
 - `watchtower_incidents` (persistenter, deduplizierter Vorfall-Lebenszyklus)
+- `watchtower_repair_state` (globale Einmal-Sperre und Verifikation für PM2-Auto-Healing)
+- `watchtower_repair_history` (append-only Ergebnisprotokoll der automatischen Reparaturen)
 - `google_oauth_accounts` (Tokens, Scopes, primary-Flag)
 - `memory_items` (type, scope, status, content, importance, confidence, Fingerprints)
 - `memory_embeddings` (lokale, modell-/dimensions- und Source-SHA-gebundene
@@ -505,8 +507,12 @@ ohne Tools. systemPrompt(task) + localDateTime('de-AT', Europe/Vienna).
 - **taskCleanup.js**: alte Runs/Events aufräumen.
 - **push.js**: web-push VAPID, sendPushToUser, prune kaputter Subscriptions.
 - **watchtowerCore.js / watchtower.js**: reine Befundregeln, Debounce/Deduplizierung,
-  System-Probes, Conversation-Lifecycle, Incident-Nachrichten und Push. Keine automatische
-  Löschung oder andere destruktive Reparatur.
+  System-Probes, Conversation-Lifecycle, Incident-Nachrichten und Push. Für die feste
+  Code-Allowlist `echolink`, `echolink-mcp-web` und `echolink-mcp-playwright` ist genau
+  ein PM2-Neustart pro beobachtetem Ausfall erlaubt. Der Versuch wird vor Ausführung
+  persistent reserviert, anschließend erneut geprüft und erst nach einem nachweislich
+  gesunden Check wieder freigegeben. `echolink-worker`, Deploys, Cleanup, Datei- und
+  Datenbankänderungen bleiben außerhalb des Auto-Heal-Pfads.
 
 ### server/routes/tasks.js (~675 Z.)
 CRUD für scheduled_tasks, run-History, run-Details mit Events, enable/disable, run-now.
