@@ -20,6 +20,7 @@ import {
   readTaskRunControl,
   updateTaskRun
 } from './lib/taskRunState.js'
+import { runWatchtowerCycle } from './lib/watchtower.js'
 
 const POLL_MS = Math.max(
   5_000,
@@ -30,7 +31,13 @@ const LOCK_TIMEOUT_SECONDS = 5 * 60
 const MAX_TASKS_PER_TICK = 25
 
 let ticking = false
+let watchtowerTicking = false
 let stopping = false
+
+const WATCHTOWER_POLL_MS = Math.max(
+  30_000,
+  Number(process.env.WATCHTOWER_POLL_MS) || 120_000
+)
 
 function recoverInterruptedRuns() {
   const now = Math.floor(Date.now() / 1000)
@@ -668,6 +675,33 @@ async function tick() {
   }
 }
 
+async function watchtowerTick() {
+  if (watchtowerTicking || stopping) return
+
+  watchtowerTicking = true
+
+  try {
+    const result = await runWatchtowerCycle({
+      database: db
+    })
+
+    console.log(JSON.stringify({
+      level: 'info',
+      event: 'watchtower_cycle_completed',
+      users: result.users,
+      notifications: result.events
+    }))
+  } catch (error) {
+    console.error(JSON.stringify({
+      level: 'error',
+      event: 'watchtower_cycle_failed',
+      error: error?.message || String(error)
+    }))
+  } finally {
+    watchtowerTicking = false
+  }
+}
+
 function shutdown(signal) {
   stopping = true
 
@@ -683,7 +717,7 @@ function shutdown(signal) {
     } catch {}
 
     process.exit(0)
-  }, ticking ? 1_000 : 0)
+  }, ticking || watchtowerTicking ? 1_000 : 0)
 }
 
 process.on('SIGINT', () => shutdown('SIGINT'))
@@ -692,8 +726,11 @@ process.on('SIGTERM', () => shutdown('SIGTERM'))
 console.log(JSON.stringify({
   level: 'info',
   event: 'task_worker_started',
-  pollMs: POLL_MS
+  pollMs: POLL_MS,
+  watchtowerPollMs: WATCHTOWER_POLL_MS
 }))
 
 tick()
 setInterval(tick, POLL_MS)
+watchtowerTick()
+setInterval(watchtowerTick, WATCHTOWER_POLL_MS)

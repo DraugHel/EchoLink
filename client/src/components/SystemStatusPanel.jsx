@@ -30,6 +30,13 @@ function formatTimestamp(value) {
   })
 }
 
+function formatUnixTimestamp(value) {
+  const seconds = Number(value)
+  return Number.isFinite(seconds) && seconds > 0
+    ? formatTimestamp(seconds * 1000)
+    : 'Noch nie'
+}
+
 function mcpState(server) {
   if (server?.mode !== 'active') return 'Deaktiviert'
   if (server?.configured === false) return 'Nicht konfiguriert'
@@ -90,6 +97,8 @@ export default function SystemStatusPanel({
   status,
   monitoredApps,
   onToggleApp,
+  onToggleWatchtower,
+  onOpenWatchtower,
   onClose
 }) {
   const databaseWarning =
@@ -182,6 +191,80 @@ export default function SystemStatusPanel({
         </header>
 
         <div style={styles.body}>
+          <div style={styles.sectionTitle}>
+            Watchtower
+          </div>
+
+          <div style={styles.watchtowerCard}>
+            <div style={styles.watchtowerHeader}>
+              <span
+                style={{
+                  ...styles.processDot,
+                  background: status?.watchtower?.enabled
+                    ? 'var(--accent)'
+                    : 'var(--text3)'
+                }}
+              />
+
+              <div style={styles.watchtowerText}>
+                <strong style={styles.watchtowerTitle}>
+                  {status?.watchtower?.enabled
+                    ? 'Aktiv und unabhängig vom offenen Chat'
+                    : 'Pausiert'}
+                </strong>
+                <span style={styles.watchtowerMeta}>
+                  Letzter Check: {formatUnixTimestamp(
+                    status?.watchtower?.lastCheckAt
+                  )}
+                  {' · '}
+                  {(status?.watchtower?.incidents || []).length} offene Vorfälle
+                </span>
+              </div>
+            </div>
+
+            {status?.watchtower?.lastError && (
+              <div style={styles.mcpError}>
+                Letzter Watchtower-Fehler: {status.watchtower.lastError}
+              </div>
+            )}
+
+            {(status?.watchtower?.incidents || []).map(incident => (
+              <div
+                key={incident.key}
+                style={styles.watchtowerIncident}
+              >
+                <strong>{incident.summary}</strong>
+                <span>{incident.detail}</span>
+              </div>
+            ))}
+
+            <div style={styles.watchtowerActions}>
+              <button
+                type="button"
+                onClick={onOpenWatchtower}
+                disabled={!status?.watchtower?.conversationId}
+                style={styles.watchtowerButton}
+              >
+                Convo öffnen
+              </button>
+
+              <button
+                type="button"
+                onClick={onToggleWatchtower}
+                style={{
+                  ...styles.watchtowerButton,
+                  color: status?.watchtower?.enabled
+                    ? 'var(--danger)'
+                    : 'var(--accent)'
+                }}
+              >
+                {status?.watchtower?.enabled
+                  ? 'Pausieren'
+                  : 'Aktivieren'}
+              </button>
+            </div>
+          </div>
+
           <div style={styles.sectionTitle}>
             Ressourcen
           </div>
@@ -565,6 +648,57 @@ const styles = {
     overflowY: 'auto',
     padding:
       '16px 16px calc(22px + env(safe-area-inset-bottom))'
+  },
+  watchtowerCard: {
+    display: 'grid',
+    gap: 10,
+    padding: 12,
+    marginBottom: 22,
+    border: '1px solid var(--border)',
+    borderRadius: 11,
+    background: 'var(--bg3)'
+  },
+  watchtowerHeader: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 10
+  },
+  watchtowerText: {
+    minWidth: 0,
+    display: 'grid',
+    gap: 3
+  },
+  watchtowerTitle: {
+    color: 'var(--text1)',
+    fontSize: 12
+  },
+  watchtowerMeta: {
+    color: 'var(--text3)',
+    fontSize: 10
+  },
+  watchtowerIncident: {
+    display: 'grid',
+    gap: 4,
+    padding: 9,
+    border: '1px solid color-mix(in srgb, var(--danger) 45%, var(--border))',
+    borderRadius: 9,
+    color: 'var(--danger)',
+    fontSize: 10,
+    overflowWrap: 'anywhere'
+  },
+  watchtowerActions: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+    gap: 8
+  },
+  watchtowerButton: {
+    minHeight: 42,
+    border: '1px solid var(--border)',
+    borderRadius: 9,
+    background: 'var(--bg2)',
+    color: 'var(--text1)',
+    fontSize: 11,
+    fontWeight: 700
   },
   sectionTitle: {
     margin: '4px 2px 9px',

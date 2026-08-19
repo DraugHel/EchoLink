@@ -1,6 +1,6 @@
 # EchoLink — Code Map
 
-> Lebendige Karte des Projekts. Stand: 2026-08-06. Bei größeren Umbauten aktualisieren.
+> Lebendige Karte des Projekts. Stand: 2026-08-19. Bei größeren Umbauten aktualisieren.
 > Zeilenzahlen sind Richtwerte — sie veralten. Muster und Verantwortlichkeiten bleiben.
 
 ## Pflege-Regel für Luna/E3
@@ -27,7 +27,7 @@ Läuft unter PM2 als `echolink` auf 127.0.0.1:3000 (siehe ecosystem.config.cjs).
 │  ├─ providers/* (Ollama, Anthropic, Z.ai, Kimi, OpenAI)    │
 │  ├─ connectors/google/* (Calendar, Gmail, OAuth)           │
 │  └─ db.js → data/echolink.db (+ data/sessions.db)          │
-├─ worker.js (separater PM2-Prozess: geplante Tasks, Push)   │
+├─ worker.js (separater PM2-Prozess: Tasks + Watchtower)    │
 └─ Externe Dienste: SearXNG :8080, Firecrawl :3002, Ollama   │
 ```
 
@@ -66,6 +66,8 @@ Tabellen:
 - `task_runs` (status, phase, plan JSON, current_step, progress, control_state)
 - `task_run_events` (Event-Log pro Run — Treibstoff für AgentRunCockpit)
 - `push_subscriptions` (Web-Push-Endpunkte pro User)
+- `watchtower_settings` (Pausezustand, eigene Conversation, Check-Metadaten)
+- `watchtower_incidents` (persistenter, deduplizierter Vorfall-Lebenszyklus)
 - `google_oauth_accounts` (Tokens, Scopes, primary-Flag)
 - `memory_items` (type, scope, status, content, importance, confidence, Fingerprints)
 - `memory_embeddings` (lokale, modell-/dimensions- und Source-SHA-gebundene
@@ -485,6 +487,10 @@ Heartbeat) abarbeiten, max 25/Tick. recoverInterruptedRuns() beim Start (running
 - **agent**: runScheduledAgent() → frische Antwort mit ReadOnly-Tools, dann Push
 - completeTask/failTask berechnen next_run_at via lib/scheduler.js
 - pruneTaskMessages (retention_days), taskCleanup-Intervall, graceful shutdown.
+- unabhängiger Watchtower-Loop (default 120s): Root-Speicher, erforderliche PM2-Prozesse,
+  lokale Healthchecks und MCP-Registry. Meldet nur bestätigte neue/geänderte Vorfälle
+  und Entwarnungen in eine automatisch angelegte eigene `Watchtower`-Conversation plus Push.
+  Gesunde Checks bleiben still; der Zustand überlebt Worker-Neustarts in SQLite.
 
 ### server/lib/agentRunner.js (~513 Z.)
 runScheduledAgent: eigene Tool-Loop NUR mit READ_ONLY_TOOLS (search+firecrawl),
@@ -498,6 +504,9 @@ ohne Tools. systemPrompt(task) + localDateTime('de-AT', Europe/Vienna).
 - **taskConversations.js**: createDedicatedTaskConversation (eigene Convos für Agent-Tasks).
 - **taskCleanup.js**: alte Runs/Events aufräumen.
 - **push.js**: web-push VAPID, sendPushToUser, prune kaputter Subscriptions.
+- **watchtowerCore.js / watchtower.js**: reine Befundregeln, Debounce/Deduplizierung,
+  System-Probes, Conversation-Lifecycle, Incident-Nachrichten und Push. Keine automatische
+  Löschung oder andere destruktive Reparatur.
 
 ### server/routes/tasks.js (~675 Z.)
 CRUD für scheduled_tasks, run-History, run-Details mit Events, enable/disable, run-now.
@@ -560,7 +569,8 @@ Pipeline: Foto/PDF des Dienstplans → Vision-OCR → Prüf-UI → Google-Calend
   extractTextFromFile (pdf-parse, mammoth docx, xlsx, sonst plain); cleanupOrphanedFiles.
 - **external.js**: POST /api/external/briefing + GET /health, beide API-Key-geschützt;
   schreibt Briefings als Assistant-Message in BRIEFING_CONVERSATION_ID.
-- **system.js** (~325 Z.): Systemstatus-Endpunkt (SystemStatusPanel.jsx).
+- **system.js**: Systemstatus-Endpunkt plus usergebundener Watchtower-Status und
+  Pause/Aktivieren-Endpunkt (SystemStatusPanel.jsx).
 - **push.js**: VAPID-Key, subscribe/unsubscribe, Test-Push.
 - **utils/pdfVision.js**: PDF-Seiten rendern → Vision-Transkription (Gmail-Attachments,
   Shift-PDFs).
@@ -582,7 +592,8 @@ Pipeline: Foto/PDF des Dienstplans → Vision-OCR → Prüf-UI → Google-Calend
 - **components/**: Message.jsx (Markdown, Tool-Blöcke, Terminal-Bündelung), MessageInput,
   Sidebar, SettingsPanel, MemoryPanel, TaskPanel, AgentRunCockpit (Run-Detail mit Plan/
   Events), ChatAgentCockpit (bei abgebrochenem Research-Run: „Fortsetzen ab X Checkpoints“),
-  TerminalTimeline (**Terminal:**-Messages), SystemStatusPanel,
+  TerminalTimeline (**Terminal:**-Messages), SystemStatusPanel inklusive Watchtower-
+  Status, Pause-Schalter und Sprung in die eigene Watchtower-Conversation,
   ShiftImporter/ShiftHistory/ShiftSettings, PushButton, ThemePicker, AppToolsMenu,
   LunaMiniHud (Luna-Status), **CorsnFace.jsx** (das Wesen in den Drähten: moods
   ok|focus|wink|sleepy|panic + Aktivitäts-Symbole pro Tool).

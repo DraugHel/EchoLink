@@ -4,9 +4,14 @@ import { exec } from 'child_process'
 import { promises as fs } from 'fs'
 import path from 'path'
 import os from 'os'
+import db from '../db.js'
 import {
   getMcpRegistryStatus
 } from '../lib/mcpRegistry.js'
+import {
+  getWatchtowerStatus,
+  setWatchtowerEnabled
+} from '../lib/watchtower.js'
 
 const router = Router()
 
@@ -22,6 +27,13 @@ const FULL_BACKUP_ROOT =
 let cache = {
   t: 0,
   data: null
+}
+
+function statusForUser(data, userId) {
+  return {
+    ...data,
+    watchtower: getWatchtowerStatus(db, userId)
+  }
 }
 
 function run(command) {
@@ -184,7 +196,10 @@ router.get(
       Date.now() - cache.t < 10000 &&
       cache.data
     ) {
-      return res.json(cache.data)
+      return res.json(statusForUser(
+        cache.data,
+        req.session.userId
+      ))
     }
 
     try {
@@ -319,10 +334,39 @@ router.get(
         data
       }
 
-      res.json(data)
+      res.json(statusForUser(
+        data,
+        req.session.userId
+      ))
     } catch {
       res.status(500).json({
         error: 'status failed'
+      })
+    }
+  }
+)
+
+router.patch(
+  '/watchtower',
+  requireAuth,
+  (req, res) => {
+    if (typeof req.body?.enabled !== 'boolean') {
+      return res.status(400).json({
+        error: 'enabled muss true oder false sein'
+      })
+    }
+
+    try {
+      const watchtower = setWatchtowerEnabled(
+        db,
+        req.session.userId,
+        req.body.enabled
+      )
+
+      res.json(watchtower)
+    } catch (error) {
+      res.status(500).json({
+        error: error?.message || String(error)
       })
     }
   }

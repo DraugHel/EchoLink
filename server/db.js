@@ -132,6 +132,51 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_push_subscriptions_user
     ON push_subscriptions(user_id, id);
 
+  CREATE TABLE IF NOT EXISTS watchtower_settings (
+    user_id INTEGER PRIMARY KEY,
+    enabled INTEGER NOT NULL DEFAULT 1
+      CHECK(enabled IN (0, 1)),
+    conversation_id INTEGER,
+    disk_warning_percent INTEGER NOT NULL DEFAULT 85
+      CHECK(disk_warning_percent BETWEEN 50 AND 99),
+    last_check_at INTEGER,
+    last_success_at INTEGER,
+    last_error TEXT,
+    created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    FOREIGN KEY (user_id)
+      REFERENCES users(id)
+      ON DELETE CASCADE,
+    FOREIGN KEY (conversation_id)
+      REFERENCES conversations(id)
+      ON DELETE SET NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS watchtower_incidents (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    monitor_key TEXT NOT NULL,
+    status TEXT NOT NULL
+      CHECK(status IN ('pending', 'open', 'resolved')),
+    severity TEXT NOT NULL
+      CHECK(severity IN ('warning', 'critical')),
+    fingerprint TEXT NOT NULL,
+    summary TEXT NOT NULL,
+    detail TEXT NOT NULL DEFAULT '',
+    opened_at INTEGER NOT NULL,
+    last_seen_at INTEGER NOT NULL,
+    resolved_at INTEGER,
+    last_notified_at INTEGER,
+    consecutive_count INTEGER NOT NULL DEFAULT 1,
+    FOREIGN KEY (user_id)
+      REFERENCES users(id)
+      ON DELETE CASCADE,
+    UNIQUE(user_id, monitor_key)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_watchtower_incidents_user_status
+    ON watchtower_incidents(user_id, status, last_seen_at DESC);
+
 
   CREATE TABLE IF NOT EXISTS google_oauth_accounts (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

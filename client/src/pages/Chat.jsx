@@ -837,6 +837,41 @@ export default function Chat({ user, onLogout }) {
     })
   }
 
+  async function toggleWatchtower() {
+    const enabled = !sysStatus?.watchtower?.enabled
+    const watchtower = await api.patch(
+      '/api/system/watchtower',
+      { enabled }
+    )
+
+    setSysStatus(current => ({
+      ...current,
+      watchtower
+    }))
+
+    if (enabled) {
+      await loadConversations()
+    }
+  }
+
+  async function openWatchtowerConversation() {
+    const conversationId = Number(
+      sysStatus?.watchtower?.conversationId
+    )
+
+    if (!Number.isInteger(conversationId)) return
+
+    const convos = await loadConversations()
+    const conversation = convos.find(
+      item => Number(item.id) === conversationId
+    )
+
+    if (!conversation) return
+
+    setShowSysPanel(false)
+    await selectConvo(conversation)
+  }
+
   async function loadConversations() {
     const convos = await api.get('/api/conversations?includeArchived=1')
     setConversations(convos)
@@ -2562,6 +2597,8 @@ export default function Chat({ user, onLogout }) {
               status={sysStatus}
               monitoredApps={monitoredApps}
               onToggleApp={toggleMonitoredApp}
+              onToggleWatchtower={toggleWatchtower}
+              onOpenWatchtower={openWatchtowerConversation}
               onClose={() => setShowSysPanel(false)}
             />
           </Suspense>
