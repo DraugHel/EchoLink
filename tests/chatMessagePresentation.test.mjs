@@ -11,7 +11,7 @@ const stylesheet = fs.readFileSync(
   'utf8'
 )
 
-test('chat messages use layered cards and compact footer controls', () => {
+test('chat messages use restrained matte cards and unboxed footer controls', () => {
   assert.match(messageSource, /msg-bubble-user/)
   assert.match(messageSource, /msg-bubble-assistant/)
   assert.match(messageSource, /msg-footer-user/)
@@ -42,14 +42,17 @@ test('chat messages use layered cards and compact footer controls', () => {
   assert.ok(footerStart > assistantRailStart)
   assert.match(userBubble, /border:\s*1px solid color-mix\(/)
   assert.doesNotMatch(userBubble, /border:\s*2px/)
-  assert.match(userBubble, /radial-gradient\(/)
-  assert.match(userBubble, /backdrop-filter:\s*blur\(14px\)/)
-  assert.match(stylesheet, /\.msg-bubble-user::before\s*\{[^}]*height:\s*2px/s)
-  assert.match(stylesheet, /\.msg-bubble-assistant::before\s*\{[^}]*width:\s*4px/s)
+  assert.match(userBubble, /background:\s*color-mix\(in srgb, var\(--bg3\) 90%, var\(--user-bubble\)\)/)
+  assert.doesNotMatch(userBubble, /gradient\(/)
+  assert.doesNotMatch(userBubble, /backdrop-filter:/)
+  assert.doesNotMatch(stylesheet, /\.msg-bubble-user::before\s*\{/)
+  assert.match(stylesheet, /\.msg-bubble-assistant\s*\{[^}]*background:\s*var\(--bg3\)/s)
+  assert.match(stylesheet, /\.msg-bubble-assistant::before\s*\{[^}]*width:\s*2px/s)
   assert.match(stylesheet, /\.msg-footer-assistant\s*\{[^}]*border-top:/s)
-  assert.match(actions, /background:\s*color-mix\(/)
-  assert.match(actions, /border:\s*1px solid color-mix\(/)
-  assert.match(actions, /border-radius:\s*999px/)
+  assert.match(actions, /background:\s*transparent/)
+  assert.match(actions, /border:\s*0/)
+  assert.doesNotMatch(actions, /border-radius:/)
+  assert.match(stylesheet, /\.msg-action-btn\s*\{[^}]*border:\s*0;[^}]*border-radius:\s*7px/s)
 })
 
 test('message presentation remains theme-variable driven', () => {

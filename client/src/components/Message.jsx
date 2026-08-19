@@ -205,8 +205,8 @@ function Message({ role, content, streaming, images, think, toolStatus, actionRe
     >
       {!isUser && (
         <div style={styles.avatar} className="msg-avatar">
-          <svg width="16" height="16" viewBox="0 0 32 32" fill="none">
-            <rect width="32" height="32" rx="10" fill="var(--accent)"/>
+          <svg width="14" height="14" viewBox="0 0 32 32" fill="none">
+            <rect width="32" height="32" rx="8" fill="var(--accent)"/>
             <path d="M8 22 L14 10 L20 18 L24 14" stroke="#0d0d0d" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
             <circle cx="24" cy="14" r="2" fill="#0d0d0d"/>
           </svg>
@@ -839,22 +839,22 @@ const XIcon2 = () => (
 )
 
 const TrashIcon = () => (
-  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
   </svg>
 )
 const CopyIcon = () => (
-  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
   </svg>
 )
 const CheckIcon = () => (
-  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
     <polyline points="20 6 9 17 4 12"/>
   </svg>
 )
 const EditIcon = () => (
-  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
     <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
   </svg>
@@ -944,11 +944,11 @@ function CodeBlock({ lang, code }) {
 const styles = {
   wrap: { display: 'flex', gap: 10, marginBottom: 20, alignItems: 'flex-start', maxWidth: 820, width: '100%', marginLeft: 'auto', marginRight: 'auto' },
   avatar: {
-    width: 34, height: 34, borderRadius: 12, flexShrink: 0,
+    width: 30, height: 30, borderRadius: 9, flexShrink: 0,
     display: 'flex', alignItems: 'center', justifyContent: 'center',
     marginTop: 2
   },
-  bubble: { maxWidth: '76%', borderRadius: 14, padding: '15px 17px', fontSize: 15, lineHeight: 1.65, minWidth: 0 },
+  bubble: { maxWidth: '76%', borderRadius: 14, padding: '13px 15px', fontSize: 15, lineHeight: 1.65, minWidth: 0 },
   userBubble: {
     color: 'var(--text)',
     fontWeight: 400
@@ -1027,14 +1027,14 @@ const styles = {
   },
   thinkWrap: {
     marginBottom: 10,
-    borderRadius: 12,
-    border: '1px solid color-mix(in srgb, var(--border2) 72%, transparent)',
+    borderRadius: 9,
+    border: '1px solid var(--border)',
     overflow: 'hidden'
   },
   thinkToggle: {
     width: '100%', textAlign: 'left',
     padding: '7px 12px', fontSize: 12,
-    color: 'var(--text2)', background: 'color-mix(in srgb, var(--bg4) 82%, transparent)',
+    color: 'var(--text2)', background: 'var(--bg4)',
     cursor: 'pointer', fontFamily: 'var(--font-mono)',
     display: 'flex', alignItems: 'center',
     border: 'none'
