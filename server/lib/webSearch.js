@@ -1,6 +1,9 @@
 const SEARXNG_URL = process.env.SEARXNG_URL || 'http://localhost:8080'
 const FIRECRAWL_URL = process.env.FIRECRAWL_URL || 'http://localhost:3002'
-const SEARCH_TIMEOUT_MS = 10000
+const SEARCH_TIMEOUT_MS = Number.parseInt(
+  process.env.SEARXNG_SEARCH_TIMEOUT_MS || '18000',
+  10
+)
 const MAX_RESULTS = 5
 
 function linkedAbortController(externalSignal, timeoutMs) {

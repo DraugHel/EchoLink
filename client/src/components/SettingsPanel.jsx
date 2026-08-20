@@ -33,6 +33,14 @@ export default function SettingsPanel({
   function modelProvider(model) {
     if (model.provider) return model.provider
 
+    if (
+      String(model.name || '').startsWith(
+        'llamacpp/'
+      )
+    ) {
+      return 'llamacpp'
+    }
+
     return /[:-]cloud$/.test(model.name || '')
       ? 'ollama-cloud'
       : 'ollama'
@@ -41,6 +49,7 @@ export default function SettingsPanel({
   const providerLabels = {
     'ollama-cloud': 'Ollama Cloud',
     ollama: 'Ollama (lokal)',
+    llamacpp: 'llama.cpp',
     anthropic: 'Anthropic',
     openai: 'OpenAI',
     zai: 'Z.ai',
