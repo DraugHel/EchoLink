@@ -30,6 +30,7 @@ import {
 } from '../providers/openai-compatible.js'
 import { streamAnthropic } from '../providers/anthropic.js'
 import { streamResponses } from '../providers/openai-responses.js'
+import { streamLlamaCpp } from '../providers/llamacpp.js'
 import {
   scheduledAgentTimeoutMs,
   scheduledAgentToolCallLimit,
@@ -138,6 +139,13 @@ function providerFor(model) {
     return {
       streamFn: streamResponses,
       providerModel: model.slice(7)
+    }
+  }
+
+  if (model.startsWith('llamacpp/')) {
+    return {
+      streamFn: streamLlamaCpp,
+      providerModel: model.slice(9)
     }
   }
 
@@ -304,6 +312,7 @@ async function callModel({
     streamFn === streamZai ||
     streamFn === streamKimi ||
     streamFn === streamDeepSeek ||
+    streamFn === streamLlamaCpp ||
     streamFn === streamResponses
       ? splitSystemTimeNote(workingMessages)
       : workingMessages

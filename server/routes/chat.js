@@ -75,6 +75,11 @@ import {
 } from '../lib/e3Tools.js'
 import { chatToolIterationLimit } from '../lib/toolLimits.js'
 import { OLLAMA_URL, streamOllama } from '../providers/ollama.js'
+import {
+  LLAMACPP_API_KEY,
+  LLAMACPP_URL,
+  streamLlamaCpp
+} from '../providers/llamacpp.js'
 import { OPENAI_KEY, ZAI_KEY, KIMI_KEY, DEEPSEEK_KEY, streamZai, streamKimi, streamDeepSeek, splitSystemTimeNote } from '../providers/openai-compatible.js'
 import { ANTHROPIC_KEY, streamAnthropic } from '../providers/anthropic.js'
 import { streamResponses } from '../providers/openai-responses.js'
@@ -1844,6 +1849,15 @@ Use these as background context. If these memories fully answer the request, ans
         source: 'provider:kimi'
       },
       {
+        matches:
+          normalizedModel.startsWith('llamacpp/'),
+        env:
+          process.env
+            .CHAT_CONTEXT_LLAMACPP_INPUT_TOKENS ||
+          '60000',
+        source: 'provider:llamacpp'
+      },
+      {
         matches: true,
         env:
           process.env
@@ -2307,8 +2321,9 @@ Use these as background context. If these memories fully answer the request, ans
       else if (activeModel.startsWith('zai/')) { streamFn = streamZai; providerModel = activeModel.slice(4) }
       else if (activeModel.startsWith('kimi/')) { streamFn = streamKimi; providerModel = activeModel.slice(5) }
       else if (activeModel.startsWith('deepseek/')) { streamFn = streamDeepSeek; providerModel = activeModel.slice(9) }
+      else if (activeModel.startsWith('llamacpp/')) { streamFn = streamLlamaCpp; providerModel = activeModel.slice(9) }
       else if (activeModel.startsWith('openai/')) { streamFn = streamResponses; providerModel = activeModel.slice(7) }
-      if (streamFn === streamZai || streamFn === streamKimi || streamFn === streamDeepSeek || streamFn === streamResponses) {
+      if (streamFn === streamZai || streamFn === streamKimi || streamFn === streamDeepSeek || streamFn === streamLlamaCpp || streamFn === streamResponses) {
         workingMessages = splitSystemTimeNote(workingMessages)
       }
       assertChatRequestActive(activeRequest)
@@ -3191,6 +3206,38 @@ async function loadModelList() {
           `${OLLAMA_URL}/api/tags`
         )
         return data.models || []
+      }
+    },
+    {
+      name: 'llamacpp',
+      enabled: Boolean(
+        LLAMACPP_URL && LLAMACPP_API_KEY
+      ),
+      load: async () => {
+        const data = await fetchJsonWithTimeout(
+          `${LLAMACPP_URL}/models`,
+          {
+            headers: {
+              Authorization:
+                `Bearer ${LLAMACPP_API_KEY}`
+            }
+          }
+        )
+
+        const remoteModels =
+          data.data || data.models || []
+
+        return remoteModels
+          .map(model =>
+            model?.id ||
+            model?.name ||
+            model?.model
+          )
+          .filter(Boolean)
+          .map(name => ({
+            name: `llamacpp/${name}`,
+            provider: 'llamacpp'
+          }))
       }
     },
     {

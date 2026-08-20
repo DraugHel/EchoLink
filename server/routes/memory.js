@@ -10,6 +10,7 @@ import {
   updateMemoryItem
 } from '../lib/memoryItems.js'
 import { runDeepSeekMemory } from '../lib/deepseekMemory.js'
+import { completeLlamaCpp } from '../providers/llamacpp.js'
 import {
   refreshMemoryEmbeddingsByIds
 } from '../lib/memoryEmbeddings.js'
@@ -162,6 +163,36 @@ async function runMemoryModel(
       apiKey:
         process.env.DEEPSEEK_API_KEY || ''
     })
+  }
+
+  if (
+    selectedModel.startsWith('llamacpp/')
+  ) {
+    const controller = new AbortController()
+    const timer = setTimeout(
+      () => controller.abort(),
+      120000
+    )
+
+    try {
+      return await completeLlamaCpp(
+        selectedModel.slice(9),
+        [
+          {
+            role: 'user',
+            content: prompt
+          }
+        ],
+        {
+          temperature: 0.3,
+          top_p: 0.9,
+          maxTokens: 4000
+        },
+        controller.signal
+      )
+    } finally {
+      clearTimeout(timer)
+    }
   }
 
   const ollamaModel =
