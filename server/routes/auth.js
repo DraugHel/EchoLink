@@ -1,6 +1,10 @@
 import { Router } from 'express'
 import bcrypt from 'bcryptjs'
 import db from '../db.js'
+import {
+  isAllowedVisionModel,
+  resolveVisionModel
+} from '../lib/visionModels.js'
 
 const router = Router()
 
@@ -76,6 +80,48 @@ router.patch('/default-prompt', (req, res) => {
   const { prompt } = req.body
   db.prepare('UPDATE users SET default_system_prompt = ? WHERE id = ?').run(prompt ?? '', req.session.userId)
   res.json({ ok: true, prompt: prompt ?? '' })
+})
+
+// Get effective global vision model (user > env > safe default)
+router.get('/vision-model', (req, res) => {
+  if (!req.session.userId) {
+    return res.status(401).json({
+      error: 'Not authenticated'
+    })
+  }
+
+  const user = db.prepare(
+    'SELECT vision_model FROM users WHERE id = ?'
+  ).get(req.session.userId)
+
+  res.json({
+    model: resolveVisionModel(
+      user?.vision_model,
+      process.env.VISION_MODEL
+    )
+  })
+})
+
+// Update user's global vision model
+router.patch('/vision-model', (req, res) => {
+  if (!req.session.userId) {
+    return res.status(401).json({
+      error: 'Not authenticated'
+    })
+  }
+
+  const model = String(req.body?.model || '').trim()
+  if (!isAllowedVisionModel(model)) {
+    return res.status(400).json({
+      error: 'Ungültiges Vision-Modell'
+    })
+  }
+
+  db.prepare(
+    'UPDATE users SET vision_model = ? WHERE id = ?'
+  ).run(model, req.session.userId)
+
+  res.json({ ok: true, model })
 })
 
 export default router

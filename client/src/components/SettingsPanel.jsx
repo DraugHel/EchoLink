@@ -24,6 +24,16 @@ export default function SettingsPanel({
     useState(false)
   const [defaultSaved, setDefaultSaved] =
     useState(false)
+  const [visionModel, setVisionModel] =
+    useState('')
+  const [visionLoading, setVisionLoading] =
+    useState(true)
+  const [savingVision, setSavingVision] =
+    useState(false)
+  const [visionSaved, setVisionSaved] =
+    useState(false)
+  const [visionError, setVisionError] =
+    useState('')
   const [saving, setSaving] = useState(false)
   const [modelsError, setModelsError] =
     useState(false)
@@ -120,6 +130,20 @@ export default function SettingsPanel({
       .then(data =>
         setDefaultPrompt(data.prompt)
       )
+
+    api
+      .get('/api/auth/vision-model')
+      .then(data => {
+        setVisionModel(data.model)
+        setVisionError('')
+      })
+      .catch(error =>
+        setVisionError(
+          error.message ||
+          'Vision-Modell konnte nicht geladen werden.'
+        )
+      )
+      .finally(() => setVisionLoading(false))
   }, [])
 
   async function saveDefault() {
@@ -140,6 +164,36 @@ export default function SettingsPanel({
       )
     } finally {
       setSavingDefault(false)
+    }
+  }
+
+  async function saveVisionModel(nextModel) {
+    const previousModel = visionModel
+    setVisionModel(nextModel)
+    setSavingVision(true)
+    setVisionSaved(false)
+    setVisionError('')
+
+    try {
+      const data = await api.patch(
+        '/api/auth/vision-model',
+        { model: nextModel }
+      )
+
+      setVisionModel(data.model)
+      setVisionSaved(true)
+      setTimeout(
+        () => setVisionSaved(false),
+        2000
+      )
+    } catch (error) {
+      setVisionModel(previousModel)
+      setVisionError(
+        error.message ||
+        'Vision-Modell konnte nicht gespeichert werden.'
+      )
+    } finally {
+      setSavingVision(false)
     }
   }
 
@@ -347,6 +401,71 @@ export default function SettingsPanel({
                     </option>
                   </select>
                 </Field>
+              </section>
+
+              <section
+                className="echolink-settings-section"
+                style={styles.section}
+              >
+                <SectionHeading
+                  title="Bildanalyse"
+                  description={
+                    'Globales Modell für Nachrichten ' +
+                    'mit Bildern.'
+                  }
+                />
+
+                <Field label="Vision-Modell">
+                  <select
+                    style={styles.select}
+                    value={visionModel}
+                    onChange={event =>
+                      saveVisionModel(
+                        event.target.value
+                      )
+                    }
+                    disabled={
+                      visionLoading ||
+                      savingVision ||
+                      (!visionModel && Boolean(visionError))
+                    }
+                  >
+                    {!visionModel && (
+                      <option value="">
+                        {visionLoading
+                          ? 'Lädt …'
+                          : 'Nicht verfügbar'}
+                      </option>
+                    )}
+                    <option
+                      value={
+                        'deepseek/' +
+                        'deepseek-v4-flash-vision-exp'
+                      }
+                    >
+                      DeepSeek V4 Flash Vision Exp
+                    </option>
+                    <option value="openai/gpt-5.6-luna">
+                      GPT-5.6 Luna
+                    </option>
+                  </select>
+                </Field>
+
+                <p style={styles.note}>
+                  Wird nur verwendet, wenn du ein Bild
+                  sendest. Normale Nachrichten verwenden
+                  weiterhin das Chatmodell.
+                </p>
+
+                {savingVision && (
+                  <p style={styles.note}>Speichert …</p>
+                )}
+                {visionSaved && (
+                  <p style={styles.note}>✓ Gespeichert</p>
+                )}
+                {visionError && (
+                  <p style={styles.error}>{visionError}</p>
+                )}
               </section>
 
               <section

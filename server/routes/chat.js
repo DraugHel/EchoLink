@@ -74,6 +74,9 @@ import {
   readE3ExportPackage
 } from '../lib/e3Tools.js'
 import { chatToolIterationLimit } from '../lib/toolLimits.js'
+import {
+  resolveActiveModel
+} from '../lib/visionModels.js'
 import { OLLAMA_URL, streamOllama } from '../providers/ollama.js'
 import {
   LLAMACPP_API_KEY,
@@ -2103,12 +2106,19 @@ Use these as background context. If these memories fully answer the request, ans
   // uploads an image. Historical images are omitted from text-only turns
   // above, so text-only providers never receive image_url content.
 
-  const VISION_MODEL =
-    process.env.VISION_MODEL ||
-    'kimi-k2.7-code:cloud'
+  const userVisionModel = hasImages
+    ? db.prepare(
+        'SELECT vision_model FROM users WHERE id = ?'
+      ).get(req.session.userId)?.vision_model
+    : ''
 
   const activeModel =
-    hasImages ? VISION_MODEL : convo.model
+    resolveActiveModel({
+      hasImages,
+      chatModel: convo.model,
+      userVisionModel,
+      envVisionModel: process.env.VISION_MODEL
+    })
 
   const finalContextBudget =
     resolveContextBudget(activeModel)
