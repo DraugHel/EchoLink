@@ -10,6 +10,7 @@ import {
   updateMemoryItem
 } from '../lib/memoryItems.js'
 import { runDeepSeekMemory } from '../lib/deepseekMemory.js'
+import { runZaiMemory } from '../lib/zaiMemory.js'
 import { completeLlamaCpp } from '../providers/llamacpp.js'
 import {
   refreshMemoryEmbeddingsByIds
@@ -152,6 +153,17 @@ async function runMemoryModel(
     }
 
     return extractOpenAIText(data)
+  }
+
+  if (
+    selectedModel.startsWith('zai/')
+  ) {
+    return runZaiMemory({
+      model: selectedModel,
+      prompt,
+      apiKey:
+        process.env.ZAI_API_KEY || ''
+    })
   }
 
   if (
