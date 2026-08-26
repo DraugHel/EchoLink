@@ -190,15 +190,48 @@ async function streamOpenAICompatible(providerName, endpoint, key, model, messag
     try { args = t.args ? JSON.parse(t.args) : {} } catch {}
     return { id: t.id, function: { name: t.name, arguments: args } }
   })
-  const tokenUsage = usage ? {
-    promptTokens: usage.prompt_tokens || 0,
-    completionTokens: usage.completion_tokens || 0,
-    totalTokens: usage.total_tokens || ((usage.prompt_tokens || 0) + (usage.completion_tokens || 0)),
-    cachedTokens: usage.prompt_cache_hit_tokens || 0,
-    cacheWriteTokens: usage.prompt_cache_miss_tokens || 0,
-    cacheObserved: usage.prompt_cache_hit_tokens !== undefined || usage.prompt_cache_miss_tokens !== undefined
-  } : null
+  const tokenUsage =
+    normalizeOpenAICompatibleTokenUsage(usage)
+
   return { fullContent, fullThinking, toolCalls, tokenUsage }
+}
+
+export function normalizeOpenAICompatibleTokenUsage(usage) {
+  if (!usage || typeof usage !== 'object') return null
+
+  const promptTokens = Number(usage.prompt_tokens) || 0
+  const completionTokens = Number(usage.completion_tokens) || 0
+  const nestedCachedTokens =
+    usage.prompt_tokens_details?.cached_tokens
+  const legacyCachedTokens =
+    usage.prompt_cache_hit_tokens
+
+  const cachedTokens = Number(
+    legacyCachedTokens ??
+    nestedCachedTokens ??
+    0
+  ) || 0
+
+  const cacheWriteTokens = Number(
+    usage.prompt_cache_miss_tokens ??
+    0
+  ) || 0
+
+  const cacheObserved =
+    legacyCachedTokens !== undefined ||
+    nestedCachedTokens !== undefined ||
+    usage.prompt_cache_miss_tokens !== undefined
+
+  return {
+    promptTokens,
+    completionTokens,
+    totalTokens:
+      Number(usage.total_tokens) ||
+      (promptTokens + completionTokens),
+    cachedTokens,
+    cacheWriteTokens,
+    cacheObserved
+  }
 }
 
 function kimiRequestExtras(model, reasoningEffort) {
