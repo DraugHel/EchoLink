@@ -9,8 +9,41 @@ function imgMediaType(b64) {
 }
 
 // ===================== Z.ai (Zhipu) Provider — OpenAI-kompatibel =====================
-const ZAI_URL = 'https://api.z.ai/api/paas/v4/chat/completions'
+const ZAI_BASE_URL = 'https://api.z.ai/api/paas/v4'
+const ZAI_URL = `${ZAI_BASE_URL}/chat/completions`
+export const ZAI_MODELS_URL = `${ZAI_BASE_URL}/models`
 export const ZAI_KEY = process.env.ZAI_API_KEY || ''
+
+export function normalizeZaiModels(data) {
+  const remoteModels = Array.isArray(data?.data)
+    ? data.data
+    : Array.isArray(data?.models)
+      ? data.models
+      : []
+
+  const ids = remoteModels
+    .map(model => (
+      typeof model === 'string'
+        ? model
+        : model?.id || model?.name || model?.model
+    ))
+    .filter(Boolean)
+    .map(id => String(id).trim())
+    .filter(id => /^glm-/i.test(id))
+
+  return Array.from(new Set(ids))
+    .sort((a, b) =>
+      b.localeCompare(
+        a,
+        undefined,
+        { numeric: true, sensitivity: 'base' }
+      )
+    )
+    .map(id => ({
+      name: `zai/${id}`,
+      provider: 'zai'
+    }))
+}
 
 // ===================== Moonshot AI (Kimi) — OpenAI-kompatibel =====================
 const KIMI_URL = 'https://api.moonshot.ai/v1/chat/completions'
@@ -185,9 +218,57 @@ function kimiRequestExtras(model, reasoningEffort) {
   return {}
 }
 
-export const streamZai = (model, messages, options, res, abortSignal) =>
-  streamOpenAICompatible('Z.ai', ZAI_URL, ZAI_KEY, model, messages, options, res, abortSignal,
-    options?.reasoningEffort === 'off' ? { thinking: { type: 'disabled' } } : {})
+function zaiAlwaysThinking(model) {
+  return /^glm-5\.3(?:$|-)/i.test(model)
+}
+
+export function zaiRequestExtras(model, reasoningEffort) {
+  if (zaiAlwaysThinking(model)) {
+    let effectiveEffort = null
+
+    if (reasoningEffort === 'off') {
+      effectiveEffort = 'low'
+    } else if (reasoningEffort === 'medium') {
+      effectiveEffort = 'high'
+    } else if (
+      reasoningEffort === 'low' ||
+      reasoningEffort === 'high' ||
+      reasoningEffort === 'max'
+    ) {
+      effectiveEffort = reasoningEffort
+    }
+
+    return {
+      thinking: { type: 'enabled' },
+      ...(effectiveEffort
+        ? { reasoning_effort: effectiveEffort }
+        : {})
+    }
+  }
+
+  return reasoningEffort === 'off'
+    ? { thinking: { type: 'disabled' } }
+    : {}
+}
+
+export const streamZai = (
+  model,
+  messages,
+  options,
+  res,
+  abortSignal
+) =>
+  streamOpenAICompatible(
+    'Z.ai',
+    ZAI_URL,
+    ZAI_KEY,
+    model,
+    messages,
+    options,
+    res,
+    abortSignal,
+    zaiRequestExtras(model, options?.reasoningEffort)
+  )
 
 // Kimi fixes temperature/top_p per model family. K3 controls reasoning via
 // reasoning_effort; only K2.6 supports disabling thinking explicitly.

@@ -83,7 +83,18 @@ import {
   LLAMACPP_URL,
   streamLlamaCpp
 } from '../providers/llamacpp.js'
-import { OPENAI_KEY, ZAI_KEY, KIMI_KEY, DEEPSEEK_KEY, streamZai, streamKimi, streamDeepSeek, splitSystemTimeNote } from '../providers/openai-compatible.js'
+import {
+  OPENAI_KEY,
+  ZAI_KEY,
+  ZAI_MODELS_URL,
+  KIMI_KEY,
+  DEEPSEEK_KEY,
+  normalizeZaiModels,
+  streamZai,
+  streamKimi,
+  streamDeepSeek,
+  splitSystemTimeNote
+} from '../providers/openai-compatible.js'
 import { ANTHROPIC_KEY, streamAnthropic } from '../providers/anthropic.js'
 import { streamResponses } from '../providers/openai-responses.js'
 import {
@@ -3298,6 +3309,22 @@ async function loadModelList() {
       }
     },
     {
+      name: 'zai',
+      enabled: Boolean(ZAI_KEY),
+      load: async () => {
+        const data = await fetchJsonWithTimeout(
+          ZAI_MODELS_URL,
+          {
+            headers: {
+              Authorization: `Bearer ${ZAI_KEY}`
+            }
+          }
+        )
+
+        return normalizeZaiModels(data)
+      }
+    },
+    {
       name: 'deepseek',
       enabled: Boolean(DEEPSEEK_KEY),
       load: async () => {
@@ -3345,14 +3372,6 @@ async function loadModelList() {
         : result.reason?.message || String(result.reason)
     }))
   })
-
-  if (ZAI_KEY) {
-    models.push(
-      { name: 'zai/glm-5.2', provider: 'zai' },
-      { name: 'zai/glm-5.1', provider: 'zai' },
-      { name: 'zai/glm-4.7', provider: 'zai' }
-    )
-  }
 
   if (KIMI_KEY) {
     models.push(
