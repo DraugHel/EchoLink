@@ -15,6 +15,7 @@ import tsx from 'react-syntax-highlighter/dist/esm/languages/prism/tsx'
 import typescript from 'react-syntax-highlighter/dist/esm/languages/prism/typescript'
 import yaml from 'react-syntax-highlighter/dist/esm/languages/prism/yaml'
 import { oneDark, oneLight } from 'react-syntax-highlighter/dist/esm/styles/prism'
+import EchoLinkMark from './EchoLinkMark.jsx'
 
 // EchoLink UI Phase 3.3: light syntax highlighter
 SyntaxHighlighter.registerLanguage('bash', bash)
@@ -205,11 +206,7 @@ function Message({ role, content, streaming, images, think, toolStatus, actionRe
     >
       {!isUser && (
         <div style={styles.avatar} className="msg-avatar">
-          <svg width="14" height="14" viewBox="0 0 32 32" fill="none">
-            <rect width="32" height="32" rx="8" fill="var(--accent)"/>
-            <path d="M8 22 L14 10 L20 18 L24 14" stroke="#0d0d0d" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
-            <circle cx="24" cy="14" r="2" fill="#0d0d0d"/>
-          </svg>
+          <EchoLinkMark size={18} />
         </div>
       )}
       <div

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import api from '../lib/api.js'
+import EchoLinkMark from './EchoLinkMark.jsx'
 
 function formatSearchResultDate(timestamp) {
   if (!timestamp) return ''
@@ -171,11 +172,7 @@ const [editingId, setEditingId] = useState(null)
         {/* Header */}
         <div style={styles.header}>
           <div style={styles.logo}>
-            <svg width="22" height="22" viewBox="0 0 32 32" fill="none">
-              <rect width="32" height="32" rx="8" fill="var(--accent)"/>
-              <path d="M8 22 L14 10 L20 18 L24 14" stroke="#0d0d0d" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
-              <circle cx="24" cy="14" r="2" fill="#0d0d0d"/>
-            </svg>
+            <EchoLinkMark size={22} title="EchoLink" />
             <span style={styles.logoText}>Echo<span style={{ color:'var(--green)' }}>Link</span></span>
           </div>
           <button style={{ ...styles.newBtn, opacity: creating ? 0.6 : 1 }} onClick={async () => {

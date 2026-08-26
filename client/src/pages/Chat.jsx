@@ -8,6 +8,7 @@ import { useTheme } from '../components/ThemePicker.jsx'
 import CorsnFace from '../components/CorsnFace.jsx'
 import LunaMiniHud from '../components/LunaMiniHud.jsx'
 import TerminalTimeline from '../components/TerminalTimeline.jsx'
+import EchoLinkMark from '../components/EchoLinkMark.jsx'
 import {
   MAX_CHAT_RECONNECT_RETRIES,
   attachPendingChatActions,
@@ -2338,11 +2339,7 @@ export default function Chat({ user, onLogout }) {
           {!activeConvo && (
             <div style={styles.empty} className="fade-in">
               <div style={styles.emptyLogo}>
-                <svg width="48" height="48" viewBox="0 0 32 32" fill="none">
-                  <rect width="32" height="32" rx="8" fill="var(--accent)"/>
-                  <path d="M8 22 L14 10 L20 18 L24 14" stroke="#0d0d0d" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
-                  <circle cx="24" cy="14" r="2" fill="#0d0d0d"/>
-                </svg>
+                <EchoLinkMark size={48} title="EchoLink" />
               </div>
               <h2 style={styles.emptyTitle}>Echo<span style={{ color:'var(--green)' }}>Link</span></h2>
               <p style={styles.emptySub}>Select a conversation or create a new one.</p>

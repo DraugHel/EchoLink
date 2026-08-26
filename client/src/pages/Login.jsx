@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import api from '../lib/api.js'
+import EchoLinkMark from '../components/EchoLinkMark.jsx'
 
 export default function Login({ onLogin }) {
   const [username, setUsername] = useState('')
@@ -25,11 +26,7 @@ export default function Login({ onLogin }) {
     <div style={styles.wrap}>
       <div style={styles.card} className="fade-in">
         <div style={styles.logo}>
-          <svg width="32" height="32" viewBox="0 0 32 32" fill="none">
-            <rect width="32" height="32" rx="8" fill="var(--accent)"/>
-            <path d="M8 22 L14 10 L20 18 L24 14" stroke="#0d0d0d" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
-            <circle cx="24" cy="14" r="2" fill="#0d0d0d"/>
-          </svg>
+          <EchoLinkMark size={32} title="EchoLink" />
           <span style={styles.logoText}>Echo<span style={{ color:'var(--green)' }}>Link</span></span>
         </div>
 
