@@ -1,6 +1,6 @@
 # EchoLink — Code Map
 
-> Lebendige Karte des Projekts. Stand: 2026-08-19. Bei größeren Umbauten aktualisieren.
+> Lebendige Karte des Projekts. Stand: 2026-08-27. Bei größeren Umbauten aktualisieren.
 > Zeilenzahlen sind Richtwerte — sie veralten. Muster und Verantwortlichkeiten bleiben.
 
 ## Pflege-Regel für Luna/E3
@@ -75,6 +75,8 @@ Tabellen:
 - `memory_items` (type, scope, status, content, importance, confidence, Fingerprints)
 - `memory_embeddings` (lokale, modell-/dimensions- und Source-SHA-gebundene
   Float32-Vektoren pro strukturierter Memory; Cascade-Delete)
+- `model_usage_events` (Usage und Kosten-Snapshot für Hintergrund-Modellaufrufe
+  wie Memory-Extraktion; Chat-Kosten bleiben an der Assistant-Message gebunden)
 - Die Memory-Auswahl kombiniert Embeddings mit exakten normalisierten
   Worttreffern; längere Lexikalabfragen brauchen zwei gemeinsame Begriffe
   oder ein markantes langes Wort, damit Teilwörter keine fremden
@@ -583,8 +585,8 @@ Pipeline: Foto/PDF des Dienstplans → Vision-OCR → Prüf-UI → Google-Calend
   extractTextFromFile (pdf-parse, mammoth docx, xlsx, sonst plain); cleanupOrphanedFiles.
 - **external.js**: POST /api/external/briefing + GET /health, beide API-Key-geschützt;
   schreibt Briefings als Assistant-Message in BRIEFING_CONVERSATION_ID.
-- **system.js**: Systemstatus-Endpunkt plus usergebundener Watchtower-Status und
-  Pause/Aktivieren-Endpunkt (SystemStatusPanel.jsx).
+- **system.js**: Systemstatus-Endpunkt plus usergebundener Watchtower-Status,
+  API-Kostenübersicht und Pause/Aktivieren-Endpunkt (SystemStatusPanel.jsx).
 - **push.js**: VAPID-Key, subscribe/unsubscribe, Test-Push.
 - **utils/pdfVision.js**: PDF-Seiten rendern → Vision-Transkription (Gmail-Attachments,
   Shift-PDFs).

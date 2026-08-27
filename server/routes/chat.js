@@ -14,6 +14,9 @@ import {
   shouldForceMemoryUpdate
 } from '../lib/memoryWriteIntent.js'
 import {
+  estimateModelUsageCost
+} from '../lib/modelCosts.js'
+import {
   createMemoryEvidence,
   serializeMemoryEvidence
 } from '../lib/memoryEvidence.js'
@@ -2480,6 +2483,14 @@ Use these as background context. If these memories fully answer the request, ans
 
       // Never persist or publish after an explicit cancellation.
       if (!isChatRequestCancelled(activeRequest)) {
+        const usageCost =
+          aggregateTokenUsage
+            ? estimateModelUsageCost(
+                activeModel,
+                aggregateTokenUsage
+              )
+            : null
+
         db.prepare(`
           INSERT INTO messages (
             conversation_id,
@@ -2505,6 +2516,17 @@ Use these as background context. If these memories fully answer the request, ans
                   cache_observed: true
                 }
               : {}),
+            ...(usageCost?.priced
+              ? {
+                  cost_usd:
+                    usageCost.costUsd,
+                  cost_priced: true,
+                  cost_pricing_key:
+                    usageCost.pricingKey
+                }
+              : {
+                  cost_priced: false
+                }),
             context_budget_tokens:
               contextMeta.budgetTokens,
             context_estimated_input_tokens:

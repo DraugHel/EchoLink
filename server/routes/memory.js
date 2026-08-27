@@ -15,6 +15,13 @@ import { completeLlamaCpp } from '../providers/llamacpp.js'
 import {
   refreshMemoryEmbeddingsByIds
 } from '../lib/memoryEmbeddings.js'
+import {
+  normalizeOpenAICompatibleUsage,
+  normalizeResponsesUsageForCost
+} from '../lib/modelCosts.js'
+import {
+  recordModelUsageEvent
+} from '../lib/modelUsageLedger.js'
 
 const router = Router()
 const OLLAMA_URL = process.env.OLLAMA_URL || 'http://localhost:11434'
@@ -152,29 +159,61 @@ async function runMemoryModel(
       )
     }
 
-    return extractOpenAIText(data)
+    return {
+      text: extractOpenAIText(data),
+      usage:
+        normalizeResponsesUsageForCost(
+          data?.usage
+        )
+    }
   }
 
   if (
     selectedModel.startsWith('zai/')
   ) {
-    return runZaiMemory({
+    let rawUsage = null
+
+    const text = await runZaiMemory({
       model: selectedModel,
       prompt,
       apiKey:
-        process.env.ZAI_API_KEY || ''
+        process.env.ZAI_API_KEY || '',
+      onUsage: usage => {
+        rawUsage = usage
+      }
     })
+
+    return {
+      text,
+      usage:
+        normalizeOpenAICompatibleUsage(
+          rawUsage
+        )
+    }
   }
 
   if (
     selectedModel.startsWith('deepseek/')
   ) {
-    return runDeepSeekMemory({
+    let rawUsage = null
+
+    const text = await runDeepSeekMemory({
       model: selectedModel,
       prompt,
       apiKey:
-        process.env.DEEPSEEK_API_KEY || ''
+        process.env.DEEPSEEK_API_KEY || '',
+      onUsage: usage => {
+        rawUsage = usage
+      }
     })
+
+    return {
+      text,
+      usage:
+        normalizeOpenAICompatibleUsage(
+          rawUsage
+        )
+    }
   }
 
   if (
@@ -187,21 +226,24 @@ async function runMemoryModel(
     )
 
     try {
-      return await completeLlamaCpp(
-        selectedModel.slice(9),
-        [
+      return {
+        text: await completeLlamaCpp(
+          selectedModel.slice(9),
+          [
+            {
+              role: 'user',
+              content: prompt
+            }
+          ],
           {
-            role: 'user',
-            content: prompt
-          }
-        ],
-        {
-          temperature: 0.3,
-          top_p: 0.9,
-          maxTokens: 4000
-        },
-        controller.signal
-      )
+            temperature: 0.3,
+            top_p: 0.9,
+            maxTokens: 4000
+          },
+          controller.signal
+        ),
+        usage: null
+      }
     } finally {
       clearTimeout(timer)
     }
@@ -252,9 +294,25 @@ async function runMemoryModel(
   const data =
     await response.json()
 
-  return String(
-    data?.message?.content || ''
-  ).trim()
+  const promptTokens =
+    Number(data?.prompt_eval_count) || 0
+  const completionTokens =
+    Number(data?.eval_count) || 0
+
+  return {
+    text: String(
+      data?.message?.content || ''
+    ).trim(),
+    usage: {
+      promptTokens,
+      completionTokens,
+      totalTokens:
+        promptTokens + completionTokens,
+      cachedTokens: 0,
+      cacheWriteTokens: 0,
+      cacheObserved: false
+    }
+  }
 }
 
 
@@ -941,7 +999,31 @@ Rules for legacyMarkdown:
   let generated
 
   try {
-    generated = await runMemoryModel(useModel, extractPrompt)
+    const memoryRun =
+      await runMemoryModel(
+        useModel,
+        extractPrompt
+      )
+
+    generated = memoryRun.text
+
+    if (memoryRun.usage) {
+      try {
+        recordModelUsageEvent(db, {
+          userId,
+          conversationId:
+            Number(conversationId),
+          purpose: 'memory',
+          model: useModel,
+          usage: memoryRun.usage
+        })
+      } catch (usageError) {
+        console.error(
+          'Memory usage tracking failed:',
+          usageError.message
+        )
+      }
+    }
   } catch (error) {
     console.error('Memory model failed:', error.message)
     return { ok: true, skipped: true, reason: 'model_failed' }

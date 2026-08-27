@@ -61,6 +61,36 @@ function formatPercent(value) {
   return `${number.toFixed(1).replace('.', ',')} %`
 }
 
+function formatUsd(value) {
+  const number = Number(value)
+  if (!Number.isFinite(number)) return '–'
+
+  const absolute = Math.abs(number)
+  const digits =
+    absolute < 0.01
+      ? 6
+      : absolute < 1
+        ? 4
+        : 2
+
+  return `$${number
+    .toFixed(digits)
+    .replace('.', ',')}`
+}
+
+function apiProviderLabel(provider) {
+  return {
+    openai: 'OpenAI',
+    anthropic: 'Anthropic',
+    zai: 'Z.ai',
+    deepseek: 'DeepSeek',
+    kimi: 'Kimi',
+    'ollama-cloud': 'Ollama Cloud',
+    ollama: 'Ollama lokal',
+    llamacpp: 'llama.cpp'
+  }[provider] || provider || 'Unbekannt'
+}
+
 function Metric({
   label,
   value,
@@ -136,6 +166,13 @@ export default function SystemStatusPanel({
     Number(status?.cpu) >= 95 ||
     databaseWarning ||
     fullWarning
+
+  const apiCosts =
+    status?.apiCosts
+  const apiCostProviders =
+    Array.isArray(apiCosts?.providers)
+      ? apiCosts.providers
+      : []
 
   const cache24h =
     status?.promptCache?.last_24h
@@ -327,6 +364,144 @@ export default function SystemStatusPanel({
               value={formatDuration(status?.uptimeSeconds)}
             />
           </div>
+
+          <div style={styles.sectionTitle}>
+            API-Kosten
+          </div>
+
+          {!apiCosts || apiCosts.events === 0 ? (
+            <div
+              style={{
+                ...styles.emptyState,
+                marginBottom: 22
+              }}
+            >
+              Noch keine berechenbare Modell-Usage gespeichert.
+            </div>
+          ) : (
+            <>
+              <div style={styles.metricGrid}>
+                <Metric
+                  label="Gesamt"
+                  value={formatUsd(
+                    apiCosts.totalUsd
+                  )}
+                  detail={`${formatCount(
+                    apiCosts.pricedEvents
+                  )} bepreiste Aufrufe`}
+                />
+                <Metric
+                  label="Letzte 24 h"
+                  value={formatUsd(
+                    apiCosts.last24hUsd
+                  )}
+                />
+                <Metric
+                  label="Letzte 7 Tage"
+                  value={formatUsd(
+                    apiCosts.last7dUsd
+                  )}
+                />
+                <Metric
+                  label="Memory"
+                  value={formatUsd(
+                    apiCosts.memoryUsd
+                  )}
+                  detail={`Chat ${formatUsd(
+                    apiCosts.chatUsd
+                  )}`}
+                />
+              </div>
+
+              {apiCosts.trackingSince && (
+                <div
+                  style={{
+                    ...styles.emptyState,
+                    marginTop: -8,
+                    marginBottom: 12
+                  }}
+                >
+                  Gespeicherte Usage ab{' '}
+                  {formatUnixTimestamp(
+                    apiCosts.trackingSince
+                  )}.
+                  Kosten werden mit dem zum Aufruf
+                  hinterlegten Modelltarif berechnet.
+                </div>
+              )}
+
+              {apiCosts.unpricedEvents > 0 && (
+                <div
+                  style={{
+                    ...styles.emptyState,
+                    marginBottom: 12,
+                    color: 'var(--danger)'
+                  }}
+                >
+                  Nicht eingerechnet:{' '}
+                  {formatCount(
+                    apiCosts.unpricedEvents
+                  )}{' '}
+                  Aufrufe ohne sicheren
+                  Token-Tarif. Sie werden nicht
+                  als $0 behandelt.
+                </div>
+              )}
+
+              <div style={styles.cacheGrid}>
+                {apiCostProviders.map(provider => (
+                  <article
+                    key={provider.provider}
+                    style={styles.cacheCard}
+                  >
+                    <strong
+                      style={styles.cacheTitle}
+                    >
+                      {apiProviderLabel(
+                        provider.provider
+                      )}
+                    </strong>
+
+                    <div
+                      style={styles.mcpMetricGrid}
+                    >
+                      <Metric
+                        label="Kosten"
+                        value={formatUsd(
+                          provider.costUsd
+                        )}
+                      />
+                      <Metric
+                        label="Chat"
+                        value={formatUsd(
+                          provider.chatUsd
+                        )}
+                      />
+                      <Metric
+                        label="Memory"
+                        value={formatUsd(
+                          provider.memoryUsd
+                        )}
+                      />
+                      <Metric
+                        label="Aufrufe"
+                        value={formatCount(
+                          provider.events
+                        )}
+                        detail={
+                          provider.unpricedEvents > 0
+                            ? `${formatCount(
+                                provider.unpricedEvents
+                              )} ohne Tarif`
+                            : ''
+                        }
+                      />
+                    </div>
+                  </article>
+                ))}
+              </div>
+            </>
+          )}
 
           <div style={styles.sectionTitle}>
             Überwachte Prozesse

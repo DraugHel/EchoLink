@@ -170,6 +170,9 @@ export async function streamAnthropic(model, messages, options, res, abortSignal
   const toolBlocks = {}
   const rawBlocks = {}  // alle Content-Bloecke in Reihenfolge — muessen bei Tool-Use verbatim zurueck
   let inputTokens = 0, outputTokens = 0
+  let cachedInputTokens = 0
+  let cacheWriteTokens = 0
+  let cacheObserved = false
   let buf = ''
   const decoder = new TextDecoder()
 
@@ -184,8 +187,19 @@ export async function streamAnthropic(model, messages, options, res, abortSignal
       if (ev.type === 'error') throw new Error(ev.error?.message || 'Anthropic stream error')
       if (ev.type === 'message_start') {
         const u = ev.message?.usage || {}
-        // Cache-Tokens mitzaehlen, damit die Anzeige die echte Kontextgroesse zeigt
-        inputTokens = (u.input_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0)
+        cachedInputTokens =
+          Number(u.cache_read_input_tokens) || 0
+        cacheWriteTokens =
+          Number(u.cache_creation_input_tokens) || 0
+        cacheObserved =
+          u.cache_read_input_tokens !== undefined ||
+          u.cache_creation_input_tokens !== undefined
+        // Anthropic reports base input, cache reads and cache writes
+        // separately. promptTokens remains the complete input size.
+        inputTokens =
+          (Number(u.input_tokens) || 0) +
+          cachedInputTokens +
+          cacheWriteTokens
       }
       if (ev.type === 'content_block_start' && ev.content_block) {
         const cb = ev.content_block
@@ -238,7 +252,10 @@ export async function streamAnthropic(model, messages, options, res, abortSignal
   const tokenUsage = {
     promptTokens: inputTokens,
     completionTokens: outputTokens,
-    totalTokens: inputTokens + outputTokens
+    totalTokens: inputTokens + outputTokens,
+    cachedTokens: cachedInputTokens,
+    cacheWriteTokens,
+    cacheObserved
   }
   return { fullContent, fullThinking, toolCalls, tokenUsage, rawOutput }
 }

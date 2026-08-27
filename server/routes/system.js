@@ -12,6 +12,9 @@ import {
   getWatchtowerStatus,
   setWatchtowerEnabled
 } from '../lib/watchtower.js'
+import {
+  getModelCostSummary
+} from '../lib/modelUsageLedger.js'
 
 const router = Router()
 
@@ -30,9 +33,22 @@ let cache = {
 }
 
 function statusForUser(data, userId) {
+  let apiCosts = null
+
+  try {
+    apiCosts =
+      getModelCostSummary(db, userId)
+  } catch (error) {
+    console.error(
+      'API cost summary failed:',
+      error?.message || String(error)
+    )
+  }
+
   return {
     ...data,
-    watchtower: getWatchtowerStatus(db, userId)
+    watchtower: getWatchtowerStatus(db, userId),
+    apiCosts
   }
 }
 

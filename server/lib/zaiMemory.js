@@ -28,7 +28,8 @@ export async function runZaiMemory({
   prompt,
   apiKey,
   fetchImpl = fetch,
-  timeoutMs = 120000
+  timeoutMs = 120000,
+  onUsage = null
 }) {
   if (!apiKey) {
     throw new Error(
@@ -109,6 +110,10 @@ export async function runZaiMemory({
         raw
       ).slice(0, 300)
     )
+  }
+
+  if (typeof onUsage === 'function') {
+    onUsage(data?.usage || null)
   }
 
   const content =

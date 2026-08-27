@@ -363,6 +363,51 @@ db.exec(`
     );
 `);
 
+db.exec(`
+  CREATE TABLE IF NOT EXISTS model_usage_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    conversation_id INTEGER,
+    purpose TEXT NOT NULL,
+    provider TEXT NOT NULL,
+    model TEXT NOT NULL,
+    prompt_tokens INTEGER NOT NULL DEFAULT 0,
+    cached_tokens INTEGER NOT NULL DEFAULT 0,
+    cache_write_tokens INTEGER NOT NULL DEFAULT 0,
+    completion_tokens INTEGER NOT NULL DEFAULT 0,
+    total_tokens INTEGER NOT NULL DEFAULT 0,
+    cost_usd REAL,
+    priced INTEGER NOT NULL DEFAULT 0
+      CHECK(priced IN (0, 1)),
+    pricing_key TEXT NOT NULL DEFAULT '',
+    pricing_json TEXT NOT NULL DEFAULT '{}',
+    created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+
+    FOREIGN KEY (user_id)
+      REFERENCES users(id)
+      ON DELETE CASCADE,
+
+    FOREIGN KEY (conversation_id)
+      REFERENCES conversations(id)
+      ON DELETE SET NULL
+  );
+
+  CREATE INDEX IF NOT EXISTS
+    idx_model_usage_events_user_created
+    ON model_usage_events(
+      user_id,
+      created_at DESC,
+      id DESC
+    );
+
+  CREATE INDEX IF NOT EXISTS
+    idx_model_usage_events_conversation
+    ON model_usage_events(
+      conversation_id,
+      created_at DESC
+    );
+`);
+
 // Add columns if they don't exist yet (for existing DBs)
 try { db.exec(`ALTER TABLE users ADD COLUMN default_system_prompt TEXT DEFAULT ''`) } catch {}
 try { db.exec(`ALTER TABLE users ADD COLUMN memory TEXT DEFAULT ''`) } catch {}
