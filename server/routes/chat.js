@@ -11,6 +11,9 @@ import {
   recallRuntimeInstruction
 } from '../lib/memoryRecallPolicy.js'
 import {
+  shouldForceMemoryUpdate
+} from '../lib/memoryWriteIntent.js'
+import {
   createMemoryEvidence,
   serializeMemoryEvidence
 } from '../lib/memoryEvidence.js'
@@ -1154,11 +1157,6 @@ async function executeTool(
 // Main chat endpoint
 
 // Auto-update memory after response (direct function call instead of HTTP)
-function shouldForceMemoryUpdate(content) {
-  return /\b(?:merk dir|merke dir|bitte merken|speichere (?:das|dies)|ab jetzt|von nun an|ich bevorzuge|vergiss|vergiss bitte|nicht mehr merken|aus (?:der )?memory entfernen)\b/i
-    .test(String(content || ''))
-}
-
 async function updateMemory(userId, conversationId, model, force = false) {
   const msgCount = db.prepare('SELECT COUNT(*) as count FROM messages WHERE conversation_id = ? AND role = ?')
     .get(conversationId, 'assistant').count
