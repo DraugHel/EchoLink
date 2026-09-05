@@ -124,6 +124,7 @@ async function streamOpenAICompatible(providerName, endpoint, key, model, messag
     messages: toOpenAI(messages),
     tools: options?.tools ?? ALL_TOOLS,
     stream_options: { include_usage: true },
+    ...(options?.maxTokens != null ? { max_tokens: options.maxTokens } : {}),
     ...(requestOptions.allowSampling !== false && options?.temperature != null
       ? { temperature: Math.min(options.temperature, 2) }
       : {}),
@@ -144,6 +145,7 @@ async function streamOpenAICompatible(providerName, endpoint, key, model, messag
   }
 
   let fullContent = '', fullThinking = ''
+  let streamCompleted = false
   const toolAcc = {}
   let usage = null
   let buf = ''
@@ -156,10 +158,11 @@ async function streamOpenAICompatible(providerName, endpoint, key, model, messag
     for (const line of lines) {
       if (!line.startsWith('data:')) continue
       const payload = line.slice(5).trim()
-      if (payload === '[DONE]') continue
+      if (payload === '[DONE]') { streamCompleted = true; continue }
       let ev
       try { ev = JSON.parse(payload) } catch { continue }
       if (ev.error) throw new Error(ev.error.message || `${providerName} stream error`)
+      if (ev.choices?.[0]?.finish_reason != null) streamCompleted = true
       if (ev.usage || ev.choices?.[0]?.usage) {
         usage = ev.usage || ev.choices[0].usage
       }
@@ -193,7 +196,7 @@ async function streamOpenAICompatible(providerName, endpoint, key, model, messag
   const tokenUsage =
     normalizeOpenAICompatibleTokenUsage(usage)
 
-  return { fullContent, fullThinking, toolCalls, tokenUsage }
+  return { fullContent, fullThinking, toolCalls, tokenUsage, completed: streamCompleted }
 }
 
 export function normalizeOpenAICompatibleTokenUsage(usage) {

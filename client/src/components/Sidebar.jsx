@@ -16,7 +16,7 @@ function formatSearchResultDate(timestamp) {
     )
 }
 
-export default function Sidebar({ conversations, activeId, onSelect, onCreate, onDelete, onRename, onArchive, onRestore, onSearchResult, user, onLogout, mobileOpen, onMobileClose, mobile }) {
+export default function Sidebar({ conversations, activeId, onSelect, onCreate, onDelete, onRename, onArchive, onRestore, onSearchResult, onSummarize, summaryDisabled = false, summaryDisabledReason = '', user, onLogout, mobileOpen, onMobileClose, mobile }) {
 
   const [actionMenuId, setActionMenuId] =
     useState(null)
@@ -411,6 +411,27 @@ const [editingId, setEditingId] = useState(null)
                            </button>
                          )}
 
+                         {c.id === activeId && !c.archived_at && (
+                           <button
+                             type="button"
+                             disabled={summaryDisabled}
+                             title={summaryDisabled ? summaryDisabledReason : 'Chat zusammenfassen'}
+                             onClick={event => {
+                               event.stopPropagation()
+                               if (summaryDisabled) return
+                               setActionMenuId(null)
+                               onSummarize?.(c)
+                             }}
+                             style={{
+                               ...styles.actionMenuButton,
+                               ...(summaryDisabled ? { opacity: 0.5, cursor: 'not-allowed' } : {})
+                             }}
+                           >
+                             <SummaryIcon />
+                             Zusammenfassen
+                           </button>
+                         )}
+
                          {c.archived_at ? (
                            <button
                              type="button"
@@ -500,6 +521,11 @@ const PencilIcon = () => (
   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
     <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
     <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+  </svg>
+)
+const SummaryIcon = () => (
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M4 4h16v12H7l-3 3V4z"/><path d="M8 8h8M8 12h5"/>
   </svg>
 )
 const ArchiveIcon = () => (

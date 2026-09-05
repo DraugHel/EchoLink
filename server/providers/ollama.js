@@ -13,7 +13,12 @@ export async function streamOllama(model, messages, options, res, abortSignal) {
       model, messages, stream: true,
       tools: options?.tools ?? ALL_TOOLS,
       ...(options?.reasoningEffort === 'off' ? { think: false } : {}),
-      options: { temperature: options?.temperature, top_k: options?.top_k, top_p: options?.top_p }
+      options: {
+        temperature: options?.temperature,
+        top_k: options?.top_k,
+        top_p: options?.top_p,
+        ...(options?.maxTokens != null ? { num_predict: options.maxTokens } : {})
+      }
     }),
     signal: abortSignal
   })
@@ -26,6 +31,7 @@ export async function streamOllama(model, messages, options, res, abortSignal) {
   let fullThinking = ''
   let toolCalls = null
   let tokenUsage = null
+  let streamCompleted = false
 
   const reader = r.body.getReader()
   const decoder = new TextDecoder()
@@ -48,6 +54,7 @@ export async function streamOllama(model, messages, options, res, abortSignal) {
         if (data.error) throw new Error(data.error)
 
         if (data.done) {
+          streamCompleted = true
           // Final event — may contain tool calls and token usage
           if (data.message?.tool_calls && data.message.tool_calls.length > 0) {
             toolCalls = data.message.tool_calls
@@ -84,5 +91,5 @@ export async function streamOllama(model, messages, options, res, abortSignal) {
     }
   }
 
-  return { fullContent, fullThinking, toolCalls, tokenUsage }
+  return { fullContent, fullThinking, toolCalls, tokenUsage, completed: streamCompleted }
 }

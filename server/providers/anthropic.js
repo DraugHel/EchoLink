@@ -142,7 +142,7 @@ export async function streamAnthropic(model, messages, options, res, abortSignal
   const RE = options?.reasoningEffort || ''
   const thinkingOn = RE !== '' && RE !== 'off'
   const body = {
-    model, max_tokens: 16384, stream: true,
+    model, max_tokens: options?.maxTokens ?? 16384, stream: true,
     messages: msgs,
     tools: anthropicTools(options?.tools ?? ALL_TOOLS),
     ...(systemParam ? { system: systemParam } : {}),
@@ -173,6 +173,7 @@ export async function streamAnthropic(model, messages, options, res, abortSignal
   let cachedInputTokens = 0
   let cacheWriteTokens = 0
   let cacheObserved = false
+  let streamCompleted = false
   let buf = ''
   const decoder = new TextDecoder()
 
@@ -185,6 +186,9 @@ export async function streamAnthropic(model, messages, options, res, abortSignal
       let ev
       try { ev = JSON.parse(line.slice(6)) } catch { continue }
       if (ev.type === 'error') throw new Error(ev.error?.message || 'Anthropic stream error')
+      if (ev.type === 'message_stop') {
+        streamCompleted = true
+      }
       if (ev.type === 'message_start') {
         const u = ev.message?.usage || {}
         cachedInputTokens =
@@ -257,6 +261,6 @@ export async function streamAnthropic(model, messages, options, res, abortSignal
     cacheWriteTokens,
     cacheObserved
   }
-  return { fullContent, fullThinking, toolCalls, tokenUsage, rawOutput }
+  return { fullContent, fullThinking, toolCalls, tokenUsage, rawOutput, completed: streamCompleted }
 }
 // ===================== Ende Anthropic Provider =====================

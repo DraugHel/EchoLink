@@ -3237,7 +3237,7 @@ async function fetchJsonWithTimeout(url, options = {}) {
   }
 }
 
-async function loadModelList() {
+export async function loadModelList() {
   const providers = [
     {
       name: 'ollama',

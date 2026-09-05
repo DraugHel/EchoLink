@@ -27,6 +27,7 @@ function emptySummary() {
     last7dUsd: 0,
     chatUsd: 0,
     memoryUsd: 0,
+    summaryUsd: 0,
     events: 0,
     pricedEvents: 0,
     unpricedEvents: 0,
@@ -57,6 +58,7 @@ export function summarizeModelCostEntries(
         costUsd: 0,
         chatUsd: 0,
         memoryUsd: 0,
+        summaryUsd: 0,
         events: 0,
         pricedEvents: 0,
         unpricedEvents: 0
@@ -99,6 +101,9 @@ export function summarizeModelCostEntries(
     if (entry.purpose === 'memory') {
       summary.memoryUsd += cost
       bucket.memoryUsd += cost
+    } else if (entry.purpose === 'conversation_summary') {
+      summary.summaryUsd += cost
+      bucket.summaryUsd += cost
     } else {
       summary.chatUsd += cost
       bucket.chatUsd += cost

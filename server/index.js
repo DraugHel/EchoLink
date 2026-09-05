@@ -9,6 +9,7 @@ import crypto from 'node:crypto'
 
 import authRoutes from './routes/auth.js'
 import conversationRoutes from './routes/conversations.js'
+import conversationSummaryRoutes from './routes/conversationSummaries.js'
 import chatRoutes from './routes/chat.js'
 import memoryRoutes from './routes/memory.js'
 import pushRoutes from './routes/push.js'
@@ -100,6 +101,8 @@ app.use(session({
 
 // API routes
 app.use('/api/auth', authRoutes)
+// Summary routes come first so their deeper /:id/summary paths cannot be shadowed by future conversation routes.
+app.use('/api/conversations', conversationSummaryRoutes)
 app.use('/api/conversations', conversationRoutes)
 app.use('/api/chat', chatRoutes)
 app.use('/api/memory', memoryRoutes)

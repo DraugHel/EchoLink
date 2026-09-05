@@ -1,0 +1,237 @@
+.summary-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  box-sizing: border-box;
+  background: rgba(0, 0, 0, 0.68);
+}
+
+.summary-dialog {
+  width: min(860px, 100%);
+  max-height: min(900px, calc(100dvh - 48px));
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--bg2);
+  box-shadow: 0 28px 80px rgba(0, 0, 0, 0.52);
+  color: var(--text1);
+}
+
+.summary-dialog-header,
+.summary-dialog-footer {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px;
+  flex: 0 0 auto;
+}
+
+.summary-dialog-header {
+  justify-content: space-between;
+  border-bottom: 1px solid var(--border);
+}
+
+.summary-dialog-header h2 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.summary-dialog-source {
+  margin-top: 3px;
+  color: var(--text3);
+  font-size: 12px;
+}
+
+.summary-dialog-body {
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+}
+
+.summary-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: var(--text2);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.summary-field select,
+.summary-field textarea {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--bg1);
+  color: var(--text1);
+  font: inherit;
+}
+
+.summary-field select {
+  min-height: 42px;
+  padding: 8px 10px;
+}
+
+.summary-editor-field {
+  min-height: 300px;
+}
+
+.summary-field textarea {
+  min-height: 320px;
+  resize: vertical;
+  padding: 12px;
+  line-height: 1.55;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 400;
+}
+
+.summary-character-count,
+.summary-cost-warning,
+.summary-cost-result,
+.summary-plan {
+  color: var(--text3);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.summary-cost-warning {
+  margin: -2px 0 0;
+}
+
+.summary-character-count {
+  text-align: right;
+}
+
+.summary-plan {
+  padding: 9px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg3);
+}
+
+.summary-alert {
+  padding: 10px 11px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg3);
+  color: var(--text2);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.summary-alert-error {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.summary-alert-success {
+  border-color: var(--accent-dim);
+  color: var(--accent);
+}
+
+.summary-generate-row,
+.summary-dialog-footer {
+  flex-wrap: wrap;
+}
+
+.summary-generate-row {
+  display: flex;
+  gap: 8px;
+}
+
+.summary-dialog-footer {
+  border-top: 1px solid var(--border);
+  justify-content: flex-end;
+}
+
+.summary-button,
+.summary-icon-button {
+  min-height: 40px;
+  box-sizing: border-box;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg3);
+  color: var(--text2);
+  cursor: pointer;
+  font-weight: 650;
+}
+
+.summary-button {
+  padding: 8px 12px;
+}
+
+.summary-icon-button {
+  width: 40px;
+  padding: 0;
+  font-size: 24px;
+  line-height: 1;
+}
+
+.summary-button-primary {
+  border-color: var(--accent-dim);
+  background: var(--accent-bg);
+  color: var(--accent);
+}
+
+.summary-button:disabled,
+.summary-icon-button:disabled,
+.summary-field select:disabled,
+.summary-field textarea:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.summary-continue-button {
+  margin-left: auto;
+}
+
+@media (max-width: 600px) {
+  .summary-dialog-overlay {
+    padding: 0;
+  }
+
+  .summary-dialog {
+    width: 100%;
+    height: 100dvh;
+    max-height: none;
+    border: 0;
+    border-radius: 0;
+  }
+
+  .summary-dialog-header {
+    padding-top: calc(12px + env(safe-area-inset-top));
+  }
+
+  .summary-dialog-body {
+    padding: 14px;
+  }
+
+  .summary-dialog-footer {
+    padding-bottom: calc(12px + env(safe-area-inset-bottom));
+  }
+
+  .summary-editor-field,
+  .summary-field textarea {
+    min-height: 240px;
+  }
+
+  .summary-dialog-footer .summary-button {
+    flex: 1 1 auto;
+  }
+
+  .summary-continue-button {
+    flex-basis: 100% !important;
+    margin-left: 0;
+  }
+}

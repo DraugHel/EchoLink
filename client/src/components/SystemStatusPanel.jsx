@@ -409,6 +409,8 @@ export default function SystemStatusPanel({
                   )}
                   detail={`Chat ${formatUsd(
                     apiCosts.chatUsd
+                  )} · Summary ${formatUsd(
+                    apiCosts.summaryUsd
                   )}`}
                 />
               </div>
@@ -481,6 +483,12 @@ export default function SystemStatusPanel({
                         label="Memory"
                         value={formatUsd(
                           provider.memoryUsd
+                        )}
+                      />
+                      <Metric
+                        label="Summary"
+                        value={formatUsd(
+                          provider.summaryUsd
                         )}
                       />
                       <Metric

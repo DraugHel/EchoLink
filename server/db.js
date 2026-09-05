@@ -408,6 +408,45 @@ db.exec(`
     );
 `);
 
+db.exec(`
+  CREATE TABLE IF NOT EXISTS conversation_summaries (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    source_conversation_id INTEGER NOT NULL UNIQUE,
+    content TEXT NOT NULL,
+    model TEXT NOT NULL,
+    prompt_version TEXT NOT NULL,
+    source_last_message_id INTEGER,
+    source_message_count INTEGER NOT NULL DEFAULT 0,
+    source_hash TEXT NOT NULL,
+    revision INTEGER NOT NULL DEFAULT 1,
+    created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    continued_conversation_id INTEGER,
+    continued_revision INTEGER,
+    continue_request_id TEXT,
+    continue_content_hash TEXT,
+    FOREIGN KEY (user_id)
+      REFERENCES users(id)
+      ON DELETE CASCADE,
+    FOREIGN KEY (source_conversation_id)
+      REFERENCES conversations(id)
+      ON DELETE CASCADE,
+    FOREIGN KEY (continued_conversation_id)
+      REFERENCES conversations(id)
+      ON DELETE SET NULL
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_conversation_summaries_user
+    ON conversation_summaries(user_id, source_conversation_id);
+`)
+
+// Forward-compatible additive columns if a development DB already had an
+// earlier summary-table draft before this feature landed.
+try { db.exec(`ALTER TABLE conversation_summaries ADD COLUMN continued_revision INTEGER`) } catch {}
+try { db.exec(`ALTER TABLE conversation_summaries ADD COLUMN continue_request_id TEXT`) } catch {}
+try { db.exec(`ALTER TABLE conversation_summaries ADD COLUMN continue_content_hash TEXT`) } catch {}
+
 // Add columns if they don't exist yet (for existing DBs)
 try { db.exec(`ALTER TABLE users ADD COLUMN default_system_prompt TEXT DEFAULT ''`) } catch {}
 try { db.exec(`ALTER TABLE users ADD COLUMN memory TEXT DEFAULT ''`) } catch {}

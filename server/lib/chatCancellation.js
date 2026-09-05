@@ -263,6 +263,23 @@ export function unregisterChatRequest(entry) {
   }
 }
 
+export function hasActiveChatRequest({ userId, conversationId }) {
+  const wantedUserId = Number(userId)
+  const wantedConversationId = Number(conversationId)
+
+  for (const entry of activeChatRequests.values()) {
+    if (
+      entry.userId === wantedUserId &&
+      entry.conversationId === wantedConversationId &&
+      !entry.completedAt
+    ) {
+      return true
+    }
+  }
+
+  return false
+}
+
 export function activeChatRequestCount() {
   return activeChatRequests.size
 }

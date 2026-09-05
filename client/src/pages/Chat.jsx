@@ -2,6 +2,7 @@ import { Component, lazy, Suspense, useState, useEffect, useRef, useCallback } f
 import Sidebar from '../components/Sidebar.jsx'
 import Message from '../components/Message.jsx'
 import MessageInput from '../components/MessageInput.jsx'
+import ConversationSummaryDialog from '../components/ConversationSummaryDialog.jsx'
 import AppToolsMenu from '../components/AppToolsMenu.jsx'
 import api from '../lib/api.js'
 import { useTheme } from '../components/ThemePicker.jsx'
@@ -503,6 +504,7 @@ export default function Chat({ user, onLogout }) {
   const [showTasks, setShowTasks] = useState(false)
   const [showShiftImporter, setShowShiftImporter] = useState(false)
   const [showTools, setShowTools] = useState(false)
+  const [summaryConversation, setSummaryConversation] = useState(null)
   const [jumpMessageId, setJumpMessageId] = useState(null)
   const [showLunaDone, setShowLunaDone] = useState(false)
   const [lunaIdle, setLunaIdle] = useState(false)
@@ -985,6 +987,7 @@ export default function Chat({ user, onLogout }) {
   }, [activeConvo?.id, streaming])
 
   async function selectConvo(convo) {
+    setSummaryConversation(null)
     setActiveConvo(convo)
     setLoading(true)
     try {
@@ -1033,6 +1036,16 @@ export default function Chat({ user, onLogout }) {
     stickToBottomRef.current = false
     await selectConvo(conversation)
     setJumpMessageId(messageId)
+  }
+
+  async function handleSummaryContinued(conversation) {
+    if (!conversation?.id) return
+    setConversations(previous => [
+      conversation,
+      ...previous.filter(item => item.id !== conversation.id)
+    ])
+    setAttachments([])
+    await selectConvo(conversation)
   }
 
   async function createConvo() {
@@ -2134,11 +2147,36 @@ export default function Chat({ user, onLogout }) {
           onArchive={archiveConvo}
           onRestore={restoreConvo}
           onSearchResult={openSearchResult}
+          onSummarize={setSummaryConversation}
+          summaryDisabled={streaming || loading || messages.length === 0}
+          summaryDisabledReason={
+            streaming
+              ? 'Während einer laufenden Antwort oder Tool-Aktion nicht verfügbar'
+              : loading
+                ? 'Chat wird noch geladen'
+                : messages.length === 0
+                  ? 'Leere Chats können nicht zusammengefasst werden'
+                  : ''
+          }
           user={user}
           onLogout={onLogout}
           mobileOpen={mobileSidebar}
           onMobileClose={() => setMobileSidebar(false)}
           mobile={mobile}
+        />
+      )}
+
+      {summaryConversation && (
+        <ConversationSummaryDialog
+          key={summaryConversation.id}
+          conversation={summaryConversation}
+          availableModels={availableModels}
+          chatBusy={
+            streaming &&
+            activeConvo?.id === summaryConversation.id
+          }
+          onClose={() => setSummaryConversation(null)}
+          onContinued={handleSummaryContinued}
         />
       )}
 

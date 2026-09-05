@@ -681,3 +681,13 @@ E3_PILOT_HARNESS_ENABLED=true npm run e3:pilot --
 ```
 
 Der Lauf bewahrt nur `pilot-summary.json` und `pilot-attestation.json` unter einer privaten, eindeutig benannten `/tmp/echolink-e3-operational-pilot-*`-Wurzel auf. Repository-, `dist`- und E3-Docker-Inventar müssen vor und nach dem Lauf bytegleich beziehungsweise identisch sein. Produktive Apply-, Revert-, Deploy-, Push-, Commit-, PM2- und systemd-Aktionen sind ausgeschlossen.
+
+## Conversation Summary / Fortsetzung (2026-09-05)
+
+- `server/lib/conversationSummary.js` — Snapshot, Redaction, Hash, Prompt v1, Budget-/Chunkplanung, Evidenz- und Outputvalidierung, Fortsetzungsrahmen.
+- `server/lib/conversationSummaryProvider.js` — tool-freies Routing über die bestehenden Provider; keine Fallback-Anbieter.
+- `server/lib/conversationSummaryService.js` — Generation/Cancel, Usage, Revisionen, Stale-Konflikte und atomare idempotente Continue-Transaktion.
+- `server/routes/conversationSummaries.js` — authentifizierte `/api/conversations/:id/summary*`-API.
+- `client/src/components/ConversationSummaryDialog.jsx` — Erstellen, Abbrechen, Bearbeiten, Speichern, Kopieren und Fortsetzen; mobil fullscreen.
+- `docs/conversation-summary.md` — Verhalten, Grenzen und bewusste Abweichungen.
+- `tests/conversationSummaryCore.test.mjs`, `tests/conversationSummaryService.test.mjs` — lange Verläufe, Ownership, Abbruch, Konflikte, Usage und Transaktions-/Idempotenzfälle.

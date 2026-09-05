@@ -264,6 +264,9 @@ export async function streamResponses(model, messages, options, res, abortSignal
     input,
     ...(instructions ? { instructions } : {}),
     tools,
+    ...(options?.maxTokens != null
+      ? { max_output_tokens: options.maxTokens }
+      : {}),
     ...(supportsPromptCacheConfig(model) ? {
       prompt_cache_key: buildPromptCacheKey(
         model,
@@ -312,6 +315,7 @@ export async function streamResponses(model, messages, options, res, abortSignal
 
   let fullContent = '', fullThinking = ''
   let rawOutput = null, usage = null
+  let streamCompleted = false
   let buf = ''
   const decoder = new TextDecoder()
 
@@ -333,6 +337,7 @@ export async function streamResponses(model, messages, options, res, abortSignal
           fullThinking += ev.delta
           res.write(`data: ${JSON.stringify({ think: ev.delta })}\n\n`)
         } else if (ev.type === 'response.completed') {
+          streamCompleted = true
           rawOutput = ev.response?.output || null
           usage = ev.response?.usage || null
         } else if (ev.type === 'response.failed' || ev.type === 'error') {
@@ -372,6 +377,6 @@ export async function streamResponses(model, messages, options, res, abortSignal
     return { id: it.call_id, function: { name: it.name, arguments: args } }
   })
   const tokenUsage = normalizeResponsesUsage(usage)
-  return { fullContent, fullThinking, toolCalls, tokenUsage, rawOutput }
+  return { fullContent, fullThinking, toolCalls, tokenUsage, rawOutput, completed: streamCompleted }
 }
 // ===================== Ende Responses API =====================

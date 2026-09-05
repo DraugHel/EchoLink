@@ -173,6 +173,9 @@ export async function streamLlamaCpp(
       include_usage: true
     },
     messages: toChatCompletionsMessages(messages),
+    ...(options?.maxTokens != null
+      ? { max_tokens: options.maxTokens }
+      : {}),
     ...(options?.temperature != null
       ? {
           temperature: Math.min(
@@ -184,13 +187,15 @@ export async function streamLlamaCpp(
     ...(options?.top_p != null
       ? { top_p: options.top_p }
       : {}),
-    ...(
-      LLAMACPP_TOOLS_ENABLED &&
-      Array.isArray(tools) &&
-      tools.length
-      ? { tools }
-      : {}
-    )
+    ...(options?.summaryMode === true
+      ? { tools: [] }
+      : (
+          LLAMACPP_TOOLS_ENABLED &&
+          Array.isArray(tools) &&
+          tools.length
+          ? { tools }
+          : {}
+        ))
   }
 
   const response = await fetch(
@@ -214,6 +219,7 @@ export async function streamLlamaCpp(
   let fullContent = ''
   let fullThinking = ''
   let usage = null
+  let streamCompleted = false
   let buffer = ''
   const toolAccumulator = {}
   const decoder = new TextDecoder()
@@ -223,7 +229,8 @@ export async function streamLlamaCpp(
     if (!trimmed.startsWith('data:')) return
 
     const payload = trimmed.slice(5).trim()
-    if (!payload || payload === '[DONE]') return
+    if (!payload) return
+    if (payload === '[DONE]') { streamCompleted = true; return }
 
     let event
     try {
@@ -231,6 +238,8 @@ export async function streamLlamaCpp(
     } catch {
       return
     }
+
+    if (event.choices?.[0]?.finish_reason != null) streamCompleted = true
 
     if (event.error) {
       throw new Error(
@@ -326,7 +335,8 @@ export async function streamLlamaCpp(
     fullContent,
     fullThinking,
     toolCalls,
-    tokenUsage: normalizedUsage(usage)
+    tokenUsage: normalizedUsage(usage),
+    completed: streamCompleted
   }
 }
 
