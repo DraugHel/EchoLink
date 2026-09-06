@@ -2,7 +2,6 @@ import { Router } from 'express'
 import { requireAuth } from '../middleware/auth.js'
 import db, { DEFAULT_MODEL } from '../db.js'
 import { parseMemoryEvidence } from '../lib/memoryEvidence.js'
-import { resolveStoredChatHistorySources } from '../lib/chatHistoryEvidence.js'
 import { deleteFilesForConvo, deleteFilesForMessage } from './uploads.js'
 
 const router = Router()
@@ -286,7 +285,6 @@ router.get('/:id/messages', requireAuth, (req, res) => {
       images,
       usage,
       memory_evidence,
-      chat_history_sources,
       created_at
     FROM messages
     WHERE conversation_id = ?
@@ -298,13 +296,7 @@ router.get('/:id/messages', requireAuth, (req, res) => {
     m.memoryEvidence = parseMemoryEvidence(
       m.memory_evidence
     )
-    m.chatHistorySources = resolveStoredChatHistorySources(
-      db,
-      req.session.userId,
-      m.chat_history_sources
-    )
     delete m.memory_evidence
-    delete m.chat_history_sources
   }
   res.json(messages)
 })
