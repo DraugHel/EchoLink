@@ -1,10 +1,8 @@
-import { Component, Fragment, lazy, Suspense, useState, useEffect, useRef, useCallback } from 'react'
+import { Component, lazy, Suspense, useState, useEffect, useRef, useCallback } from 'react'
 import Sidebar from '../components/Sidebar.jsx'
 import Message from '../components/Message.jsx'
 import MessageInput from '../components/MessageInput.jsx'
 import ConversationSummaryDialog from '../components/ConversationSummaryDialog.jsx'
-import ChatHistorySources from '../components/ChatHistorySources.jsx'
-import '../components/ChatHistorySources.css'
 import AppToolsMenu from '../components/AppToolsMenu.jsx'
 import api from '../lib/api.js'
 import { useTheme } from '../components/ThemePicker.jsx'
@@ -341,14 +339,10 @@ function formatLunaToolEvent(event) {
 
   if (!rawName) return ''
 
-  const readableName = rawName === 'search_chat_history'
-    ? 'Frühere Chats durchsuchen'
-    : rawName === 'read_chat_excerpt'
-      ? 'Gespräch nachlesen'
-      : rawName
-          .replace(/[_-]+/g, ' ')
-          .replace(/\s+/g, ' ')
-          .trim()
+  const readableName = rawName
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
 
   const status = String(event?.status || '')
     .trim()
@@ -1439,17 +1433,6 @@ export default function Chat({ user, onLogout }) {
               : m
           ))
         }
-        if (Array.isArray(json.chatHistorySources)) {
-          setMessages(prev => prev.map(m =>
-            m.id === assistantId
-              ? {
-                  ...m,
-                  chatHistorySources:
-                    json.chatHistorySources
-                }
-              : m
-          ))
-        }
         if (json.done) {
           completeTrackedChatRun(
             json.completedWithIssue
@@ -2449,42 +2432,35 @@ export default function Chat({ user, onLogout }) {
               } else {
                 const prev = out.length === 0 ? null : messages[i - 1]
                 out.push(
-                  <Fragment key={m.id}>
-                    <Message
-                      role={m.role}
-                      content={m.content}
-                      streaming={m.streaming}
-                      images={m.images}
-                      think={m.think}
-                      toolStatus={m.toolStatus}
-                      actionRequests={m.actionRequests}
-                      usage={m.usage}
-                      memoryEvidence={m.memoryEvidence}
-                      id={m.id}
-                      createdAt={m.created_at}
-                      prevCreatedAt={prev ? prev.created_at : null}
-                      onDelete={m.pendingActionOnly
-                        ? undefined
-                        : deleteMessage}
-                      onApprove={handleActionApprove}
-                      onAlwaysAllow={handleActionAlways}
-                      onDeny={handleActionDeny}
-                      editing={editingId === m.id}
-                      onEdit={m.pendingActionOnly
-                        ? undefined
-                        : () => setEditingId(m.id)}
-                      onSaveEdit={saveEdit}
-                      onCancelEdit={() => setEditingId(null)}
-                      retryFailed={m.retryFailed}
-                      onRetry={retryMessage}
-                    />
-                    {m.role === 'assistant' && (
-                      <ChatHistorySources
-                        sources={m.chatHistorySources}
-                        onOpen={openSearchResult}
-                      />
-                    )}
-                  </Fragment>
+            <Message
+              key={m.id}
+              role={m.role}
+              content={m.content}
+              streaming={m.streaming}
+              images={m.images}
+              think={m.think}
+              toolStatus={m.toolStatus}
+              actionRequests={m.actionRequests}
+              usage={m.usage}
+              memoryEvidence={m.memoryEvidence}
+              id={m.id}
+              createdAt={m.created_at}
+              prevCreatedAt={prev ? prev.created_at : null}
+              onDelete={m.pendingActionOnly
+                ? undefined
+                : deleteMessage}
+              onApprove={handleActionApprove}
+              onAlwaysAllow={handleActionAlways}
+              onDeny={handleActionDeny}
+              editing={editingId === m.id}
+              onEdit={m.pendingActionOnly
+                ? undefined
+                : () => setEditingId(m.id)}
+              onSaveEdit={saveEdit}
+              onCancelEdit={() => setEditingId(null)}
+              retryFailed={m.retryFailed}
+              onRetry={retryMessage}
+            />
                 )
               }
             }

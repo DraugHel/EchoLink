@@ -4,7 +4,6 @@ import {
   TERMINAL_TOOL
 } from './webSearch.js'
 import { TASK_TOOLS } from './taskTools.js'
-import { CHAT_HISTORY_TOOLS } from './chatHistoryTools.js'
 import { E3_TOOLS, e3ToolsEnabled } from './e3Tools.js'
 import { CALENDAR_TOOLS } from './calendarTools.js'
 import { CALENDAR_EXTRA_TOOLS } from './calendarExtraTools.js'
@@ -22,7 +21,6 @@ export const ALL_TOOLS = [
   SEARCH_TOOL,
   FIRECRAWL_TOOL,
   TERMINAL_TOOL,
-  ...CHAT_HISTORY_TOOLS,
   ...CALENDAR_TOOLS,
   ...CALENDAR_EXTRA_TOOLS,
   ...GMAIL_TOOLS,
