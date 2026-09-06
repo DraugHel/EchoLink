@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { makeHistoryDb } from './chatHistoryTestDb.mjs'
 import {
+  CHAT_HISTORY_TOOLS,
   createChatHistoryRequestState,
   executeChatHistoryTool
 } from '../server/lib/chatHistoryTools.js'
@@ -148,4 +149,53 @@ test('runtime budget still rejects history work that itself exceeds the cap', as
     error => error.code === 'CHAT_HISTORY_RUNTIME_LIMIT'
   )
   assert.ok(state.runtimeUsedMs >= state.runtimeBudgetMs)
+}))
+
+test('search tool does not expose a conversation_id for the model to guess', () => {
+  const searchTool = CHAT_HISTORY_TOOLS.find(tool => tool.function.name === 'search_chat_history')
+  assert.ok(searchTool)
+  assert.equal(
+    Object.hasOwn(searchTool.function.parameters.properties, 'conversation_id'),
+    false
+  )
+  assert.match(searchTool.function.description, /Do not guess or invent conversation IDs/)
+})
+
+test('guessed search conversation IDs fail without consuming the three-search quota', async () => withDb(async db => {
+  const state = createChatHistoryRequestState({ maxChars: 24000 })
+
+  for (const conversationId of [999, 998, 997]) {
+    await assert.rejects(
+      executeChatHistoryTool('search_chat_history', {
+        query: 'Scarlett',
+        conversation_id: conversationId
+      }, { db, userId: 1, state }),
+      error => error.code === 'CHAT_HISTORY_UNTRUSTED_CONVERSATION_ID'
+    )
+  }
+
+  assert.equal(state.searchCalls, 0)
+
+  for (const query of ['Scarlett', 'Guitarix', 'Routing']) {
+    await executeChatHistoryTool('search_chat_history', { query }, { db, userId: 1, state })
+  }
+  assert.equal(state.searchCalls, 3)
+  await assert.rejects(
+    executeChatHistoryTool('search_chat_history', { query: 'Kopfhörer' }, { db, userId: 1, state }),
+    error => error.code === 'CHAT_HISTORY_SEARCH_LIMIT'
+  )
+}))
+
+test('failed excerpt lookups do not consume the three-read quota', async () => withDb(async db => {
+  const state = createChatHistoryRequestState({ maxChars: 24000 })
+  await assert.rejects(
+    executeChatHistoryTool('read_chat_excerpt', {
+      conversation_id: 10,
+      message_id: 999,
+      before: 0,
+      after: 0
+    }, { db, userId: 1, state }),
+    error => error.code === 'CHAT_HISTORY_NOT_FOUND'
+  )
+  assert.equal(state.readCalls, 0)
 }))
