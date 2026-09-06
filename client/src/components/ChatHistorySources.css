@@ -1,0 +1,113 @@
+.chat-history-sources {
+  width: min(760px, calc(100% - 28px));
+  margin: -2px auto 14px;
+  box-sizing: border-box;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg2);
+  overflow: hidden;
+}
+
+.chat-history-sources-title {
+  padding: 8px 11px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text2);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .02em;
+}
+
+.chat-history-sources-list {
+  display: grid;
+}
+
+.chat-history-source {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+  padding: 9px 11px;
+}
+
+.chat-history-source + .chat-history-source {
+  border-top: 1px solid var(--border);
+}
+
+.chat-history-source-copy {
+  min-width: 0;
+}
+
+.chat-history-source-name,
+.chat-history-source-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chat-history-source-name {
+  color: var(--text1);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.chat-history-source-label {
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.chat-history-source-meta {
+  margin-top: 3px;
+  color: var(--text3);
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.chat-history-source-badge {
+  padding: 1px 5px;
+  border: 1px solid var(--border2);
+  border-radius: 999px;
+  color: var(--text3);
+  font-size: 9px;
+}
+
+.chat-history-source-open {
+  flex: 0 0 auto;
+  min-height: 34px;
+  padding: 6px 9px;
+  border: 1px solid var(--border2);
+  border-radius: 7px;
+  background: var(--bg3);
+  color: var(--text2);
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.chat-history-source-open:hover:not(:disabled) {
+  border-color: var(--accent-dim);
+  color: var(--accent);
+}
+
+.chat-history-source-open:disabled {
+  opacity: .48;
+  cursor: not-allowed;
+}
+
+@media (max-width: 600px) {
+  .chat-history-sources {
+    width: calc(100% - 18px);
+    margin-bottom: 10px;
+  }
+
+  .chat-history-source {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .chat-history-source-open {
+    width: 100%;
+  }
+}

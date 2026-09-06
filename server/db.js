@@ -455,6 +455,7 @@ try { db.exec(`ALTER TABLE messages ADD COLUMN images TEXT DEFAULT ''`) } catch 
 try { db.exec(`ALTER TABLE messages ADD COLUMN usage TEXT DEFAULT ''`) } catch {}
 try { db.exec(`ALTER TABLE messages ADD COLUMN think TEXT DEFAULT ''`) } catch {}
 try { db.exec(`ALTER TABLE messages ADD COLUMN memory_evidence TEXT DEFAULT ''`) } catch {}
+try { db.exec(`ALTER TABLE messages ADD COLUMN chat_history_sources TEXT DEFAULT ''`) } catch {}
 try { db.exec(`ALTER TABLE conversations ADD COLUMN reasoning_effort TEXT DEFAULT ''`) } catch {}
 try { db.exec(`ALTER TABLE conversations ADD COLUMN archived_at INTEGER`) } catch {}
 try { db.exec(`ALTER TABLE messages ADD COLUMN source_task_id INTEGER`) } catch {}
