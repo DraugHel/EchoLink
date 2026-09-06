@@ -36,6 +36,14 @@ export function getLunaToolText(value) {
     .replace(/\s+/g, ' ')
     .trim()
 
+  if (/\bread_chat_excerpt\b|gespräch\s+nachlesen|gespraech\s+nachlesen/i.test(compact)) {
+    return 'Luna liest in früheren Chats nach …'
+  }
+
+  if (/\bsearch_chat_history\b|frühere\s+chats?\s+durchsuchen|fruehere\s+chats?\s+durchsuchen/i.test(compact)) {
+    return 'Luna durchsucht frühere Chats …'
+  }
+
   // "terminal" contains the German substring "termin". Commands must
   // therefore be classified before calendar terms.
   if (/\b(?:terminal|shell|command|befehl|exec)\b/i.test(compact)) {
@@ -79,6 +87,13 @@ export function getLunaToolKind(value) {
   const raw = normalizeLunaToolStatus(value)
 
   if (!raw) return ''
+
+  if (
+    /\b(?:search_chat_history|read_chat_excerpt)\b/i.test(raw) ||
+    /frühere\s+chats?\s+durchsuchen|fruehere\s+chats?\s+durchsuchen|gespräch\s+nachlesen|gespraech\s+nachlesen/i.test(raw)
+  ) {
+    return 'tool'
+  }
 
   if (/\b(?:terminal|shell|command|befehl|exec)\b/i.test(raw)) {
     return 'terminal'

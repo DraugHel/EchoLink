@@ -96,3 +96,56 @@ test('reload sources become changed or unavailable without serving stale copied 
   db.prepare('DELETE FROM messages WHERE id = 105').run()
   assert.equal(resolveStoredChatHistorySources(db, 1, raw)[0].status, 'unavailable')
 }))
+
+
+test('runtime budget ignores model pauses before and between history tool calls', async () => withDb(async db => {
+  const state = createChatHistoryRequestState({
+    maxChars: 24000,
+    env: { CHAT_HISTORY_RETRIEVAL_BUDGET_MS: '250' }
+  })
+
+  await new Promise(resolve => setTimeout(resolve, 300))
+  const search = await executeChatHistoryTool('search_chat_history', { query: 'Scarlett' }, {
+    db, userId: 1, state
+  })
+  assert.match(search, /Scarlett/)
+
+  await new Promise(resolve => setTimeout(resolve, 300))
+  const read = await executeChatHistoryTool('read_chat_excerpt', {
+    conversation_id: 10,
+    message_id: 101,
+    before: 0,
+    after: 0
+  }, { db, userId: 1, state })
+
+  assert.match(read, /\[H\d+\]/)
+  assert.ok(state.runtimeUsedMs < state.runtimeBudgetMs)
+}))
+
+test('runtime budget still rejects history work that itself exceeds the cap', async () => withDb(async db => {
+  const state = createChatHistoryRequestState({
+    maxChars: 24000,
+    env: { CHAT_HISTORY_RETRIEVAL_BUDGET_MS: '250' }
+  })
+  const waitArray = new Int32Array(new SharedArrayBuffer(4))
+  const slowDb = new Proxy(db, {
+    get(target, property) {
+      if (property === 'prepare') {
+        return (...args) => {
+          Atomics.wait(waitArray, 0, 0, 275)
+          return target.prepare(...args)
+        }
+      }
+      const value = Reflect.get(target, property, target)
+      return typeof value === 'function' ? value.bind(target) : value
+    }
+  })
+
+  await assert.rejects(
+    executeChatHistoryTool('search_chat_history', { query: 'Scarlett' }, {
+      db: slowDb, userId: 1, state
+    }),
+    error => error.code === 'CHAT_HISTORY_RUNTIME_LIMIT'
+  )
+  assert.ok(state.runtimeUsedMs >= state.runtimeBudgetMs)
+}))

@@ -136,7 +136,7 @@ export function createChatHistoryRequestState({
     readCalls: 0,
     usedChars: 0,
     maxChars: Math.max(0, Math.min(24_000, Math.floor(Number(maxChars) || 0))),
-    startedAt: Date.now(),
+    runtimeUsedMs: 0,
     runtimeBudgetMs: boundedRuntimeMs(env),
     cache: new Map(),
     catalog: new Map(),
@@ -145,13 +145,36 @@ export function createChatHistoryRequestState({
 }
 
 function checkRuntime(state) {
-  if (Date.now() - state.startedAt > state.runtimeBudgetMs) {
+  if (state.runtimeUsedMs >= state.runtimeBudgetMs) {
     throw new ChatHistoryError(
       'CHAT_HISTORY_RUNTIME_LIMIT',
       'Zeitbudget für die Chat-History-Suche ist erreicht.',
       429
     )
   }
+}
+
+function monotonicMs() {
+  return Number(process.hrtime.bigint() / 1_000_000n)
+}
+
+async function runWithinRuntimeBudget(state, operation) {
+  checkRuntime(state)
+  const startedAt = monotonicMs()
+  let result
+  let failure
+
+  try {
+    result = await operation()
+  } catch (error) {
+    failure = error
+  }
+
+  state.runtimeUsedMs += Math.max(0, monotonicMs() - startedAt)
+
+  if (failure) throw failure
+  checkRuntime(state)
+  return result
 }
 
 function consumeChars(state, text) {
@@ -328,77 +351,78 @@ export async function executeChatHistoryTool(name, args, {
     )
   }
   abortIfNeeded(signal, isRequestActive)
-  checkRuntime(state)
 
-  if (name === SEARCH_CHAT_HISTORY_TOOL_NAME) {
-    const normalized = normalizeSearchChatHistoryArgs(args)
+  return runWithinRuntimeBudget(state, async () => {
+    abortIfNeeded(signal, isRequestActive)
+
+    if (name === SEARCH_CHAT_HISTORY_TOOL_NAME) {
+      const normalized = normalizeSearchChatHistoryArgs(args)
+      const key = stableKey(name, normalized)
+      const cached = state.cache.get(key)
+      if (cached && validateSearchCache(db, userId, cached)) {
+        abortIfNeeded(signal, isRequestActive)
+        return cached.text
+      }
+      if (state.searchCalls >= 3) {
+        throw new ChatHistoryError(
+          'CHAT_HISTORY_SEARCH_LIMIT',
+          'Maximal drei History-Suchaufrufe pro Nutzerturn.',
+          429
+        )
+      }
+      state.searchCalls += 1
+      const result = searchChatHistory(db, userId, args, { excludedMessageId })
+      abortIfNeeded(signal, isRequestActive)
+      const text = consumeChars(state, searchText(result))
+      state.cache.set(key, {
+        text,
+        internalHits: result.results.map(hit => ({
+          conversationId: hit.conversationId,
+          messageId: hit.messageId,
+          sourceHash: hit.sourceHash
+        }))
+      })
+      return text
+    }
+
+    const normalized = normalizeReadChatExcerptArgs(args)
     const key = stableKey(name, normalized)
     const cached = state.cache.get(key)
-    if (cached && validateSearchCache(db, userId, cached)) {
+    if (cached && validateReadCache(db, userId, cached)) {
       abortIfNeeded(signal, isRequestActive)
       return cached.text
     }
-    if (state.searchCalls >= 3) {
+    if (state.readCalls >= 3) {
       throw new ChatHistoryError(
-        'CHAT_HISTORY_SEARCH_LIMIT',
-        'Maximal drei History-Suchaufrufe pro Nutzerturn.',
+        'CHAT_HISTORY_READ_LIMIT',
+        'Maximal drei History-Leseaufrufe pro Nutzerturn.',
         429
       )
     }
-    state.searchCalls += 1
-    const result = searchChatHistory(db, userId, args, { excludedMessageId })
+    state.readCalls += 1
+    const remaining = Math.max(0, state.maxChars - state.usedChars)
+    const maxToolChars = Math.min(12_000, remaining)
+    if (maxToolChars < 800) {
+      throw new ChatHistoryError(
+        'CHAT_HISTORY_RESULT_LIMIT',
+        'Zu wenig verbleibendes Zeichenbudget für einen sicheren Chat-Ausschnitt.',
+        429
+      )
+    }
+    const excerpt = readChatExcerpt(db, userId, args, {
+      maxResultChars: maxToolChars
+    })
     abortIfNeeded(signal, isRequestActive)
-    checkRuntime(state)
-    const text = consumeChars(state, searchText(result))
+    const formatted = excerptText(excerpt, state, maxToolChars)
+    const text = consumeChars(state, formatted.text)
+    for (const source of formatted.sources) {
+      state.catalog.set(source.label, source)
+    }
+    state.nextLabel += formatted.sources.length
     state.cache.set(key, {
       text,
-      internalHits: result.results.map(hit => ({
-        conversationId: hit.conversationId,
-        messageId: hit.messageId,
-        sourceHash: hit.sourceHash
-      }))
+      internalSources: formatted.sources
     })
     return text
-  }
-
-  const normalized = normalizeReadChatExcerptArgs(args)
-  const key = stableKey(name, normalized)
-  const cached = state.cache.get(key)
-  if (cached && validateReadCache(db, userId, cached)) {
-    abortIfNeeded(signal, isRequestActive)
-    return cached.text
-  }
-  if (state.readCalls >= 3) {
-    throw new ChatHistoryError(
-      'CHAT_HISTORY_READ_LIMIT',
-      'Maximal drei History-Leseaufrufe pro Nutzerturn.',
-      429
-    )
-  }
-  state.readCalls += 1
-  const remaining = Math.max(0, state.maxChars - state.usedChars)
-  const maxToolChars = Math.min(12_000, remaining)
-  if (maxToolChars < 800) {
-    throw new ChatHistoryError(
-      'CHAT_HISTORY_RESULT_LIMIT',
-      'Zu wenig verbleibendes Zeichenbudget für einen sicheren Chat-Ausschnitt.',
-      429
-    )
-  }
-  const excerpt = readChatExcerpt(db, userId, args, {
-    maxResultChars: maxToolChars
   })
-  abortIfNeeded(signal, isRequestActive)
-  checkRuntime(state)
-  const formatted = excerptText(excerpt, state, maxToolChars)
-  const text = consumeChars(state, formatted.text)
-  for (const source of formatted.sources) {
-    state.catalog.set(source.label, source)
-  }
-  state.nextLabel += formatted.sources.length
-  state.cache.set(key, {
-    text,
-    internalSources: formatted.sources
-  })
-  return text
 }
