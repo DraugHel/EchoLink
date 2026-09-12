@@ -52,9 +52,9 @@ test('Archive-, Prozess-, Lock-, Docker- und Datenbankinventar ist read-only', (
     `docker system df`,
     `docker image ls`,
     `git -C /root/echolink --no-pager status --short`,
-    `sqlite3 /root/echolink/data/echolink.db 'PRAGMA integrity_check;'`,
-    `sqlite3 /root/echolink/data/echolink.db 'SELECT COUNT(*) FROM memories;'`,
-    `sqlite3 /root/echolink/data/echolink.db '.schema memories'`,
+    `sqlite3 -readonly /root/echolink/data/echolink.db 'PRAGMA integrity_check;'`,
+    `sqlite3 -readonly /root/echolink/data/echolink.db 'SELECT COUNT(*) FROM memories;'`,
+    `sqlite3 -readonly /root/echolink/data/echolink.db '.schema memories'`,
     `node --check server/routes/chat.js`,
     `sha256sum /var/lib/echolink-e3/validation-images.json`
   ]
@@ -66,6 +66,59 @@ test('Archive-, Prozess-, Lock-, Docker- und Datenbankinventar ist read-only', (
       command
     )
   }
+})
+
+test('sqlite3-Lesezugriffe sind ohne -readonly execution-blocked', () => {
+  const unsafe = [
+    `sqlite3 /tmp/does-not-exist.db 'SELECT 1;'`,
+    `sqlite3 /root/echolink/echolink.db 'SELECT COUNT(*) FROM memory_items;'`,
+    `sudo sqlite3 /tmp/does-not-exist.db 'PRAGMA integrity_check;'`,
+    `printf '%s' "$(sqlite3 /tmp/does-not-exist.db 'SELECT 1;')"`
+  ]
+
+  for (const command of unsafe) {
+    const result = classifyTerminalCommand(command)
+    assert.equal(result.readOnly, false, command)
+    assert.equal(result.blocked, true, command)
+    assert.equal(result.code, 'SQLITE_READONLY_REQUIRED', command)
+    assert.match(result.reason, /-readonly/, command)
+  }
+
+  const allowlisted = classifyTerminalCommand(
+    `sqlite3 /tmp/does-not-exist.db 'SELECT 1;'`,
+    { allowedPrefixes: ['sqlite3'] }
+  )
+  assert.equal(allowlisted.blocked, true)
+  assert.equal(allowlisted.readOnly, false)
+
+  const safe = [
+    `sqlite3 -readonly /root/echolink/data/echolink.db 'SELECT 1;'`,
+    `sqlite3 -readonly /root/echolink/data/echolink.db 'PRAGMA integrity_check;'`,
+    `sqlite3 -readonly /root/echolink/data/echolink.db '.schema memory_items'`
+  ]
+
+  for (const command of safe) {
+    const result = classifyTerminalCommand(command)
+    assert.equal(result.readOnly, true, command)
+    assert.notEqual(result.blocked, true, command)
+  }
+})
+
+test('Chat blockiert sqlite3-Lesezugriffe ohne -readonly vor Operationsanlage', () => {
+  const source = readFileSync(
+    new URL('../server/routes/chat.js', import.meta.url),
+    'utf8'
+  )
+
+  const policyIndex = source.indexOf('const commandPolicy = terminalCommandPolicy(command)')
+  const blockIndex = source.indexOf('if (commandPolicy.blocked)', policyIndex)
+  const operationIndex = source.indexOf('const operation = createTerminalOperation', policyIndex)
+
+  assert.ok(policyIndex > 0)
+  assert.ok(blockIndex > policyIndex)
+  assert.ok(operationIndex > blockIndex)
+  assert.match(source, /TERMINAL_POLICY_BLOCKED/)
+  assert.match(source, /Retry the read with sqlite3 -readonly/)
 })
 
 test('Bash-Heredoc mit ausschließlich lesenden Befehlen ist read-only', () => {

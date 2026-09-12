@@ -26,6 +26,7 @@ import {
 import {
   getLunaToolKind,
   getLunaToolText,
+  isRecoverableLunaToolEvent,
   normalizeLunaToolStatus
 } from '../lib/lunaToolPresence.js'
 
@@ -1398,7 +1399,7 @@ export default function Chat({ user, onLogout }) {
             )
           )
         }
-        if (json.tool) {
+        if (json.tool && !isRecoverableLunaToolEvent(json)) {
           const toolStatus = formatLunaToolEvent(json)
 
           ensureTrackedChatRun(current =>

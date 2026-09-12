@@ -27,6 +27,15 @@ export function normalizeLunaToolStatus(value) {
   return String(value).trim()
 }
 
+export function isRecoverableLunaToolEvent(event) {
+  return Boolean(
+    event &&
+    event.tool === 'search_chat_history' &&
+    String(event.status || '').toLowerCase() === 'error' &&
+    event.error === 'CHAT_HISTORY_UNTRUSTED_CONVERSATION_ID'
+  )
+}
+
 export function getLunaToolText(value) {
   const raw = normalizeLunaToolStatus(value)
 

@@ -4,6 +4,7 @@ import assert from 'node:assert/strict'
 import {
   getLunaToolKind,
   getLunaToolText,
+  isRecoverableLunaToolEvent,
   normalizeLunaToolStatus
 } from '../client/src/lib/lunaToolPresence.js'
 
@@ -48,6 +49,25 @@ test('Chat-History-Suche wird im HUD nicht als Websuche klassifiziert', () => {
       'Luna durchsucht frühere Chats …'
     )
     assert.equal(getLunaToolKind(status), 'tool')
+  }
+})
+
+test('nur der bekannte recoverable History-ID-Retry wird im HUD unterdrückt', () => {
+  assert.equal(
+    isRecoverableLunaToolEvent({
+      tool: 'search_chat_history',
+      status: 'error',
+      error: 'CHAT_HISTORY_UNTRUSTED_CONVERSATION_ID'
+    }),
+    true
+  )
+
+  for (const event of [
+    { tool: 'search_chat_history', status: 'error', error: 'CHAT_HISTORY_RUNTIME_LIMIT' },
+    { tool: 'read_chat_excerpt', status: 'error', error: 'CHAT_HISTORY_UNTRUSTED_CONVERSATION_ID' },
+    { tool: 'search_chat_history', status: 'done' }
+  ]) {
+    assert.equal(isRecoverableLunaToolEvent(event), false)
   }
 })
 

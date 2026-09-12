@@ -384,6 +384,112 @@ function curlIsReadOnly(args) {
   )
 }
 
+function normalizedExecutable(words) {
+  const normalized = [...words]
+  while (normalized.length && ASSIGNMENT.test(normalized[0])) normalized.shift()
+  while (['if', 'elif', 'while', 'until', 'then', 'do', 'else'].includes(normalized[0])) normalized.shift()
+
+  while (normalized[0] === 'command' || normalized[0] === 'sudo') {
+    const wrapper = normalized.shift()
+    if (wrapper === 'sudo') {
+      while (normalized[0]?.startsWith('-')) {
+        const option = normalized.shift()
+        if (/^(?:-u|-g|-h|-p|-C|--user|--group|--host|--prompt|--chdir)$/.test(option)) normalized.shift()
+      }
+    } else {
+      while (normalized[0]?.startsWith('-')) normalized.shift()
+    }
+  }
+
+  if (normalized[0] === 'env') {
+    normalized.shift()
+    while (normalized[0]?.startsWith('-') || ASSIGNMENT.test(normalized[0] || '')) normalized.shift()
+  }
+
+  return {
+    executable: normalized.shift()?.split('/').at(-1) || '',
+    args: normalized
+  }
+}
+
+function sqliteStatementsAreReadOnly(sql) {
+  if (!sql || WRITE_SQL.test(sql)) return false
+  if (sql.startsWith('.')) return READ_ONLY_SQLITE_DOT_COMMAND.test(sql)
+
+  const statements = sql.split(';').map(value => value.trim()).filter(Boolean)
+  return statements.length > 0 && statements.every(statement => {
+    if (/^(?:select|with\b[\s\S]*\bselect|explain(?:\s+query\s+plan)?\s+select)\b/i.test(statement)) return true
+    const pragma = statement.match(/^pragma\s+(?:[A-Za-z_][A-Za-z0-9_]*\.)?([A-Za-z_][A-Za-z0-9_]*)\s*(?:\([^)]*\))?$/i)
+    return Boolean(pragma && READ_ONLY_PRAGMA.test(pragma[1]))
+  })
+}
+
+function sqliteReadonlyRequirementForWords(words) {
+  const { executable, args } = normalizedExecutable(words)
+  if (executable !== 'sqlite3') return null
+  if (args[0] === '-readonly') return null
+  if (!args.length || args[0].startsWith('-')) return null
+
+  const sql = args.slice(1).join(' ').trim()
+  if (!sqliteStatementsAreReadOnly(sql)) return null
+
+  return {
+    blocked: true,
+    code: 'SQLITE_READONLY_REQUIRED',
+    reason: 'sqlite3-Lesezugriffe müssen -readonly verwenden, damit ein falscher oder nicht vorhandener DB-Pfad keine Datei anlegen kann'
+  }
+}
+
+function sqliteReadonlyGuard(source) {
+  const segments = splitCommands(source)
+  if (!segments?.length) return null
+
+  for (const segment of segments) {
+    const words = shellWords(segment)
+    if (words) {
+      const violation = sqliteReadonlyRequirementForWords(words)
+      if (violation) return violation
+    }
+  }
+
+  let quote = null
+  let escaped = false
+  for (let i = 0; i < source.length; i += 1) {
+    const char = source[i]
+    if (escaped) {
+      escaped = false
+      continue
+    }
+    if (char === '\\' && quote !== "'") {
+      escaped = true
+      continue
+    }
+    if (quote === "'") {
+      if (char === "'") quote = null
+      continue
+    }
+    if (char === '"') {
+      quote = quote === '"' ? null : '"'
+      continue
+    }
+    if (char === '`') continue
+
+    const isCommandSubstitution = char === '$' && source[i + 1] === '('
+    const isProcessSubstitution = (char === '<' || char === '>') && source[i + 1] === '('
+    if (!isCommandSubstitution && !isProcessSubstitution) continue
+    if (isCommandSubstitution && source[i + 2] === '(') continue
+
+    const bodyStart = i + 2
+    const end = matchingParen(source, bodyStart)
+    if (end < 0) continue
+    const nested = sqliteReadonlyGuard(source.slice(bodyStart, end))
+    if (nested) return nested
+    i = end
+  }
+
+  return null
+}
+
 function commandIsReadOnly(words, raw) {
   while (words.length && ASSIGNMENT.test(words[0])) words.shift()
   if (!words.length) return true
@@ -442,21 +548,11 @@ function commandIsReadOnly(words, raw) {
   }
   if (executable === 'sqlite3') {
     const sqliteArgs = [...args]
-    if (sqliteArgs[0] === '-readonly') sqliteArgs.shift()
+    if (sqliteArgs[0] !== '-readonly') return false
+    sqliteArgs.shift()
     if (!sqliteArgs.length || sqliteArgs[0].startsWith('-')) return false
     sqliteArgs.shift()
-    const sql = sqliteArgs.join(' ').trim()
-    if (!sql || WRITE_SQL.test(sql)) return false
-    if (sql.startsWith('.')) return READ_ONLY_SQLITE_DOT_COMMAND.test(sql)
-
-    const statements = sql.split(';').map(value => value.trim()).filter(Boolean)
-    return statements.length > 0 && statements.every(statement => {
-      if (/^(?:select|with\b[\s\S]*\bselect|explain(?:\s+query\s+plan)?\s+select)\b/i.test(statement)) {
-        return true
-      }
-      const pragma = statement.match(/^pragma\s+(?:[A-Za-z_][A-Za-z0-9_]*\.)?([A-Za-z_][A-Za-z0-9_]*)\s*(?:\([^)]*\))?$/i)
-      return Boolean(pragma && READ_ONLY_PRAGMA.test(pragma[1]))
-    })
+    return sqliteStatementsAreReadOnly(sqliteArgs.join(' ').trim())
   }
   if (executable === 'tar') {
     const lists = args.some(arg => /^-[^-]*t/.test(arg) || arg === '--list')
@@ -703,6 +799,11 @@ export function classifyTerminalCommand(command, options = {}) {
   const source = sanitizeVerifiedHeredocs(unwrapped)
   if (source === null) {
     return { readOnly: false, reason: 'Nicht lesendes oder unklares Heredoc' }
+  }
+
+  const sqliteGuard = sqliteReadonlyGuard(source)
+  if (sqliteGuard) {
+    return { readOnly: false, ...sqliteGuard }
   }
 
   const classifyNested = nested => classifyTerminalCommand(nested)

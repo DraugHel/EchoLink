@@ -663,6 +663,18 @@ async function executeTool(
     const description = args.description || command
     const commandPolicy = terminalCommandPolicy(command)
 
+    if (commandPolicy.blocked) {
+      const code = commandPolicy.code || 'TERMINAL_POLICY_BLOCKED'
+      const reason = commandPolicy.reason || 'Terminalbefehl wurde durch die Sicherheitsrichtlinie blockiert.'
+      res.write(`data: ${JSON.stringify({
+        tool: 'terminal',
+        status: 'error',
+        error: code,
+        query: command
+      })}\n\n`)
+      return `Terminal blocked [${code}]: ${reason}. Retry the read with sqlite3 -readonly.`
+    }
+
     const operation = createTerminalOperation({
       userId: requestContext.userId,
       conversationId,
