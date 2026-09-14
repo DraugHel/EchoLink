@@ -24,6 +24,189 @@ export function supportsPromptCacheConfig(model) {
   return /^gpt-5\.6(?:-|$)/.test(String(model || ''))
 }
 
+const OPENAI_HISTORY_SEARCH_TOOL = 'search_chat_history'
+const OPENAI_HISTORY_READ_TOOL = 'read_chat_excerpt'
+const MAX_HISTORY_UNIX_SECONDS = 4_102_444_800 // 2100-01-01T00:00:00Z
+
+function nullableInteger(description, minimum, maximum) {
+  return {
+    type: ['integer', 'null'],
+    minimum,
+    maximum,
+    description
+  }
+}
+
+export function toResponsesTools(tools = []) {
+  return tools.map(tool => {
+    const fn = tool?.function || {}
+    const base = {
+      type: 'function',
+      name: fn.name,
+      description: fn.description,
+      parameters: fn.parameters
+    }
+
+    if (fn.name === OPENAI_HISTORY_SEARCH_TOOL) {
+      return {
+        ...base,
+        strict: true,
+        parameters: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            query: {
+              type: 'string',
+              minLength: 2,
+              maxLength: 300,
+              description:
+                'Short characteristic terms to find in prior chats; at most eight normalized search terms.'
+            },
+            date_from_unix: nullableInteger(
+              'Inclusive UTC Unix timestamp in seconds. MUST be null unless the user explicitly requested a time window.',
+              0,
+              MAX_HISTORY_UNIX_SECONDS
+            ),
+            date_to_unix: nullableInteger(
+              'Exclusive UTC Unix timestamp in seconds. MUST be null unless the user explicitly requested a time window.',
+              0,
+              MAX_HISTORY_UNIX_SECONDS
+            ),
+            include_archived: {
+              type: ['boolean', 'null'],
+              description:
+                'Whether archived chats are included. Use null for the default (true).'
+            },
+            limit: nullableInteger(
+              'Maximum hits. Use null for the default (5).',
+              1,
+              10
+            )
+          },
+          required: [
+            'query',
+            'date_from_unix',
+            'date_to_unix',
+            'include_archived',
+            'limit'
+          ]
+        }
+      }
+    }
+
+    if (fn.name === OPENAI_HISTORY_READ_TOOL) {
+      return {
+        ...base,
+        strict: true,
+        parameters: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            conversation_id: {
+              type: 'integer',
+              minimum: 1,
+              description:
+                'Conversation ID returned by search_chat_history.'
+            },
+            message_id: {
+              type: 'integer',
+              minimum: 1,
+              description:
+                'Center message ID returned by search_chat_history.'
+            },
+            before: nullableInteger(
+              'Previous messages in the same chat. Use null for the default (3).',
+              0,
+              5
+            ),
+            after: nullableInteger(
+              'Following messages in the same chat. Use null for the default (3).',
+              0,
+              5
+            )
+          },
+          required: [
+            'conversation_id',
+            'message_id',
+            'before',
+            'after'
+          ]
+        }
+      }
+    }
+
+    return base
+  })
+}
+
+function unixSecondsToIso(value) {
+  if (
+    !Number.isInteger(value) ||
+    value < 0 ||
+    value > MAX_HISTORY_UNIX_SECONDS
+  ) {
+    return null
+  }
+  return new Date(value * 1000).toISOString()
+}
+
+export function normalizeResponsesToolArguments(name, args) {
+  const input =
+    args && typeof args === 'object' && !Array.isArray(args)
+      ? args
+      : {}
+
+  if (name === OPENAI_HISTORY_SEARCH_TOOL) {
+    const canonical = {
+      query: input.query
+    }
+
+    let from = Number.isInteger(input.date_from_unix)
+      ? input.date_from_unix
+      : null
+    let to = Number.isInteger(input.date_to_unix)
+      ? input.date_to_unix
+      : null
+
+    if (from != null && to != null && from >= to) {
+      ;[from, to] = [to, from]
+      if (from === to) {
+        from = null
+        to = null
+      }
+    }
+
+    const fromIso = unixSecondsToIso(from)
+    const toIso = unixSecondsToIso(to)
+    if (fromIso) canonical.date_from = fromIso
+    if (toIso) canonical.date_to = toIso
+    if (typeof input.include_archived === 'boolean') {
+      canonical.include_archived = input.include_archived
+    }
+    if (Number.isInteger(input.limit)) {
+      canonical.limit = input.limit
+    }
+
+    return canonical
+  }
+
+  if (name === OPENAI_HISTORY_READ_TOOL) {
+    const canonical = {
+      conversation_id: input.conversation_id,
+      message_id: input.message_id
+    }
+    if (Number.isInteger(input.before)) {
+      canonical.before = input.before
+    }
+    if (Number.isInteger(input.after)) {
+      canonical.after = input.after
+    }
+    return canonical
+  }
+
+  return input
+}
+
 export function buildPromptCacheKey(
   model,
   instructions,
@@ -252,12 +435,9 @@ export async function streamResponses(model, messages, options, res, abortSignal
       explicitPromptCache
     }
   )
-  const tools = (options?.tools ?? ALL_TOOLS).map(t => ({
-    type: 'function',
-    name: t.function.name,
-    description: t.function.description,
-    parameters: t.function.parameters
-  }))
+  const tools = toResponsesTools(
+    options?.tools ?? ALL_TOOLS
+  )
   const body = {
     model, stream: true, store: false,
     include: ['reasoning.encrypted_content'],
@@ -371,11 +551,27 @@ export async function streamResponses(model, messages, options, res, abortSignal
     })
   }
 
-  const toolCalls = (rawOutput || []).filter(it => it.type === 'function_call').map(it => {
-    let args = {}
-    try { args = it.arguments ? JSON.parse(it.arguments) : {} } catch {}
-    return { id: it.call_id, function: { name: it.name, arguments: args } }
-  })
+  const toolCalls = (rawOutput || [])
+    .filter(it => it.type === 'function_call')
+    .map(it => {
+      let args = {}
+      try {
+        args = it.arguments
+          ? JSON.parse(it.arguments)
+          : {}
+      } catch {}
+      return {
+        id: it.call_id,
+        function: {
+          name: it.name,
+          arguments:
+            normalizeResponsesToolArguments(
+              it.name,
+              args
+            )
+        }
+      }
+    })
   const tokenUsage = normalizeResponsesUsage(usage)
   return { fullContent, fullThinking, toolCalls, tokenUsage, rawOutput, completed: streamCompleted }
 }

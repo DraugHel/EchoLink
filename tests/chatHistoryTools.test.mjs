@@ -159,6 +159,10 @@ test('search tool does not expose a conversation_id for the model to guess', () 
     false
   )
   assert.match(searchTool.function.description, /Do not guess or invent conversation IDs/)
+  assert.match(
+    searchTool.function.description,
+    /Do not add date filters unless the user explicitly requested a time window/
+  )
 })
 
 test('guessed search conversation IDs fail without consuming the three-search quota', async () => withDb(async db => {

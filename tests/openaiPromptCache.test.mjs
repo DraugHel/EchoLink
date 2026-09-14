@@ -5,8 +5,10 @@ import {
   buildPromptCacheKey,
   normalizeResponsesUsage,
   isRetryableResponsesStatus,
+  normalizeResponsesToolArguments,
   supportsPromptCacheConfig,
-  toResponsesInput
+  toResponsesInput,
+  toResponsesTools
 } from '../server/providers/openai-responses.js'
 
 test('Responses retries only transient HTTP statuses', () => {
@@ -164,6 +166,132 @@ test('GPT-5.6 erhält einen stabilen, promptabhängigen Cache-Key', () => {
   assert.equal(
     supportsPromptCacheConfig('gpt-5.5'),
     false
+  )
+})
+
+
+test('Responses macht nur History-Tools strict und nutzt nullable Unix-Zeitfilter', () => {
+  const sourceTools = [
+    {
+      type: 'function',
+      function: {
+        name: 'search_chat_history',
+        description: 'history search',
+        parameters: {
+          type: 'object',
+          properties: {
+            query: { type: 'string' },
+            date_from: { type: 'string' }
+          },
+          required: ['query']
+        }
+      }
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'terminal',
+        description: 'terminal',
+        parameters: {
+          type: 'object',
+          properties: {
+            command: { type: 'string' }
+          },
+          required: ['command']
+        }
+      }
+    }
+  ]
+
+  const [history, terminal] = toResponsesTools(sourceTools)
+
+  assert.equal(history.strict, true)
+  assert.equal(history.parameters.additionalProperties, false)
+  assert.deepEqual(
+    history.parameters.required,
+    [
+      'query',
+      'date_from_unix',
+      'date_to_unix',
+      'include_archived',
+      'limit'
+    ]
+  )
+  assert.deepEqual(
+    history.parameters.properties.date_from_unix.type,
+    ['integer', 'null']
+  )
+  assert.match(
+    history.parameters.properties.date_from_unix.description,
+    /MUST be null unless the user explicitly requested a time window/
+  )
+  assert.equal(
+    Object.hasOwn(history.parameters.properties, 'date_from'),
+    false
+  )
+
+  assert.equal(
+    Object.hasOwn(terminal, 'strict'),
+    false
+  )
+  assert.deepEqual(
+    terminal.parameters,
+    sourceTools[1].function.parameters
+  )
+})
+
+test('Responses kanonisiert History-Zeitfilter ohne fragile ISO-Modellstrings', () => {
+  assert.deepEqual(
+    normalizeResponsesToolArguments(
+      'search_chat_history',
+      {
+        query: '134 liter',
+        date_from_unix: null,
+        date_to_unix: null,
+        include_archived: null,
+        limit: null
+      }
+    ),
+    {
+      query: '134 liter'
+    }
+  )
+
+  assert.deepEqual(
+    normalizeResponsesToolArguments(
+      'search_chat_history',
+      {
+        query: '134 liter',
+        date_from_unix: 1787788800,
+        date_to_unix: 1787875200,
+        include_archived: true,
+        limit: 5
+      }
+    ),
+    {
+      query: '134 liter',
+      date_from: '2026-08-27T00:00:00.000Z',
+      date_to: '2026-08-28T00:00:00.000Z',
+      include_archived: true,
+      limit: 5
+    }
+  )
+
+  assert.deepEqual(
+    normalizeResponsesToolArguments(
+      'read_chat_excerpt',
+      {
+        conversation_id: 10,
+        message_id: 105,
+        before: null,
+        after: 2
+      }
+    ),
+    {
+      conversation_id: 10,
+      message_id: 105,
+      after: 2
+    }
   )
 })
 
