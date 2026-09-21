@@ -2363,6 +2363,14 @@ Use these as background context. If these memories fully answer the request, ans
       envVisionModel: process.env.VISION_MODEL
     })
 
+  if (
+    activeModel.startsWith('deepseek/') &&
+    ollamaMessages[0]?.role === 'system'
+  ) {
+    ollamaMessages[0].content +=
+      '\n\n[DeepSeek presentation policy: During tool-driven work, do not narrate progress in normal assistant content. Keep tool-call rounds concise and preferably content-free. After all tools are finished, produce one polished Markdown answer. Use short headings, bullets or tables when they improve readability. Summarize results instead of replaying raw tool output.]'
+  }
+
   const finalContextBudget =
     resolveContextBudget(activeModel)
 
@@ -2679,10 +2687,11 @@ Use these as background context. If these memories fully answer the request, ans
           tokenUsage
         )
       assertChatRequestActive(activeRequest)
-      if (fullContent) allContent += (allContent ? '\n\n' : '') + fullContent
       if (fullThinking) accThinking += (accThinking ? '\n\n' : '') + fullThinking
 
-      // Handle tool calls
+      // Handle tool calls. Any normal prose emitted in a tool round is kept
+      // only in workingMessages for provider continuity; it is not part of
+      // the persisted/final assistant answer.
       if (toolCalls && toolCalls.length > 0) {
         workingMessages.push({
           role: 'assistant',
@@ -2737,6 +2746,11 @@ Use these as background context. If these memories fully answer the request, ans
         }
         continue // Next iteration with tool results
       }
+
+      // Only a tool-free round is user-facing final content. This prevents
+      // DeepSeek-style progress narration from being concatenated into the
+      // finished answer after multiple tool iterations.
+      if (fullContent) allContent = fullContent
 
       // Final response — extract thinking from tags if native thinking is empty
       const THINK_TAG_RE = /<think>([\s\S]*?)<\/think>/g
