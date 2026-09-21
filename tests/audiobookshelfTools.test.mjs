@@ -94,7 +94,6 @@ test('write preparation re-reads exact items and formats old-to-new preview with
     {
       updates: [{
         id: 'item_123',
-        expectedUpdatedAt: 777,
         metadata: {
           title: 'Elantris',
           authors: [{ name: 'Brandon Sanderson' }],
@@ -106,6 +105,7 @@ test('write preparation re-reads exact items and formats old-to-new preview with
   )
 
   assert.equal(calls.length, 1)
+  assert.equal(action.args.updates[0].expectedUpdatedAt, 777)
   const preview = formatAudiobookshelfPreview(action)
   assert.match(preview, /- 02\/16 -> Elantris/)
   assert.match(preview, /Brandon - Cosmere Sanderson -> Brandon Sanderson/)
@@ -147,14 +147,13 @@ test('write execution posts only after approval path invokes it', async () => {
   assert.match(result, /"applied":1/)
 })
 
-test('write preparation rejects stale previews before showing approval', async () => {
+test('write preparation rejects an item without a bindable updatedAt', async () => {
   await assert.rejects(
     prepareAudiobookshelfAction(
       'audiobookshelf_update_metadata',
       {
         updates: [{
           id: 'item_123',
-          expectedUpdatedAt: 777,
           metadata: { title: 'Elantris' }
         }]
       },
@@ -162,12 +161,12 @@ test('write preparation rejects stale previews before showing approval', async (
         env,
         fetchImpl: async () => response({
           id: 'item_123',
-          updatedAt: 778,
+          updatedAt: null,
           mediaType: 'book',
           metadata: { title: 'Old' }
         })
       }
     ),
-    error => error?.code === 'AUDIOBOOKSHELF_STALE_PREVIEW'
+    error => error?.code === 'AUDIOBOOKSHELF_INVALID_UPDATED_AT'
   )
 })

@@ -1,7 +1,8 @@
 import {
   assertAudiobookshelfId,
   audiobookshelfConfig,
-  normalizeAudiobookshelfUpdates
+  normalizeAudiobookshelfUpdates,
+  sanitizeBookMetadata
 } from './audiobookshelf.js'
 
 const LOCAL_TIMEOUT_MS = 20_000
@@ -71,7 +72,7 @@ const TOOL_GET_ITEM = {
   function: {
     name: 'audiobookshelf_get_item',
     description:
-      'Read one Audiobookshelf item with compact metadata and updatedAt. Read-only. Re-read items before proposing metadata changes.',
+      'Read one Audiobookshelf item with compact metadata and updatedAt. Read-only. Use this for targeted inspection; write approval preparation performs its own authoritative freshness re-read.',
     parameters: {
       type: 'object',
       properties: {
@@ -149,19 +150,13 @@ const TOOL_UPDATE_METADATA = {
             type: 'object',
             properties: {
               id: { type: 'string' },
-              expectedUpdatedAt: {
-                type: 'integer',
-                minimum: 0,
-                description:
-                  'Exact updatedAt from the latest item read. Prevents stale writes.'
-              },
               metadata: {
                 type: 'object',
                 properties: metadataProperties,
                 additionalProperties: false
               }
             },
-            required: ['id', 'expectedUpdatedAt', 'metadata'],
+            required: ['id', 'metadata'],
             additionalProperties: false
           }
         }
@@ -432,6 +427,39 @@ function shortValue(value) {
     : text
 }
 
+function normalizeAudiobookshelfWriteIntent(args = {}) {
+  if (!args || typeof args !== 'object' || Array.isArray(args)) {
+    throw toolError('Audiobookshelf write args muessen ein Objekt sein')
+  }
+  const keys = Object.keys(args)
+  if (keys.some(key => key !== 'updates')) {
+    throw toolError('Audiobookshelf write args enthalten nicht erlaubte Felder')
+  }
+  if (!Array.isArray(args.updates) || !args.updates.length || args.updates.length > 25) {
+    throw toolError('updates muss 1 bis 25 Eintraege enthalten')
+  }
+
+  const seen = new Set()
+  return args.updates.map((entry, index) => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+      throw toolError(`updates[${index}] muss ein Objekt sein`)
+    }
+    const entryKeys = Object.keys(entry)
+    if (entryKeys.some(key => !['id', 'metadata'].includes(key))) {
+      throw toolError(`updates[${index}] enthaelt nicht erlaubte Felder`)
+    }
+    const id = assertAudiobookshelfId(entry.id, 'item-id')
+    if (seen.has(id)) {
+      throw toolError(`Doppelte Item-ID: ${id}`)
+    }
+    seen.add(id)
+    return {
+      id,
+      metadata: sanitizeBookMetadata(entry.metadata)
+    }
+  })
+}
+
 export async function prepareAudiobookshelfAction(
   name,
   args = {},
@@ -441,31 +469,35 @@ export async function prepareAudiobookshelfAction(
     throw toolError(`Kein Audiobookshelf-Schreibtool: ${name}`)
   }
 
-  const updates = normalizeAudiobookshelfUpdates({
-    updates: args.updates
-  })
+  const intents = normalizeAudiobookshelfWriteIntent(args)
   const before = []
+  const updates = []
 
-  for (const update of updates) {
+  for (const intent of intents) {
     const item = await localRequest(
-      `/items/${encodeURIComponent(update.id)}`,
+      `/items/${encodeURIComponent(intent.id)}`,
       context
     )
     if (item?.mediaType !== 'book') {
       throw toolError(
-        `Item ${update.id} ist kein Buch`,
+        `Item ${intent.id} ist kein Buch`,
         'AUDIOBOOKSHELF_NOT_A_BOOK',
         409
       )
     }
-    if (item?.updatedAt !== update.expectedUpdatedAt) {
+    if (!Number.isSafeInteger(item?.updatedAt) || item.updatedAt < 0) {
       throw toolError(
-        `Item ${update.id} wurde seit der Vorschau geaendert`,
-        'AUDIOBOOKSHELF_STALE_PREVIEW',
+        `Item ${intent.id} hat keinen gueltigen updatedAt-Wert`,
+        'AUDIOBOOKSHELF_INVALID_UPDATED_AT',
         409
       )
     }
     before.push(item)
+    updates.push({
+      id: intent.id,
+      expectedUpdatedAt: item.updatedAt,
+      metadata: intent.metadata
+    })
   }
 
   return {

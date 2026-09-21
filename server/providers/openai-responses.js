@@ -496,6 +496,7 @@ export async function streamResponses(model, messages, options, res, abortSignal
   let fullContent = '', fullThinking = ''
   let rawOutput = null, usage = null
   let streamCompleted = false
+  let incompleteReason = ''
   let buf = ''
   const decoder = new TextDecoder()
 
@@ -520,6 +521,12 @@ export async function streamResponses(model, messages, options, res, abortSignal
           streamCompleted = true
           rawOutput = ev.response?.output || null
           usage = ev.response?.usage || null
+        } else if (ev.type === 'response.incomplete') {
+          rawOutput = ev.response?.output || null
+          usage = ev.response?.usage || null
+          incompleteReason =
+            ev.response?.incomplete_details?.reason ||
+            'unknown'
         } else if (ev.type === 'response.failed' || ev.type === 'error') {
           const providerError = ev.response?.error || ev.error || {}
           const message = providerError.message || ev.message || 'OpenAI Responses stream error'
@@ -549,6 +556,19 @@ export async function streamResponses(model, messages, options, res, abortSignal
       retryable: true,
       partialOutput: Boolean(fullContent || fullThinking)
     })
+  }
+
+  if (!streamCompleted) {
+    const message = incompleteReason
+      ? `OpenAI Responses incomplete: ${incompleteReason}`
+      : 'OpenAI Responses stream ended without a terminal event'
+    throw annotateResponsesStreamError(
+      new Error(message),
+      {
+        retryable: !incompleteReason,
+        partialOutput: Boolean(fullContent || fullThinking)
+      }
+    )
   }
 
   const toolCalls = (rawOutput || [])

@@ -1858,7 +1858,7 @@ Use these as background context. If these memories fully answer the request, ans
 - For cleanup/sort/normalize requests, inspect the complete relevant library before claiming the audit is complete. Continue paginated reads until all required items were inspected.
 - First present a normal-chat dry-run with proposed metadata changes. Do not call audiobookshelf_update_metadata during the discovery/dry-run step.
 - Call audiobookshelf_update_metadata only after the user explicitly asks to apply a previously shown plan. Do not ask for another natural-language yes; the application automatically presents an old-to-new Approve/Deny card.
-- Before proposing a write, re-read each affected item and use its exact updatedAt as expectedUpdatedAt. The write path rechecks this again and fails closed on stale data.
+- On an apply turn, use paginated library reads to map the previously shown plan to current item IDs. Do not individually re-read every affected item just to obtain freshness tokens: audiobookshelf_update_metadata re-reads each requested item in the backend, binds the approval to its fresh updatedAt, and the apply route rechecks that value again before writing.
 - Only book metadata may be changed. Never rename, move or delete files/folders and never modify audio files, chapters or covers through this integration.
 - Do not guess uncertain bibliographic facts; verify them with normal web-search tools or leave them unchanged.]`
 

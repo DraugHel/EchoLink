@@ -10,9 +10,11 @@ Tools:
 - `audiobookshelf_list_libraries` — read-only library inventory.
 - `audiobookshelf_list_items` — read-only paginated compact item inventory.
 - `audiobookshelf_get_item` — read-only single-item metadata and `updatedAt`.
-- `audiobookshelf_update_metadata` — write tool. It first re-reads every item,
-  binds the request to the exact `expectedUpdatedAt`, renders an old-to-new
-  approval card, and performs no write until the user clicks Approve.
+- `audiobookshelf_update_metadata` — write tool. The model supplies only item
+  IDs plus intended metadata. Approval preparation re-reads every requested
+  item, binds the action to the fresh `updatedAt`, renders an old-to-new card,
+  and performs no write until the user clicks Approve. The apply route checks
+  those bound timestamps again immediately before writing.
 
 The tools call only EchoLink's loopback `/api/audiobookshelf` adapter. That
 adapter is still the only component that talks to the configured ABS API and

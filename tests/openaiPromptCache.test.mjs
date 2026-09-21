@@ -387,3 +387,16 @@ test('Chat und UI verdrahten Cache-Telemetrie', async () => {
   assert.match(messageSource, /Prompt-Cache:/)
   assert.match(statusSource, /GPT-5\.6 Prompt-Cache/)
 })
+
+test('Responses behandelt incomplete und fehlende Terminalevents explizit', async () => {
+  const source = await readFile(
+    new URL(
+      '../server/providers/openai-responses.js',
+      import.meta.url
+    ),
+    'utf8'
+  )
+  assert.match(source, /response\.incomplete/)
+  assert.match(source, /OpenAI Responses incomplete:/)
+  assert.match(source, /stream ended without a terminal event/)
+})
