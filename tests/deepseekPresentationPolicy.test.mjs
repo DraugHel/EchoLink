@@ -41,6 +41,40 @@ test('DeepSeek presentation policy forbids process narration and converts proces
   )
 })
 
+test('DeepSeek presentation policy reports unresolved facts without narrating future work', () => {
+  assert.match(
+    DEEPSEEK_USER_FACING_POLICY,
+    /Handle unresolved facts without narrating the resolution process/
+  )
+  assert.match(
+    DEEPSEEK_USER_FACING_POLICY,
+    /Do not explain what you would need to do next to resolve an uncertainty/
+  )
+  assert.match(
+    DEEPSEEK_USER_FACING_POLICY,
+    /The narrator remains unresolved because no reliable source is available/
+  )
+})
+
+test('DeepSeek presentation policy scopes positive conclusions when issues remain', () => {
+  assert.match(
+    DEEPSEEK_USER_FACING_POLICY,
+    /Scope conclusions precisely/
+  )
+  assert.match(
+    DEEPSEEK_USER_FACING_POLICY,
+    /Do not call the overall result clean, finished, fully correct, or complete/
+  )
+  assert.match(
+    DEEPSEEK_USER_FACING_POLICY,
+    /The previously applied fixes are correct; several metadata inconsistencies remain/
+  )
+  assert.match(
+    DEEPSEEK_USER_FACING_POLICY,
+    /The library is complete; the applied fixes are correct, and several metadata inconsistencies remain/
+  )
+})
+
 test('DeepSeek presentation policy forbids generic continuation CTAs', () => {
   assert.match(
     DEEPSEEK_USER_FACING_POLICY,
