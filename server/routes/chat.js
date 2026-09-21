@@ -70,6 +70,14 @@ import {
   prepareGmailSendDraft
 } from '../lib/gmailTools.js'
 import {
+  AUDIOBOOKSHELF_TOOL_NAMES,
+  AUDIOBOOKSHELF_WRITE_TOOL_NAMES,
+  audiobookshelfToolsEnabled,
+  executeAudiobookshelfTool,
+  formatAudiobookshelfPreview,
+  prepareAudiobookshelfAction
+} from '../lib/audiobookshelfTools.js'
+import {
   E3_TOOL_NAMES,
   approveE3Action,
   denyE3Action,
@@ -163,6 +171,7 @@ const MAX_PROVIDER_STREAM_RETRIES = 3
 const pendingTerminalActions = new Map()
 const pendingCalendarActions = new Map()
 const pendingGmailActions = new Map()
+const pendingAudiobookshelfActions = new Map()
 const pendingE3Actions = new Map()
 
 setImmediate(() => {
@@ -887,6 +896,92 @@ async function executeTool(
       })}\n\n`)
 
       return `Playwright MCP error: ${message}`
+    }
+  }
+
+  if (
+    AUDIOBOOKSHELF_WRITE_TOOL_NAMES.has(name)
+  ) {
+    let action
+    try {
+      action = await prepareAudiobookshelfAction(
+        name,
+        args,
+        { signal: abortSignal }
+      )
+    } catch (error) {
+      const message = error?.message || String(error)
+      res.write(`data: ${JSON.stringify({
+        tool: name,
+        status: 'error',
+        error: error?.code || message
+      })}\n\n`)
+      return `Audiobookshelf error [${error?.code || 'AUDIOBOOKSHELF_TOOL_ERROR'}]: ${message}`
+    }
+
+    const preview = formatAudiobookshelfPreview(action)
+
+    return new Promise(resolve => {
+      const actionId = crypto.randomUUID()
+      const timeout = setTimeout(() => {
+        const current = pendingAudiobookshelfActions.get(actionId)
+        if (current?.resolve !== resolve) return
+        pendingAudiobookshelfActions.delete(actionId)
+        resolve('Audiobookshelf action approval expired')
+      }, 10 * 60 * 1000)
+      timeout.unref?.()
+
+      pendingAudiobookshelfActions.set(actionId, {
+        conversationId: Number(conversationId),
+        toolName: name,
+        args: action.args,
+        action,
+        resolve,
+        timeout
+      })
+
+      res.write(`data: ${JSON.stringify({
+        actionRequest: true,
+        actionId,
+        description: 'Audiobookshelf-Metadaten ändern',
+        reason:
+          'Die gezeigten Metadaten werden erst nach deiner Bestätigung geschrieben. Dateien und Ordner bleiben unverändert.',
+        command: preview,
+        type: 'audiobookshelf',
+        source: 'chat'
+      })}\n\n`)
+    })
+  }
+
+  if (AUDIOBOOKSHELF_TOOL_NAMES.has(name)) {
+    res.write(`data: ${JSON.stringify({
+      tool: name,
+      status: 'running',
+      query: args
+    })}\n\n`)
+
+    try {
+      const result = await executeAudiobookshelfTool(
+        name,
+        args,
+        { signal: abortSignal }
+      )
+      res.write(`data: ${JSON.stringify({
+        tool: name,
+        status: 'done'
+      })}\n\n`)
+      return result
+    } catch (error) {
+      if (abortSignal?.aborted || error?.name === 'AbortError') {
+        throw error
+      }
+      const message = error?.message || String(error)
+      res.write(`data: ${JSON.stringify({
+        tool: name,
+        status: 'error',
+        error: error?.code || message
+      })}\n\n`)
+      return `Audiobookshelf error [${error?.code || 'AUDIOBOOKSHELF_TOOL_ERROR'}]: ${message}`
     }
   }
 
@@ -1757,6 +1852,21 @@ Use these as background context. If these memories fully answer the request, ans
     ? `${systemContent}\n\n${calendarToolPolicy}`
     : calendarToolPolicy
 
+
+  const audiobookshelfToolPolicy = `[Audiobookshelf tool policy:
+- Use the native audiobookshelf_* tools; do not use terminal, shell or curl for Audiobookshelf work.
+- For cleanup/sort/normalize requests, inspect the complete relevant library before claiming the audit is complete. Continue paginated reads until all required items were inspected.
+- First present a normal-chat dry-run with proposed metadata changes. Do not call audiobookshelf_update_metadata during the discovery/dry-run step.
+- Call audiobookshelf_update_metadata only after the user explicitly asks to apply a previously shown plan. Do not ask for another natural-language yes; the application automatically presents an old-to-new Approve/Deny card.
+- Before proposing a write, re-read each affected item and use its exact updatedAt as expectedUpdatedAt. The write path rechecks this again and fails closed on stale data.
+- Only book metadata may be changed. Never rename, move or delete files/folders and never modify audio files, chapters or covers through this integration.
+- Do not guess uncertain bibliographic facts; verify them with normal web-search tools or leave them unchanged.]`
+
+  if (audiobookshelfToolsEnabled()) {
+    systemContent = systemContent
+      ? `${systemContent}\n\n${audiobookshelfToolPolicy}`
+      : audiobookshelfToolPolicy
+  }
 
   const e3ToolPolicy = `[E3 source-editing policy:
 - When the user asks to change EchoLink source or repository files and E3 tools are available, first read /root/echolink/MAP.md and use it as the repository map before inspecting the relevant source read-only and using e3_prepare_change with a small exact operation list.
@@ -2974,6 +3084,50 @@ router.post(
       }
     }
 
+    const audiobookshelfEntry =
+      pendingAudiobookshelfActions.get(actionId)
+
+    if (audiobookshelfEntry) {
+      const ownedConversation = db.prepare(`
+        SELECT id
+        FROM conversations
+        WHERE id = ? AND user_id = ?
+      `).get(
+        audiobookshelfEntry.conversationId,
+        req.session.userId
+      )
+
+      if (!ownedConversation) {
+        return res.status(404).json({
+          error: 'Action not found or expired'
+        })
+      }
+
+      pendingAudiobookshelfActions.delete(actionId)
+      clearTimeout(audiobookshelfEntry.timeout)
+
+      try {
+        const result = await executeAudiobookshelfTool(
+          audiobookshelfEntry.toolName,
+          audiobookshelfEntry.args
+        )
+        audiobookshelfEntry.resolve(result)
+        return res.json({
+          success: true,
+          type: 'audiobookshelf'
+        })
+      } catch (error) {
+        const message = error?.message || String(error)
+        audiobookshelfEntry.resolve(
+          `Audiobookshelf error [${error?.code || 'AUDIOBOOKSHELF_TOOL_ERROR'}]: ${message}`
+        )
+        return res.status(error?.statusCode || 502).json({
+          error: message,
+          code: error?.code || 'AUDIOBOOKSHELF_TOOL_ERROR'
+        })
+      }
+    }
+
     const entry = pendingTerminalActions.get(actionId)
     const approval = approveTerminalOperation(
       actionId,
@@ -3090,6 +3244,35 @@ router.post(
         success: true,
         denied: true,
         type: 'gmail'
+      })
+    }
+
+    const audiobookshelfEntry =
+      pendingAudiobookshelfActions.get(actionId)
+
+    if (audiobookshelfEntry) {
+      const ownedConversation = db.prepare(`
+        SELECT id
+        FROM conversations
+        WHERE id = ? AND user_id = ?
+      `).get(
+        audiobookshelfEntry.conversationId,
+        req.session.userId
+      )
+      if (!ownedConversation) {
+        return res.status(404).json({
+          error: 'Action not found or expired'
+        })
+      }
+      pendingAudiobookshelfActions.delete(actionId)
+      clearTimeout(audiobookshelfEntry.timeout)
+      audiobookshelfEntry.resolve(
+        'Audiobookshelf action denied by user'
+      )
+      return res.json({
+        success: true,
+        denied: true,
+        type: 'audiobookshelf'
       })
     }
 
@@ -3210,6 +3393,21 @@ router.get(
           }
         })
 
+    const audiobookshelfActions =
+      [...pendingAudiobookshelfActions.entries()]
+        .filter(([, entry]) =>
+          Number(entry.conversationId) === conversationId
+        )
+        .map(([actionId, entry]) => ({
+          actionId,
+          description: 'Audiobookshelf-Metadaten ändern',
+          reason:
+            'Die gezeigten Metadaten werden erst nach deiner Bestätigung geschrieben. Dateien und Ordner bleiben unverändert.',
+          command: formatAudiobookshelfPreview(entry.action),
+          type: 'audiobookshelf',
+          source: 'chat'
+        }))
+
     let e3Actions = []
 
     if (e3ToolsEnabled()) {
@@ -3252,7 +3450,8 @@ router.get(
       ...terminalActions,
       ...e3Actions,
       ...calendarActions,
-      ...gmailActions
+      ...gmailActions,
+      ...audiobookshelfActions
     ])
   }
 )

@@ -470,6 +470,13 @@ Tests: `tests/terminalOperations.test.mjs`.
 
 ## Backend — Tools (server/lib/)
 
+- **audiobookshelf.js / routes/audiobookshelf.js / audiobookshelfTools.js**: serverseitige
+  Audiobookshelf-Integration. API-Key und Upstream-URL bleiben ausserhalb des
+  Modellkontexts; native `audiobookshelf_*`-Chat-Tools lesen ueber den lokalen Adapter
+  ohne Terminal/curl. Metadaten-Writes sind auf Buchfelder und 25 Items begrenzt,
+  verlangen `expectedUpdatedAt`, zeigen eine eigene Approve/Deny-Karte und werden erst
+  nach Freigabe ueber den Adapter ausgefuehrt; dessen Stale-Preflight und Rollback bleiben
+  die Write-Sicherheitsgrenze.
 - **toolRegistry.js**: ALL_TOOLS = Search+Firecrawl+Terminal + Calendar + CalendarExtra +
   Gmail + Task. Einzige Stelle, an der Tools registriert werden.
 - **webSearch.js**: web_search (SearXNG :8080, 10s Timeout, 5 Results), firecrawl_scrape

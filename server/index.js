@@ -23,6 +23,7 @@ import shiftMultipageRoutes from './routes/shiftMultipage.js'
 import shiftSyncRoutes from './routes/shiftSync.js'
 import shiftSettingsRoutes from './routes/shiftSettings.js'
 import shiftHistoryRoutes from './routes/shiftHistory.js'
+import audiobookshelfRoutes from './routes/audiobookshelf.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const SQLiteStore = connectSqlite3(session)
@@ -117,6 +118,7 @@ app.use('/api/shift-multipage', shiftMultipageRoutes)
 app.use('/api/shift-sync', shiftSyncRoutes)
 app.use('/api/shift-settings', shiftSettingsRoutes)
 app.use('/api/shift-history', shiftHistoryRoutes)
+app.use('/api/audiobookshelf', audiobookshelfRoutes)
 
 // Unbekannte API-Routen immer als JSON beantworten.
 app.use('/api', (req, res) => {

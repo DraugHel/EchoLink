@@ -9,6 +9,10 @@ import { E3_TOOLS, e3ToolsEnabled } from './e3Tools.js'
 import { CALENDAR_TOOLS } from './calendarTools.js'
 import { CALENDAR_EXTRA_TOOLS } from './calendarExtraTools.js'
 import { GMAIL_TOOLS } from './gmailTools.js'
+import {
+  AUDIOBOOKSHELF_TOOLS,
+  audiobookshelfToolsEnabled
+} from './audiobookshelfTools.js'
 import { GITHUB_TOOLS } from './githubTools.js'
 import { githubMcpEnabled } from './githubMcpClient.js'
 import { PLAYWRIGHT_TOOLS } from './playwrightTools.js'
@@ -26,6 +30,9 @@ export const ALL_TOOLS = [
   ...CALENDAR_TOOLS,
   ...CALENDAR_EXTRA_TOOLS,
   ...GMAIL_TOOLS,
+  ...(audiobookshelfToolsEnabled()
+    ? AUDIOBOOKSHELF_TOOLS
+    : []),
   ...(githubMcpEnabled() ? GITHUB_TOOLS : []),
   ...(playwrightMcpEnabled()
     ? PLAYWRIGHT_TOOLS
