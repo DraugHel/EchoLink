@@ -167,6 +167,9 @@ import {
   detachPendingE3ActionsForRequest,
   settleE3ActionCompletion
 } from '../lib/e3ApprovalCompletion.js'
+import {
+  applyDeepSeekUserFacingPolicy
+} from '../lib/deepseekPresentation.js'
 
 const router = Router()
 const MAX_PROVIDER_STREAM_RETRIES = 3
@@ -2364,6 +2367,12 @@ Use these as background context. If these memories fully answer the request, ans
       userVisionModel,
       envVisionModel: process.env.VISION_MODEL
     })
+
+  ollamaMessages = applyDeepSeekUserFacingPolicy(
+    ollamaMessages,
+    activeModel
+  )
+
   const finalContextBudget =
     resolveContextBudget(activeModel)
 
