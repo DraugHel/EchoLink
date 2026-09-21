@@ -21,6 +21,12 @@ adapter is still the only component that talks to the configured ABS API and
 it retains the existing 25-item batch cap, stale-preview preflight and rollback
 attempt on partial upstream failure.
 
+For clear, unambiguous metadata fixes, the model calls the write-preparation
+tool as soon as the audit/plan is complete. The old-to-new Approve/Deny card is
+the user's single confirmation. The model must not ask for an additional
+natural-language "apply"/"anwenden"/"yes" before presenting that card. A
+normal-chat follow-up is reserved for genuinely ambiguous metadata choices.
+
 The previous `skills/audiobookshelf/SKILL.md` is removed because EchoLink's
 legacy skill loader reads matching skills with the terminal tool. The native
 runtime policy now carries the same workflow constraints without any shell or

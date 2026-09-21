@@ -1861,9 +1861,10 @@ Use these as background context. If these memories fully answer the request, ans
   const audiobookshelfToolPolicy = `[Audiobookshelf tool policy:
 - Use the native audiobookshelf_* tools; do not use terminal, shell or curl for Audiobookshelf work.
 - For cleanup/sort/normalize requests, inspect the complete relevant library before claiming the audit is complete. Continue paginated reads until all required items were inspected.
-- First present a normal-chat dry-run with proposed metadata changes. Do not call audiobookshelf_update_metadata during the discovery/dry-run step.
-- Call audiobookshelf_update_metadata only after the user explicitly asks to apply a previously shown plan. Do not ask for another natural-language yes; the application automatically presents an old-to-new Approve/Deny card.
-- On an apply turn, use paginated library reads to map the previously shown plan to current item IDs. Do not individually re-read every affected item just to obtain freshness tokens: audiobookshelf_update_metadata re-reads each requested item in the backend, binds the approval to its fresh updatedAt, and the apply route rechecks that value again before writing.
+- When the requested metadata changes are clear and unambiguous, call audiobookshelf_update_metadata in the same turn after the audit/plan is complete. Do not ask the user to reply "apply", "anwenden", "yes" or otherwise confirm in natural language first.
+- The audiobookshelf_update_metadata call is preparation only: EchoLink re-reads the affected items, binds fresh updatedAt values, and presents the old-to-new Approve/Deny card. That UI approval is the user's single confirmation; no metadata is written before Approve.
+- Ask a normal-chat follow-up only when the intended metadata itself is genuinely ambiguous, uncertain, or requires a user choice. Do not use a follow-up merely to confirm an otherwise complete plan.
+- Use paginated library reads to map the plan to current item IDs. Do not individually re-read every affected item just to obtain freshness tokens: audiobookshelf_update_metadata re-reads each requested item in the backend, binds the approval to its fresh updatedAt, and the apply route rechecks that value again before writing.
 - Only book metadata may be changed. Never rename, move or delete files/folders and never modify audio files, chapters or covers through this integration.
 - Do not guess uncertain bibliographic facts; verify them with normal web-search tools or leave them unchanged.]`
 

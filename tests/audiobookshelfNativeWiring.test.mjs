@@ -28,6 +28,25 @@ test('native runtime policy forbids curl/terminal for normal ABS work', () => {
   )
 })
 
+test('native Audiobookshelf policy uses the approval card as the single confirmation', () => {
+  assert.match(
+    chat,
+    /Do not ask the user to reply "apply", "anwenden", "yes" or otherwise confirm in natural language first\./
+  )
+  assert.match(
+    chat,
+    /That UI approval is the user's single confirmation; no metadata is written before Approve\./
+  )
+  assert.match(
+    chat,
+    /Do not use a follow-up merely to confirm an otherwise complete plan\./
+  )
+  assert.doesNotMatch(
+    chat,
+    /Call audiobookshelf_update_metadata only after the user explicitly asks to apply a previously shown plan\./
+  )
+})
+
 test('legacy Audiobookshelf skill is removed so skill loading cannot trigger terminal cat', () => {
   assert.equal(
     fs.existsSync(
