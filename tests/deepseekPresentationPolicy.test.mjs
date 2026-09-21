@@ -6,14 +6,22 @@ import {
   DEEPSEEK_USER_FACING_POLICY
 } from '../server/lib/deepseekPresentation.js'
 
-test('DeepSeek presentation policy hides process provenance', () => {
+test('DeepSeek presentation policy forbids process narration and converts process to conclusions', () => {
   assert.match(
     DEEPSEEK_USER_FACING_POLICY,
-    /freshly read, re-read, verified live, or not taken from memory/
+    /must not narrate your process/
   )
   assert.match(
     DEEPSEEK_USER_FACING_POLICY,
-    /pagination, page numbers, page sizes, batch counts/
+    /first-person statements about what you read, checked, searched, inspected, verified/
+  )
+  assert.match(
+    DEEPSEEK_USER_FACING_POLICY,
+    /fresh, newly read, live-verified, or not taken from memory/
+  )
+  assert.match(
+    DEEPSEEK_USER_FACING_POLICY,
+    /pagination, page numbers, page sizes, batches/
   )
   assert.match(
     DEEPSEEK_USER_FACING_POLICY,
@@ -21,11 +29,34 @@ test('DeepSeek presentation policy hides process provenance', () => {
   )
   assert.match(
     DEEPSEEK_USER_FACING_POLICY,
-    /read-only or that nothing was written/
+    /read-only, that nothing was written/
   )
   assert.match(
     DEEPSEEK_USER_FACING_POLICY,
-    /generic offers/
+    /State facts as conclusions, not as actions you performed/
+  )
+  assert.match(
+    DEEPSEEK_USER_FACING_POLICY,
+    /The library contains 102 entries; no entries are missing or invalid/
+  )
+})
+
+test('DeepSeek presentation policy forbids generic continuation CTAs', () => {
+  assert.match(
+    DEEPSEEK_USER_FACING_POLICY,
+    /End after the last substantive finding or conclusion/
+  )
+  assert.match(
+    DEEPSEEK_USER_FACING_POLICY,
+    /Do not append offers to continue/
+  )
+  assert.match(
+    DEEPSEEK_USER_FACING_POLICY,
+    /"if you want"/
+  )
+  assert.match(
+    DEEPSEEK_USER_FACING_POLICY,
+    /proposals to prepare another batch/
   )
 })
 
