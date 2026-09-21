@@ -10,7 +10,6 @@ import {
   DEEPSEEK_KEY,
   streamZai,
   streamKimi,
-  streamDeepSeek,
   splitSystemTimeNote
 } from '../providers/openai-compatible.js'
 import {
@@ -18,6 +17,9 @@ import {
   streamAnthropic
 } from '../providers/anthropic.js'
 import { streamResponses } from '../providers/openai-responses.js'
+import {
+  streamDeepSeekResponses
+} from '../providers/deepseek-responses.js'
 
 function collectorResponse() {
   return {
@@ -50,7 +52,7 @@ export function resolveConversationSummaryProvider(model) {
   const mappings = [
     ['zai/', 'zai', ZAI_KEY, streamZai],
     ['kimi/', 'kimi', KIMI_KEY, streamKimi],
-    ['deepseek/', 'deepseek', DEEPSEEK_KEY, streamDeepSeek],
+    ['deepseek/', 'deepseek', DEEPSEEK_KEY, streamDeepSeekResponses],
     ['openai/', 'openai', OPENAI_KEY, streamResponses]
   ]
 

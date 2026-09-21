@@ -107,11 +107,13 @@ import {
   normalizeZaiModels,
   streamZai,
   streamKimi,
-  streamDeepSeek,
   splitSystemTimeNote
 } from '../providers/openai-compatible.js'
 import { ANTHROPIC_KEY, streamAnthropic } from '../providers/anthropic.js'
 import { streamResponses } from '../providers/openai-responses.js'
+import {
+  streamDeepSeekResponses
+} from '../providers/deepseek-responses.js'
 import {
   attachChatResponse,
   assertAbortSignalActive,
@@ -2362,15 +2364,6 @@ Use these as background context. If these memories fully answer the request, ans
       userVisionModel,
       envVisionModel: process.env.VISION_MODEL
     })
-
-  if (
-    activeModel.startsWith('deepseek/') &&
-    ollamaMessages[0]?.role === 'system'
-  ) {
-    ollamaMessages[0].content +=
-      '\n\n[DeepSeek presentation policy: During tool-driven work, do not narrate progress in normal assistant content. Keep tool-call rounds concise and preferably content-free. After all tools are finished, produce one polished Markdown answer. Use short headings, bullets or tables when they improve readability. Summarize results instead of replaying raw tool output.]'
-  }
-
   const finalContextBudget =
     resolveContextBudget(activeModel)
 
@@ -2627,10 +2620,10 @@ Use these as background context. If these memories fully answer the request, ans
       if (activeModel.startsWith('claude')) streamFn = streamAnthropic
       else if (activeModel.startsWith('zai/')) { streamFn = streamZai; providerModel = activeModel.slice(4) }
       else if (activeModel.startsWith('kimi/')) { streamFn = streamKimi; providerModel = activeModel.slice(5) }
-      else if (activeModel.startsWith('deepseek/')) { streamFn = streamDeepSeek; providerModel = activeModel.slice(9) }
+      else if (activeModel.startsWith('deepseek/')) { streamFn = streamDeepSeekResponses; providerModel = activeModel.slice(9) }
       else if (activeModel.startsWith('llamacpp/')) { streamFn = streamLlamaCpp; providerModel = activeModel.slice(9) }
       else if (activeModel.startsWith('openai/')) { streamFn = streamResponses; providerModel = activeModel.slice(7) }
-      if (streamFn === streamZai || streamFn === streamKimi || streamFn === streamDeepSeek || streamFn === streamLlamaCpp || streamFn === streamResponses) {
+      if (streamFn === streamZai || streamFn === streamKimi || streamFn === streamDeepSeekResponses || streamFn === streamLlamaCpp || streamFn === streamResponses) {
         workingMessages = splitSystemTimeNote(workingMessages)
       }
       assertChatRequestActive(activeRequest)
@@ -2699,7 +2692,7 @@ Use these as background context. If these memories fully answer the request, ans
           tool_calls: toolCalls,
           // Responses-API: Items (inkl. Reasoning) fuer die naechste Iteration mitnehmen
           ...(rawOutput ? { _raw: rawOutput } : {}),
-          ...( (streamFn === streamKimi || streamFn === streamDeepSeek) && fullThinking
+          ...(streamFn === streamKimi && fullThinking
             ? { reasoning_content: fullThinking }
             : {})
         })

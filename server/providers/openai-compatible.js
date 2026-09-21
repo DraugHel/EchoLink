@@ -119,8 +119,6 @@ export function splitSystemTimeNote(messages) {
 // Gleiches Interface wie streamOllama: { fullContent, fullThinking, toolCalls, tokenUsage }
 export async function streamOpenAICompatible(providerName, endpoint, key, model, messages, options, res, abortSignal, extra = {}, requestOptions = {}) {
   if (!key) throw new Error(`API-Key fuer ${providerName} fehlt in der .env`)
-  const deferContentUntilToolOutcome =
-    requestOptions.deferContentUntilToolOutcome === true
   const body = {
     model, stream: true,
     messages: toOpenAI(messages),
@@ -176,9 +174,7 @@ export async function streamOpenAICompatible(providerName, endpoint, key, model,
       }
       if (delta.content) {
         fullContent += delta.content
-        if (!deferContentUntilToolOutcome) {
-          res.write(`data: ${JSON.stringify({ token: delta.content })}\n\n`)
-        }
+        res.write(`data: ${JSON.stringify({ token: delta.content })}\n\n`)
       }
       if (delta.tool_calls) {
         for (const tc of delta.tool_calls) {
@@ -197,18 +193,6 @@ export async function streamOpenAICompatible(providerName, endpoint, key, model,
     try { args = t.args ? JSON.parse(t.args) : {} } catch {}
     return { id: t.id, function: { name: t.name, arguments: args } }
   })
-
-  // DeepSeek often emits user-facing prose before deciding to call a tool.
-  // When deferred, suppress that tool-round narration entirely. A tool-free
-  // round is the real final answer and is emitted once the outcome is known.
-  if (
-    deferContentUntilToolOutcome &&
-    toolCalls.length === 0 &&
-    fullContent
-  ) {
-    res.write(`data: ${JSON.stringify({ token: fullContent })}\n\n`)
-  }
-
   const tokenUsage =
     normalizeOpenAICompatibleTokenUsage(usage)
 
@@ -337,10 +321,7 @@ export const streamDeepSeek = (model, messages, options, res, abortSignal) =>
     options?.reasoningEffort === 'off'
       ? { thinking: { type: 'disabled' } }
       : { thinking: { type: 'enabled' } },
-    {
-      allowSampling: false,
-      deferContentUntilToolOutcome: true
-    }
+    { allowSampling: false }
   )
 
 export const OPENAI_KEY = process.env.OPENAI_API_KEY || ''

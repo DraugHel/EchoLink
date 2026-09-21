@@ -24,7 +24,7 @@ Läuft unter PM2 als `echolink` auf 127.0.0.1:3000 (siehe ecosystem.config.cjs).
 │ Express server/index.js :3000                              │
 │  ├─ routes/* (REST + SSE-Streaming)                        │
 │  ├─ lib/* (Tools, Scheduler, Memory, Push, AgentRunner)    │
-│  ├─ providers/* (Ollama, Anthropic, Z.ai, Kimi, OpenAI)    │
+│  ├─ providers/* (Ollama, Anthropic, Z.ai, Kimi, DeepSeek, OpenAI) │
 │  ├─ connectors/google/* (Calendar, Gmail, OAuth)           │
 │  └─ db.js → data/echolink.db (+ data/sessions.db)          │
 ├─ worker.js (separater PM2-Prozess: Tasks + Watchtower)    │
