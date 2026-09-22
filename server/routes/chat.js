@@ -3725,7 +3725,7 @@ export async function loadModelList() {
         return (data.data || [])
           .map(model => model.id)
           .filter(id =>
-            /^(gpt-5|gpt-4|o[0-9])/.test(id) &&
+            /^(gpt-[4-9]|o[0-9])/.test(id) &&
             !/audio|realtime|image|transcribe|tts|search|embedding/.test(id)
           )
           .sort()

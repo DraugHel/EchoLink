@@ -21,7 +21,7 @@ export function supportsReasoningConfig(model) {
 }
 
 export function supportsPromptCacheConfig(model) {
-  return /^gpt-5\.6(?:-|$)/.test(String(model || ''))
+  return /^gpt-(?:5\.6|6)(?:-|$)/.test(String(model || ''))
 }
 
 const OPENAI_HISTORY_SEARCH_TOOL = 'search_chat_history'

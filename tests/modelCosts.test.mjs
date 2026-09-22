@@ -89,6 +89,34 @@ test('OpenAI cache reads and writes use separate rates', () => {
   )
 })
 
+test('GPT-6 pricing covers Astra, Sol and Luna', () => {
+  const cases = [
+    ['gpt-6-astra', 10.00, 1.00, 12.50, 50.00],
+    ['gpt-6-sol', 2.00, 0.20, 2.50, 10.00],
+    ['gpt-6-luna', 0.10, 0.01, 0.125, 0.50]
+  ]
+
+  for (const [
+    id,
+    input,
+    cached,
+    cacheWrite,
+    output
+  ] of cases) {
+    const price = resolveModelPricing(`openai/${id}`)
+
+    assert.ok(price)
+    assert.equal(price.inputPerMillion, input)
+    assert.equal(price.cachedPerMillion, cached)
+    assert.equal(price.cacheWritePerMillion, cacheWrite)
+    assert.equal(price.outputPerMillion, output)
+    assert.equal(
+      price.key,
+      `openai:${id}:2026-09-22`
+    )
+  }
+})
+
 test('DeepSeek cache misses are billed as uncached input, not premium writes', () => {
   const result = estimateModelUsageCost(
     'deepseek/deepseek-v4-flash',

@@ -80,6 +80,39 @@ function pricing({
 }
 
 function openAiPricing(id) {
+  if (/^gpt-6-astra(?:$|-)/i.test(id)) {
+    return pricing({
+      key: 'openai:gpt-6-astra:2026-09-22',
+      input: 10.00,
+      cached: 1.00,
+      cacheWrite: 12.50,
+      output: 50.00,
+      source: 'OpenAI GPT-6 API pricing'
+    })
+  }
+
+  if (/^gpt-6-sol(?:$|-)/i.test(id)) {
+    return pricing({
+      key: 'openai:gpt-6-sol:2026-09-22',
+      input: 2.00,
+      cached: 0.20,
+      cacheWrite: 2.50,
+      output: 10.00,
+      source: 'OpenAI GPT-6 API pricing'
+    })
+  }
+
+  if (/^gpt-6-luna(?:$|-)/i.test(id)) {
+    return pricing({
+      key: 'openai:gpt-6-luna:2026-09-22',
+      input: 0.10,
+      cached: 0.01,
+      cacheWrite: 0.125,
+      output: 0.50,
+      source: 'OpenAI GPT-6 API pricing'
+    })
+  }
+
   if (/^gpt-5\.6-luna(?:$|-)/i.test(id)) {
     return pricing({
       key: 'openai:gpt-5.6-luna:2026-07-30',

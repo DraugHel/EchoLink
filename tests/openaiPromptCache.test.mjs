@@ -124,7 +124,7 @@ test('Andere Modelle erhalten keine GPT-5.6-Breakpoints', () => {
   )
 })
 
-test('GPT-5.6 erhält einen stabilen, promptabhängigen Cache-Key', () => {
+test('GPT-5.6 und GPT-6 unterstützen EchoLinks expliziten Prompt-Cache', () => {
   const tools = [{
     type: 'function',
     name: 'calendar_list_events',
@@ -161,6 +161,18 @@ test('GPT-5.6 erhält einen stabilen, promptabhängigen Cache-Key', () => {
   )
   assert.equal(
     supportsPromptCacheConfig('gpt-5.6-mini'),
+    true
+  )
+  assert.equal(
+    supportsPromptCacheConfig('gpt-6-astra'),
+    true
+  )
+  assert.equal(
+    supportsPromptCacheConfig('gpt-6-sol'),
+    true
+  )
+  assert.equal(
+    supportsPromptCacheConfig('gpt-6-luna'),
     true
   )
   assert.equal(
@@ -382,10 +394,11 @@ test('Chat und UI verdrahten Cache-Telemetrie', async () => {
   assert.match(chatSource, /mergeTokenUsage/)
   assert.match(chatSource, /cache_write_tokens/)
   assert.match(chatSource, /prompt_cache/)
+  assert.match(chatSource, /gpt-\[4-9\]/)
 
   assert.match(pageSource, /\/api\/chat\/stats/)
   assert.match(messageSource, /Prompt-Cache:/)
-  assert.match(statusSource, /GPT-5\.6 Prompt-Cache/)
+  assert.match(statusSource, /OpenAI Prompt-Cache/)
 })
 
 test('Responses behandelt incomplete und fehlende Terminalevents explizit', async () => {

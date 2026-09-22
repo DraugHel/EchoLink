@@ -565,7 +565,7 @@ export default function SystemStatusPanel({
           </div>
 
           <div style={styles.sectionTitle}>
-            GPT-5.6 Prompt-Cache
+            OpenAI Prompt-Cache
           </div>
 
           {!cacheObserved ? (
@@ -575,7 +575,7 @@ export default function SystemStatusPanel({
                 marginBottom: 22
               }}
             >
-              Noch keine GPT-5.6 Cache-Daten.
+              Noch keine OpenAI Cache-Daten.
               Nach dem nächsten passenden Chat erscheinen
               hier Reads, Writes und Trefferquoten.
             </div>
