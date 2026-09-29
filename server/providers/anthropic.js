@@ -1,5 +1,10 @@
 import { ALL_TOOLS } from '../lib/toolRegistry.js'
 import { imgMediaType } from '../lib/images.js'
+import {
+  fetchProviderStream,
+  markProviderError,
+  streamFailure
+} from './streamErrors.js'
 
 // ===================== Anthropic API Provider =====================
 const ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages'
@@ -151,7 +156,7 @@ export async function streamAnthropic(model, messages, options, res, abortSignal
       ? { thinking: { type: 'adaptive', display: 'summarized' }, output_config: { effort: RE } }
       : (options?.temperature != null ? { temperature: Math.min(options.temperature, 1) } : {}))
   }
-  const r = await fetch(ANTHROPIC_URL, {
+  const r = await fetchProviderStream(ANTHROPIC_URL, {
     method: 'POST',
     headers: {
       'content-type': 'application/json',
@@ -160,11 +165,7 @@ export async function streamAnthropic(model, messages, options, res, abortSignal
     },
     body: JSON.stringify(body),
     signal: abortSignal
-  })
-  if (!r.ok) {
-    const errBody = await r.text()
-    throw new Error(`Anthropic ${r.status}: ${errBody.slice(0, 200)}`)
-  }
+  }, 'Anthropic')
 
   let fullContent = '', fullThinking = ''
   const toolBlocks = {}
@@ -177,6 +178,7 @@ export async function streamAnthropic(model, messages, options, res, abortSignal
   let buf = ''
   const decoder = new TextDecoder()
 
+  try {
   for await (const chunk of r.body) {
     buf += decoder.decode(chunk, { stream: true })
     const lines = buf.split('\n')
@@ -185,7 +187,12 @@ export async function streamAnthropic(model, messages, options, res, abortSignal
       if (!line.startsWith('data: ')) continue
       let ev
       try { ev = JSON.parse(line.slice(6)) } catch { continue }
-      if (ev.type === 'error') throw new Error(ev.error?.message || 'Anthropic stream error')
+      if (ev.type === 'error') {
+        throw markProviderError(
+          new Error(ev.error?.message || 'Anthropic stream error'),
+          { retryable: ['overloaded_error', 'api_error'].includes(ev.error?.type) }
+        )
+      }
       if (ev.type === 'message_stop') {
         streamCompleted = true
       }
@@ -237,6 +244,9 @@ export async function streamAnthropic(model, messages, options, res, abortSignal
         outputTokens = ev.usage.output_tokens
       }
     }
+  }
+  } catch (error) {
+    throw streamFailure(error, fullContent || fullThinking)
   }
 
   const toolCalls = Object.values(toolBlocks).map(t => {

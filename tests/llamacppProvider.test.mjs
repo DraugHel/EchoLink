@@ -185,11 +185,7 @@ test(
       )
     ])
 
-    assert.match(
-      chat,
-      /activeModel\.startsWith\(['"]llamacpp\/['"]\)/
-    )
-    assert.match(chat, /streamFn\s*=\s*streamLlamaCpp/)
+    assert.match(chat, /resolveProvider\(activeModel\)/)
     assert.match(chat, /`\$\{LLAMACPP_URL\}\/models`/)
     assert.match(chat, /provider:\s*['"]llamacpp['"]/)
     assert.match(
@@ -197,11 +193,7 @@ test(
       /CHAT_CONTEXT_LLAMACPP_INPUT_TOKENS/
     )
 
-    assert.match(
-      agent,
-      /model\.startsWith\(['"]llamacpp\/['"]\)/
-    )
-    assert.match(agent, /streamFn:\s*streamLlamaCpp/)
+    assert.match(agent, /resolveProvider\(model\)/)
 
     assert.match(
       memory,

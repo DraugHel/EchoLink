@@ -280,63 +280,6 @@ function parseSseEvent(rawEvent) {
   }
 }
 
-function formatDuration(seconds) {
-  if (
-    seconds == null ||
-    !Number.isFinite(Number(seconds))
-  ) {
-    return '–'
-  }
-
-  const value = Math.max(
-    0,
-    Math.floor(Number(seconds))
-  )
-
-  const days = Math.floor(value / 86400)
-  const hours = Math.floor(
-    value % 86400 / 3600
-  )
-  const minutes = Math.floor(
-    value % 3600 / 60
-  )
-
-  if (days > 0) {
-    return `${days}d ${hours}h`
-  }
-
-  if (hours > 0) {
-    return `${hours}h ${minutes}m`
-  }
-
-  return `${minutes}m`
-}
-
-function formatBackupAge(backup) {
-  if (!backup?.found) return 'fehlt'
-  return `vor ${formatDuration(backup.ageSeconds)}`
-}
-
-function metricColor(value, warning, critical) {
-  if (
-    value == null ||
-    !Number.isFinite(Number(value))
-  ) {
-    return 'var(--text3)'
-  }
-
-  if (Number(value) >= critical) {
-    return 'var(--danger)'
-  }
-
-  if (Number(value) >= warning) {
-    return '#e7b955'
-  }
-
-  return 'var(--text2)'
-}
-
-
 function formatLunaToolEvent(event) {
   const rawName = String(event?.tool || '').trim()
 
@@ -1313,6 +1256,7 @@ export default function Chat({ user, onLogout }) {
     setStreaming(true)
 
     let assistantContent = ''
+    let assistantThink = ''
     let preserveLocalConclusion = false
     let continuationCheckpoints = Array.isArray(resumeCheckpoints)
       ? [...resumeCheckpoints]
@@ -1354,6 +1298,7 @@ export default function Chat({ user, onLogout }) {
       }
 
       if (isRetry) {
+        assistantThink = ''
         setMessages(prev => prev.map(message =>
           message.id === assistantId
             ? {
@@ -1422,6 +1367,12 @@ export default function Chat({ user, onLogout }) {
           assistantContent += json.token
           setMessages(prev => prev.map(m =>
             m.id === assistantId ? { ...m, content: assistantContent, toolStatus: null } : m
+          ))
+        }
+        if (json.think) {
+          assistantThink += json.think
+          setMessages(prev => prev.map(m =>
+            m.id === assistantId ? { ...m, think: assistantThink } : m
           ))
         }
         if (json.usage) {
@@ -2773,64 +2724,6 @@ const MoreIcon = () => (
     <circle cx="5" cy="12" r="1.8" />
     <circle cx="12" cy="12" r="1.8" />
     <circle cx="19" cy="12" r="1.8" />
-  </svg>
-)
-
-const CalendarImportIcon = () => (
-  <svg
-    width="17"
-    height="17"
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="2"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-  >
-    <rect x="3" y="4" width="18" height="17" rx="2" />
-    <path d="M8 2v4M16 2v4M3 9h18" />
-    <path d="M12 13v5M9.5 15.5 12 18l2.5-2.5" />
-  </svg>
-)
-
-const ClockIcon = () => (
-  <svg
-    width="20"
-    height="20"
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="1.8"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-  >
-    <circle cx="12" cy="12" r="8.5" />
-    <path d="M12 7.5v5l3.5 2" />
-    <path d="M7 3.8 4.5 6.3M17 3.8l2.5 2.5" />
-  </svg>
-)
-
-const BrainIcon = () => (
-  <svg
-    width="20"
-    height="20"
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="1.8"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-  >
-    <path d="M9.5 4.5A3 3 0 0 0 4 6v1.2A3.5 3.5 0 0 0 3 13a3.5 3.5 0 0 0 4 5.8A3 3 0 0 0 12 17V7.5a3 3 0 0 0-2.5-3z" />
-    <path d="M14.5 4.5A3 3 0 0 1 20 6v1.2a3.5 3.5 0 0 1 1 5.8 3.5 3.5 0 0 1-4 5.8A3 3 0 0 1 12 17V7.5a3 3 0 0 1 2.5-3z" />
-    <path d="M8 9h1.5M14.5 9H16M8 14h1.5M14.5 14H16" />
-  </svg>
-)
-
-const GearIcon = () => (
-  <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-    <circle cx="12" cy="12" r="3"/>
-    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
   </svg>
 )
 

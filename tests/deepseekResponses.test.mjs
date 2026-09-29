@@ -363,11 +363,16 @@ test('EchoLink routes DeepSeek chat, scheduled agents and summaries through Resp
     'utf8'
   )
 
+  const providers = fs.readFileSync(
+    new URL('../server/providers/index.js', import.meta.url),
+    'utf8'
+  )
+
+  assert.match(providers, /streamDeepSeekResponses/)
+  assert.match(providers, /['"]deepseek\/['"]/)
+
   for (const source of [chat, agent, summary]) {
-    assert.match(
-      source,
-      /streamDeepSeekResponses/
-    )
+    assert.match(source, /resolveProvider/)
   }
 
   assert.doesNotMatch(

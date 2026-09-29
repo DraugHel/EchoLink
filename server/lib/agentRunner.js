@@ -21,18 +21,10 @@ import {
 import {
   playwrightMcpEnabled
 } from './playwrightMcpClient.js'
-import { streamOllama } from '../providers/ollama.js'
 import {
-  splitSystemTimeNote,
-  streamZai,
-  streamKimi
-} from '../providers/openai-compatible.js'
-import { streamAnthropic } from '../providers/anthropic.js'
-import { streamResponses } from '../providers/openai-responses.js'
-import {
-  streamDeepSeekResponses
-} from '../providers/deepseek-responses.js'
-import { streamLlamaCpp } from '../providers/llamacpp.js'
+  prepareProviderMessages,
+  resolveProvider
+} from '../providers/index.js'
 import {
   scheduledAgentTimeoutMs,
   scheduledAgentToolCallLimit,
@@ -106,55 +98,6 @@ function cleanFinalContent(content) {
   return String(content || '')
     .replace(/<think>[\s\S]*?<\/think>/gi, '')
     .trim()
-}
-
-function providerFor(model) {
-  if (model.startsWith('claude')) {
-    return {
-      streamFn: streamAnthropic,
-      providerModel: model
-    }
-  }
-
-  if (model.startsWith('zai/')) {
-    return {
-      streamFn: streamZai,
-      providerModel: model.slice(4)
-    }
-  }
-
-  if (model.startsWith('kimi/')) {
-    return {
-      streamFn: streamKimi,
-      providerModel: model.slice(5)
-    }
-  }
-
-  if (model.startsWith('deepseek/')) {
-    return {
-      streamFn: streamDeepSeekResponses,
-      providerModel: model.slice(9)
-    }
-  }
-
-  if (model.startsWith('openai/')) {
-    return {
-      streamFn: streamResponses,
-      providerModel: model.slice(7)
-    }
-  }
-
-  if (model.startsWith('llamacpp/')) {
-    return {
-      streamFn: streamLlamaCpp,
-      providerModel: model.slice(9)
-    }
-  }
-
-  return {
-    streamFn: streamOllama,
-    providerModel: model
-  }
 }
 
 function systemPrompt(task) {
@@ -296,10 +239,11 @@ async function callModel({
   tools,
   controller
 }) {
+  const provider = resolveProvider(model)
   const {
     streamFn,
     providerModel
-  } = providerFor(model)
+  } = provider
 
   const options = {
     temperature: conversation.temperature,
@@ -311,13 +255,7 @@ async function callModel({
   }
 
   const providerMessages =
-    streamFn === streamZai ||
-    streamFn === streamKimi ||
-    streamFn === streamDeepSeekResponses ||
-    streamFn === streamLlamaCpp ||
-    streamFn === streamResponses
-      ? splitSystemTimeNote(workingMessages)
-      : workingMessages
+    prepareProviderMessages(provider, workingMessages)
 
   return streamFn(
     providerModel,

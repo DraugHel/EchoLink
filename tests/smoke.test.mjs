@@ -220,20 +220,22 @@ test('OpenAI verwendet ausschließlich die Responses API', async () => {
     /\/v1\/chat\/completions/
   )
 
+  const providerIndexSource = await readFile(
+    path.join(root, 'server/providers/index.js'),
+    'utf8'
+  )
+
   assert.match(
-    chatSource,
+    providerIndexSource,
     /import\s*\{\s*streamResponses\s*\}[\s\S]*openai-responses\.js/
   )
 
   assert.match(
-    chatSource,
-    /activeModel\.startsWith\(['"]openai\/['"]\)/
+    providerIndexSource,
+    /prefix:\s*['"]openai\/['"][\s\S]*streamFn:\s*streamResponses/
   )
 
-  assert.match(
-    chatSource,
-    /streamFn\s*=\s*streamResponses/
-  )
+  assert.match(chatSource, /resolveProvider\(activeModel\)/)
 
   assert.doesNotMatch(
     chatSource,

@@ -3,8 +3,6 @@ import {
   useMemo,
   useState
 } from 'react'
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
 import api from '../lib/api.js'
 
 const TYPE_OPTIONS = [
@@ -319,9 +317,6 @@ export default function MemoryPanel({
   streaming,
   onClose
 }) {
-  const [tab, setTab] =
-    useState('items')
-
   const [items, setItems] =
     useState([])
 
@@ -352,29 +347,8 @@ export default function MemoryPanel({
   const [actionId, setActionId] =
     useState(null)
 
-  const [memory, setMemory] =
-    useState('')
-
-  const [legacyLoading, setLegacyLoading] =
-    useState(true)
-
-  const [legacyUpdating, setLegacyUpdating] =
+  const [chatUpdating, setChatUpdating] =
     useState(false)
-
-  const [legacyEditing, setLegacyEditing] =
-    useState(false)
-
-  const [legacyDraft, setLegacyDraft] =
-    useState('')
-
-  const [legacySaving, setLegacySaving] =
-    useState(false)
-
-  const [legacyDeleting, setLegacyDeleting] =
-    useState(false)
-
-  const [legacyError, setLegacyError] =
-    useState('')
 
   async function loadItems() {
     setItemsLoading(true)
@@ -401,36 +375,6 @@ export default function MemoryPanel({
       setItemsLoading(false)
     }
   }
-
-  async function loadLegacy() {
-    setLegacyLoading(true)
-    setLegacyError('')
-
-    try {
-      const data =
-        await api.get('/api/memory')
-
-      const nextMemory =
-        data?.memory || ''
-
-      setMemory(nextMemory)
-
-      if (!legacyEditing) {
-        setLegacyDraft(nextMemory)
-      }
-    } catch (error) {
-      setLegacyError(
-        error?.message ||
-        'Legacy-Memory konnte nicht geladen werden.'
-      )
-    } finally {
-      setLegacyLoading(false)
-    }
-  }
-
-  useEffect(() => {
-    loadLegacy()
-  }, [])
 
   useEffect(() => {
     loadItems()
@@ -624,90 +568,27 @@ export default function MemoryPanel({
     }
   }
 
-  async function updateLegacy() {
+  async function updateFromChat() {
     if (!conversationId || streaming) {
       return
     }
 
-    setLegacyUpdating(true)
-    setLegacyError('')
+    setChatUpdating(true)
+    setItemError('')
 
     try {
-      const data = await api.post(
+      await api.post(
         `/api/memory/update/${conversationId}`,
         {}
       )
-
-      if (
-        typeof data?.memory ===
-        'string'
-      ) {
-        setMemory(data.memory)
-        setLegacyDraft(data.memory)
-      } else {
-        await loadLegacy()
-      }
+      await loadItems()
     } catch (error) {
-      setLegacyError(
+      setItemError(
         error?.message ||
-        'Legacy-Memory konnte nicht aktualisiert werden.'
+        'Memories konnten nicht aus dem Chat aktualisiert werden.'
       )
     } finally {
-      setLegacyUpdating(false)
-    }
-  }
-
-  async function saveLegacy() {
-    setLegacySaving(true)
-    setLegacyError('')
-
-    try {
-      const data = await api.post(
-        '/api/memory/save',
-        {
-          content: legacyDraft
-        }
-      )
-
-      setMemory(
-        typeof data?.memory === 'string'
-          ? data.memory
-          : legacyDraft
-      )
-
-      setLegacyEditing(false)
-    } catch (error) {
-      setLegacyError(
-        error?.message ||
-        'Legacy-Memory konnte nicht gespeichert werden.'
-      )
-    } finally {
-      setLegacySaving(false)
-    }
-  }
-
-  async function clearLegacy() {
-    const confirmed =
-      window.confirm(
-        'Das gesamte Legacy-Memory wirklich löschen?'
-      )
-
-    if (!confirmed) return
-
-    setLegacyDeleting(true)
-
-    try {
-      await api.delete('/api/memory')
-      setMemory('')
-      setLegacyDraft('')
-      setLegacyEditing(false)
-    } catch (error) {
-      setLegacyError(
-        error?.message ||
-        'Legacy-Memory konnte nicht gelöscht werden.'
-      )
-    } finally {
-      setLegacyDeleting(false)
+      setChatUpdating(false)
     }
   }
 
@@ -795,36 +676,6 @@ export default function MemoryPanel({
         </header>
 
         <div
-          className="echolink-memory-tabs"
-          style={{
-            display: 'flex',
-            gap: 6,
-            padding: '10px 15px',
-            borderBottom:
-              '1px solid var(--border)'
-          }}
-        >
-          {[
-            ['items', 'Einzel-Memories'],
-            ['legacy', 'Legacy-Markdown']
-          ].map(([key, label]) => (
-            <button
-              key={key}
-              type="button"
-              onClick={() => setTab(key)}
-              style={{
-                ...buttonStyle({
-                  accent: tab === key
-                }),
-                flex: 1
-              }}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-
-        <div
           className="echolink-memory-body"
           style={{
             flex: 1,
@@ -833,8 +684,7 @@ export default function MemoryPanel({
             padding: 15
           }}
         >
-          {tab === 'items' ? (
-            <>
+          <>
               <div
                 className="echolink-memory-toolbar"
                 style={{
@@ -896,6 +746,26 @@ export default function MemoryPanel({
                   })}
                 >
                   Neu laden
+                </button>
+
+                <button
+                  type="button"
+                  onClick={updateFromChat}
+                  disabled={
+                    chatUpdating ||
+                    streaming ||
+                    !conversationId
+                  }
+                  style={buttonStyle({
+                    disabled:
+                      chatUpdating ||
+                      streaming ||
+                      !conversationId
+                  })}
+                >
+                  {chatUpdating
+                    ? 'Aktualisiere …'
+                    : 'Aus Chat aktualisieren'}
                 </button>
 
                 <button
@@ -1281,184 +1151,7 @@ export default function MemoryPanel({
                   {itemError}
                 </div>
               )}
-            </>
-          ) : (
-            <>
-              <div
-                style={{
-                  display: 'flex',
-                  flexWrap: 'wrap',
-                  gap: 8,
-                  marginBottom: 13
-                }}
-              >
-                {!legacyEditing ? (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setLegacyDraft(memory)
-                      setLegacyEditing(true)
-                    }}
-                    disabled={legacyLoading}
-                    style={buttonStyle({
-                      disabled: legacyLoading
-                    })}
-                  >
-                    Bearbeiten
-                  </button>
-                ) : (
-                  <>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setLegacyDraft(memory)
-                        setLegacyEditing(false)
-                      }}
-                      disabled={legacySaving}
-                      style={buttonStyle({
-                        disabled: legacySaving
-                      })}
-                    >
-                      Abbrechen
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={saveLegacy}
-                      disabled={legacySaving}
-                      style={buttonStyle({
-                        accent: true,
-                        disabled: legacySaving
-                      })}
-                    >
-                      {legacySaving
-                        ? 'Speichere …'
-                        : 'Speichern'}
-                    </button>
-                  </>
-                )}
-
-                <button
-                  type="button"
-                  onClick={loadLegacy}
-                  disabled={legacyLoading}
-                  style={buttonStyle({
-                    disabled: legacyLoading
-                  })}
-                >
-                  Neu laden
-                </button>
-
-                <button
-                  type="button"
-                  onClick={updateLegacy}
-                  disabled={
-                    legacyLoading ||
-                    legacyUpdating ||
-                    streaming
-                  }
-                  style={buttonStyle({
-                    accent: true,
-                    disabled:
-                      legacyLoading ||
-                      legacyUpdating ||
-                      streaming
-                  })}
-                >
-                  {legacyUpdating
-                    ? 'Aktualisiere …'
-                    : 'Aus Chat aktualisieren'}
-                </button>
-
-                <button
-                  type="button"
-                  onClick={clearLegacy}
-                  disabled={legacyDeleting}
-                  style={{
-                    ...buttonStyle({
-                      danger: true,
-                      disabled:
-                        legacyDeleting
-                    }),
-                    marginLeft: 'auto'
-                  }}
-                >
-                  {legacyDeleting
-                    ? 'Lösche …'
-                    : 'Legacy löschen'}
-                </button>
-              </div>
-
-              {legacyLoading ? (
-                <div
-                  style={{
-                    color: 'var(--text3)'
-                  }}
-                >
-                  Legacy-Memory wird geladen …
-                </div>
-              ) : legacyEditing ? (
-                <textarea
-                  autoFocus
-                  value={legacyDraft}
-                  onChange={event =>
-                    setLegacyDraft(
-                      event.target.value
-                    )
-                  }
-                  rows={18}
-                  style={{
-                    ...fieldStyle(),
-                    resize: 'vertical',
-                    lineHeight: 1.6
-                  }}
-                />
-              ) : memory ? (
-                <div
-                  style={{
-                    color: 'var(--text1)',
-                    fontSize: 13,
-                    lineHeight: 1.6,
-                    overflowWrap: 'anywhere'
-                  }}
-                >
-                  <ReactMarkdown
-                    remarkPlugins={[
-                      remarkGfm
-                    ]}
-                  >
-                    {memory}
-                  </ReactMarkdown>
-                </div>
-              ) : (
-                <div
-                  style={{
-                    padding: 30,
-                    textAlign: 'center',
-                    color: 'var(--text3)'
-                  }}
-                >
-                  Kein Legacy-Memory vorhanden.
-                </div>
-              )}
-
-              {legacyError && (
-                <div
-                  style={{
-                    marginTop: 13,
-                    padding: 10,
-                    border:
-                      '1px solid var(--danger)',
-                    borderRadius: 8,
-                    color: 'var(--danger)',
-                    fontSize: 12
-                  }}
-                >
-                  {legacyError}
-                </div>
-              )}
-            </>
-          )}
+          </>
         </div>
       </section>
     </div>

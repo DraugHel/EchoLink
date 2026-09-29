@@ -92,11 +92,10 @@ import { chatToolIterationLimit } from '../lib/toolLimits.js'
 import {
   resolveActiveModel
 } from '../lib/visionModels.js'
-import { OLLAMA_URL, streamOllama } from '../providers/ollama.js'
+import { OLLAMA_URL } from '../providers/ollama.js'
 import {
   LLAMACPP_API_KEY,
-  LLAMACPP_URL,
-  streamLlamaCpp
+  LLAMACPP_URL
 } from '../providers/llamacpp.js'
 import {
   OPENAI_KEY,
@@ -104,16 +103,14 @@ import {
   ZAI_MODELS_URL,
   KIMI_KEY,
   DEEPSEEK_KEY,
-  normalizeZaiModels,
-  streamZai,
-  streamKimi,
-  splitSystemTimeNote
+  normalizeZaiModels
 } from '../providers/openai-compatible.js'
-import { ANTHROPIC_KEY, streamAnthropic } from '../providers/anthropic.js'
-import { streamResponses } from '../providers/openai-responses.js'
+import { ANTHROPIC_KEY } from '../providers/anthropic.js'
 import {
-  streamDeepSeekResponses
-} from '../providers/deepseek-responses.js'
+  incompleteStreamError,
+  prepareProviderMessages,
+  resolveProvider
+} from '../providers/index.js'
 import {
   attachChatResponse,
   assertAbortSignalActive,
@@ -1433,7 +1430,7 @@ router.post(
   }
 )
 
-router.post('/:conversationId', requireAuth, async (req, res) => {
+router.post('/:conversationId(\\d+)', requireAuth, async (req, res) => {
   const validationError = validateChatBody(req.body)
   if (validationError) {
     return res.status(400).json({ error: validationError })
@@ -2625,17 +2622,12 @@ Use these as background context. If these memories fully answer the request, ans
     while (iterations < MAX_TOOL_ITERATIONS) {
       iterations++
 
-      let streamFn = streamOllama
-      let providerModel = activeModel
-      if (activeModel.startsWith('claude')) streamFn = streamAnthropic
-      else if (activeModel.startsWith('zai/')) { streamFn = streamZai; providerModel = activeModel.slice(4) }
-      else if (activeModel.startsWith('kimi/')) { streamFn = streamKimi; providerModel = activeModel.slice(5) }
-      else if (activeModel.startsWith('deepseek/')) { streamFn = streamDeepSeekResponses; providerModel = activeModel.slice(9) }
-      else if (activeModel.startsWith('llamacpp/')) { streamFn = streamLlamaCpp; providerModel = activeModel.slice(9) }
-      else if (activeModel.startsWith('openai/')) { streamFn = streamResponses; providerModel = activeModel.slice(7) }
-      if (streamFn === streamZai || streamFn === streamKimi || streamFn === streamDeepSeekResponses || streamFn === streamLlamaCpp || streamFn === streamResponses) {
-        workingMessages = splitSystemTimeNote(workingMessages)
-      }
+      const modelProvider = resolveProvider(activeModel)
+      const { streamFn, providerModel } = modelProvider
+      workingMessages = prepareProviderMessages(
+        modelProvider,
+        workingMessages
+      )
       assertChatRequestActive(activeRequest)
       let streamResult
       let providerRetryAttempt = 0
@@ -2648,6 +2640,13 @@ Use these as background context. If these memories fully answer the request, ans
             chatStream,
             abortController.signal
           )
+          // Ein Stream ohne Abschluss-Event gilt nicht als fertige Antwort.
+          if (streamResult?.completed === false) {
+            throw incompleteStreamError(
+              modelProvider.label,
+              streamResult
+            )
+          }
           break
         } catch (error) {
           if (
@@ -2702,12 +2701,11 @@ Use these as background context. If these memories fully answer the request, ans
           tool_calls: toolCalls,
           // Responses-API: Items (inkl. Reasoning) fuer die naechste Iteration mitnehmen
           ...(rawOutput ? { _raw: rawOutput } : {}),
-          ...(streamFn === streamKimi && fullThinking
+          ...(modelProvider.name === 'kimi' && fullThinking
             ? { reasoning_content: fullThinking }
             : {})
         })
 
-        let terminalDone = false
         for (const tc of toolCalls) {
           assertChatRequestActive(activeRequest)
           const result = await executeTool(
@@ -2732,20 +2730,12 @@ Use these as background context. If these memories fully answer the request, ans
             }
           )
           assertChatRequestActive(activeRequest)
-          if (result === '__TERMINAL_DONE__') {
-            terminalDone = true
-          }
           workingMessages.push({
             role: 'tool',
             // Echte Zuordnung statt ausschließlich über Nachrichtenreihenfolge.
             ...(tc.id ? { tool_call_id: tc.id } : {}),
-            content: result === '__TERMINAL_DONE__' ? '(terminal output saved to chat)' : result
+            content: result
           })
-        }
-        if (terminalDone) {
-          chatStream.write('data: ' + JSON.stringify({ done: true }) + '\n\n')
-          responseCompleted = true
-          break
         }
         continue // Next iteration with tool results
       }
@@ -3472,31 +3462,6 @@ router.get(
     ])
   }
 )
-
-// Update memory endpoint
-router.post('/memory', requireAuth, async (req, res) => {
-  const { content } = req.body || {}
-
-  if (typeof content !== 'string') {
-    return res.status(400).json({ error: 'content muss ein String sein' })
-  }
-
-  if (content.length > CHAT_LIMITS.memory) {
-    return res.status(400).json({
-      error: `Memory ist zu lang (maximal ${CHAT_LIMITS.memory} Zeichen)`
-    })
-  }
-
-  db.prepare('UPDATE users SET memory = ? WHERE id = ?').run(content, req.session.userId)
-  res.json({ success: true })
-})
-
-// Get memory
-router.get('/memory', requireAuth, (req, res) => {
-  const user = db.prepare('SELECT memory FROM users WHERE id = ?').get(req.session.userId)
-  const memory = user?.memory || ''
-  res.json({ memory })
-})
 
 function readUsageStats(userId, sinceSeconds = null) {
   const sinceClause = sinceSeconds == null

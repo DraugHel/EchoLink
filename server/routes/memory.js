@@ -23,14 +23,17 @@ import {
   recordModelUsageEvent
 } from '../lib/modelUsageLedger.js'
 
+import { OLLAMA_URL } from '../providers/ollama.js'
+import { OPENAI_KEY } from '../providers/openai-compatible.js'
+import {
+  completeWithProvider,
+  resolveProvider
+} from '../providers/index.js'
+
 const router = Router()
-const OLLAMA_URL = process.env.OLLAMA_URL || 'http://localhost:11434'
 
 const OPENAI_RESPONSES_URL =
   'https://api.openai.com/v1/responses'
-
-const OPENAI_KEY =
-  process.env.OPENAI_API_KEY || ''
 
 function extractOpenAIText(data) {
   if (
@@ -249,6 +252,37 @@ async function runMemoryModel(
     }
   }
 
+  const genericProvider =
+    resolveProvider(selectedModel)
+
+  // Claude und Kimi haben keinen eigenen Memory-Client. Sie nutzen denselben
+  // Stream-Pfad wie der Chat, nur ohne Tools und ohne Ausgabe an den Client.
+  if (
+    genericProvider.name === 'anthropic' ||
+    genericProvider.name === 'kimi'
+  ) {
+    const result = await completeWithProvider({
+      model: selectedModel,
+      messages: [
+        {
+          role: 'user',
+          content: prompt
+        }
+      ],
+      options: {
+        temperature: 0.3,
+        maxTokens: 4000,
+        reasoningEffort: 'off'
+      },
+      signal: AbortSignal.timeout(120000)
+    })
+
+    return {
+      text: String(result.fullContent || '').trim(),
+      usage: result.tokenUsage || null
+    }
+  }
+
   const ollamaModel =
     selectedModel.startsWith('ollama/')
       ? selectedModel.slice(7)
@@ -314,45 +348,6 @@ async function runMemoryModel(
     }
   }
 }
-
-
-// Get current memory
-router.get('/', requireAuth, (req, res) => {
-  const user = db.prepare('SELECT memory FROM users WHERE id = ?').get(req.session.userId)
-  res.json({ memory: user.memory || '' })
-})
-
-// Manually save edited memory
-router.post('/save', requireAuth, (req, res) => {
-  const content = req.body?.content
-
-  if (typeof content !== 'string') {
-    return res.status(400).json({
-      error: 'Memory content must be a string'
-    })
-  }
-
-  if (content.length > 500_000) {
-    return res.status(400).json({
-      error: 'Memory ist zu lang'
-    })
-  }
-
-  db.prepare(
-    'UPDATE users SET memory = ? WHERE id = ?'
-  ).run(content, req.session.userId)
-
-  res.json({
-    ok: true,
-    memory: content
-  })
-})
-
-// Clear memory
-router.delete('/', requireAuth, (req, res) => {
-  db.prepare('UPDATE users SET memory = ? WHERE id = ?').run('', req.session.userId)
-  res.json({ ok: true })
-})
 
 
 function sendItemError(res, error) {
@@ -853,14 +848,6 @@ export async function extractMemory(userId, conversationId, model) {
     return { ok: true, skipped: true, reason: 'not_enough_messages' }
   }
 
-  const user = db.prepare(`
-    SELECT memory
-    FROM users
-    WHERE id = ?
-  `).get(userId)
-
-  const existingMemory = user?.memory || ''
-
   const activeItems = listMemoryItems(userId, {
     status: 'active',
     limit: 200
@@ -892,18 +879,7 @@ export async function extractMemory(userId, conversationId, model) {
 
   const extractPrompt = `You are a memory extraction system.
 
-Analyze the conversation and update two memory representations:
-
-1. legacyMarkdown:
-A concise backward-compatible user profile in Markdown.
-
-2. memories:
-Structured actions for individual durable memories.
-
-Existing legacy Markdown:
----
-${existingMemory.slice(0, 16000) || '(none)'}
----
+Analyze the conversation and return structured actions for individual durable memories.
 
 Existing active structured memories:
 ---
@@ -918,7 +894,6 @@ ${transcript}
 Return ONLY valid JSON in exactly this general shape:
 
 {
-  "legacyMarkdown": "## Persönliches\\n- ...",
   "memories": [
     {
       "action": "create",
@@ -979,19 +954,6 @@ Rules for structured memories:
 - Project-specific facts should use project:<slug>.
 - Use the conversation language; default to German.
 
-Rules for legacyMarkdown:
-- Preserve still-valid existing facts.
-- Remove facts clearly contradicted by newer information.
-- Merge duplicates.
-- Maximum 20 bullet points.
-- One fact per bullet.
-- Allowed headings:
-  ## Persönliches
-  ## Präferenzen
-  ## Projekte & Ziele
-  ## Arbeit & Fähigkeiten
-  ## Aktueller Kontext
-- Omit empty sections.
 - Do not invent information.`
 
   const useModel = model || convo.model || DEFAULT_MODEL
@@ -1038,20 +1000,6 @@ Rules for legacyMarkdown:
     return { ok: true, skipped: true, reason: 'invalid_json' }
   }
 
-  const legacyCandidate = typeof parsed.legacyMarkdown === 'string'
-    ? parsed.legacyMarkdown.trim()
-    : ''
-
-  const newMemory = legacyCandidate || existingMemory
-
-  if (newMemory !== existingMemory) {
-    db.prepare(`
-      UPDATE users
-      SET memory = ?
-      WHERE id = ?
-    `).run(newMemory.slice(0, 500000), userId)
-  }
-
   const latestUserMessage = [...messages]
     .reverse()
     .find(message => message.role === 'user')
@@ -1073,7 +1021,6 @@ Rules for legacyMarkdown:
 
   return {
     ok: true,
-    memory: newMemory,
     structured,
     embedding: {
       indexed: embedding.indexed,

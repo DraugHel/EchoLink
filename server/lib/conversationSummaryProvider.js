@@ -1,25 +1,12 @@
-import { streamOllama } from '../providers/ollama.js'
 import {
-  llamaCppConfigured,
-  streamLlamaCpp
-} from '../providers/llamacpp.js'
-import {
-  OPENAI_KEY,
-  ZAI_KEY,
-  KIMI_KEY,
-  DEEPSEEK_KEY,
-  streamZai,
-  streamKimi,
-  splitSystemTimeNote
-} from '../providers/openai-compatible.js'
-import {
-  ANTHROPIC_KEY,
-  streamAnthropic
-} from '../providers/anthropic.js'
-import { streamResponses } from '../providers/openai-responses.js'
-import {
-  streamDeepSeekResponses
-} from '../providers/deepseek-responses.js'
+  prepareProviderMessages,
+  resolveProvider
+} from '../providers/index.js'
+
+const CONFIG_LABELS = {
+  anthropic: 'Anthropic',
+  llamacpp: 'llama.cpp'
+}
 
 function collectorResponse() {
   return {
@@ -39,50 +26,17 @@ export function resolveConversationSummaryProvider(model) {
     throw error
   }
 
-  if (requestedModel.startsWith('claude')) {
-    if (!ANTHROPIC_KEY) throwConfigured('Anthropic')
-    return {
-      provider: 'anthropic',
-      providerModel: requestedModel,
-      streamFn: streamAnthropic,
-      transformMessages: messages => messages
-    }
+  const provider = resolveProvider(requestedModel)
+  if (!provider.configured) {
+    throwConfigured(CONFIG_LABELS[provider.name] || provider.name)
   }
 
-  const mappings = [
-    ['zai/', 'zai', ZAI_KEY, streamZai],
-    ['kimi/', 'kimi', KIMI_KEY, streamKimi],
-    ['deepseek/', 'deepseek', DEEPSEEK_KEY, streamDeepSeekResponses],
-    ['openai/', 'openai', OPENAI_KEY, streamResponses]
-  ]
-
-  for (const [prefix, provider, key, streamFn] of mappings) {
-    if (!requestedModel.startsWith(prefix)) continue
-    if (!key) throwConfigured(provider)
-    return {
-      provider,
-      providerModel: requestedModel.slice(prefix.length),
-      streamFn,
-      transformMessages: splitSystemTimeNote
-    }
-  }
-
-  if (requestedModel.startsWith('llamacpp/')) {
-    if (!llamaCppConfigured()) throwConfigured('llama.cpp')
-    return {
-      provider: 'llamacpp',
-      providerModel: requestedModel.slice(9),
-      streamFn: streamLlamaCpp,
-      transformMessages: splitSystemTimeNote
-    }
-  }
-
-  // Unprefixed models are the existing Ollama path, matching chat.js.
   return {
-    provider: 'ollama',
-    providerModel: requestedModel,
-    streamFn: streamOllama,
-    transformMessages: messages => messages
+    provider: provider.name,
+    providerModel: provider.providerModel,
+    streamFn: provider.streamFn,
+    transformMessages: messages =>
+      prepareProviderMessages(provider, messages)
   }
 }
 

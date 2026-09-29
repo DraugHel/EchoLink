@@ -1,12 +1,10 @@
 import { ALL_TOOLS } from '../lib/toolRegistry.js'
-
-function imgMediaType(b64) {
-  if (b64.startsWith('/9j/')) return 'image/jpeg'
-  if (b64.startsWith('iVBOR')) return 'image/png'
-  if (b64.startsWith('R0lGOD')) return 'image/gif'
-  if (b64.startsWith('UklGR')) return 'image/webp'
-  return 'image/jpeg'
-}
+import { imgMediaType } from '../lib/images.js'
+import {
+  fetchProviderStream,
+  markProviderError,
+  streamFailure
+} from './streamErrors.js'
 
 // ===================== Z.ai (Zhipu) Provider — OpenAI-kompatibel =====================
 const ZAI_BASE_URL = 'https://api.z.ai/api/paas/v4'
@@ -49,8 +47,7 @@ export function normalizeZaiModels(data) {
 const KIMI_URL = 'https://api.moonshot.ai/v1/chat/completions'
 export const KIMI_KEY = process.env.MOONSHOT_API_KEY || ''
 
-// ===================== DeepSeek V4 — OpenAI-kompatibel =====================
-const DEEPSEEK_URL = 'https://api.deepseek.com/chat/completions'
+// DeepSeek laeuft ueber deepseek-responses.js; der Key dient hier der Modellliste.
 export const DEEPSEEK_KEY = process.env.DEEPSEEK_API_KEY || ''
 
 // Ollama-internes Format -> OpenAI Chat Completions Format
@@ -133,16 +130,12 @@ export async function streamOpenAICompatible(providerName, endpoint, key, model,
       : {}),
     ...extra
   }
-  const r = await fetch(endpoint, {
+  const r = await fetchProviderStream(endpoint, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` },
     body: JSON.stringify(body),
     signal: abortSignal
-  })
-  if (!r.ok) {
-    const errBody = await r.text()
-    throw new Error(`${providerName} ${r.status}: ${errBody.slice(0, 200)}`)
-  }
+  }, providerName)
 
   let fullContent = '', fullThinking = ''
   let streamCompleted = false
@@ -151,6 +144,7 @@ export async function streamOpenAICompatible(providerName, endpoint, key, model,
   let buf = ''
   const decoder = new TextDecoder()
 
+  try {
   for await (const chunk of r.body) {
     buf += decoder.decode(chunk, { stream: true })
     const lines = buf.split('\n')
@@ -161,7 +155,7 @@ export async function streamOpenAICompatible(providerName, endpoint, key, model,
       if (payload === '[DONE]') { streamCompleted = true; continue }
       let ev
       try { ev = JSON.parse(payload) } catch { continue }
-      if (ev.error) throw new Error(ev.error.message || `${providerName} stream error`)
+      if (ev.error) throw markProviderError(new Error(ev.error.message || `${providerName} stream error`))
       if (ev.choices?.[0]?.finish_reason != null) streamCompleted = true
       if (ev.usage || ev.choices?.[0]?.usage) {
         usage = ev.usage || ev.choices[0].usage
@@ -186,6 +180,9 @@ export async function streamOpenAICompatible(providerName, endpoint, key, model,
         }
       }
     }
+  }
+  } catch (error) {
+    throw streamFailure(error, fullContent || fullThinking)
   }
 
   const toolCalls = Object.values(toolAcc).filter(t => t.name).map(t => {
@@ -312,15 +309,6 @@ export const streamKimi = (model, messages, options, res, abortSignal) =>
   streamOpenAICompatible(
     'Kimi', KIMI_URL, KIMI_KEY, model, messages, options, res, abortSignal,
     kimiRequestExtras(model, options?.reasoningEffort),
-    { allowSampling: false }
-  )
-
-export const streamDeepSeek = (model, messages, options, res, abortSignal) =>
-  streamOpenAICompatible(
-    'DeepSeek', DEEPSEEK_URL, DEEPSEEK_KEY, model, messages, options, res, abortSignal,
-    options?.reasoningEffort === 'off'
-      ? { thinking: { type: 'disabled' } }
-      : { thinking: { type: 'enabled' } },
     { allowSampling: false }
   )
 
