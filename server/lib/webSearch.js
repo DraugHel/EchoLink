@@ -112,6 +112,36 @@ function braveQuery(query) {
     .slice(0, 600)
 }
 
+const RETRY_MAX_WORDS = 8
+
+function wordCount(text) {
+  return String(text || '').trim().split(/\s+/).filter(Boolean).length
+}
+
+// Suchoperatoren (site:, intitle:, -wort, AND/OR/NOT) und Anfuehrungszeichen
+// sind eine haeufige Ursache fuer null Treffer.
+function isSearchOperator(word) {
+  return (
+    /^[-+]?(?:site|inurl|intitle|inbody|filetype|ext|lang|loc|before|after):\S*$/i.test(word) ||
+    /^-\S+$/.test(word) ||
+    /^(?:AND|OR|NOT)$/.test(word)
+  )
+}
+
+// Vereinfachte Anfrage fuer den zweiten Versuch. Leer, wenn sich nichts
+// vereinfachen laesst (dann lohnt sich eine zweite Suche nicht).
+function simplifiedQuery(query) {
+  const original = braveQuery(query)
+  const simpler = original
+    .replace(/["“”„«»]/g, ' ')
+    .split(/\s+/)
+    .filter(word => word && !isSearchOperator(word))
+    .slice(0, RETRY_MAX_WORDS)
+    .join(' ')
+
+  return simpler && simpler !== original ? simpler : ''
+}
+
 function braveResults(data) {
   const items = Array.isArray(data?.web?.results)
     ? data.web.results
@@ -238,6 +268,37 @@ async function searxngSearch(query, abortSignal, fetchFn) {
   }
 }
 
+// Bei null Treffern einmal mit vereinfachter Anfrage wiederholen, bevor der
+// Fehler an das Modell geht. Kostet hoechstens eine weitere Suche. Das Log
+// enthaelt bewusst nur Zaehler, nie den Suchbegriff.
+async function retryEmptyBraveSearch(query, abortSignal, options) {
+  const simpler = simplifiedQuery(query)
+  let results = []
+
+  if (simpler && !abortSignal?.aborted) {
+    const retry = await braveSearch(simpler, abortSignal, options)
+    results = retry.results || []
+  }
+
+  console.log(JSON.stringify({
+    level: 'info',
+    event: 'brave_search_empty',
+    words: wordCount(query),
+    retried: Boolean(simpler),
+    recovered: results.length > 0
+  }))
+
+  if (results.length) {
+    return { query, usedQuery: simpler, results, engine: 'brave' }
+  }
+
+  if (abortSignal?.aborted) {
+    return { error: 'Search timeout', query }
+  }
+
+  return { error: 'No results found', query }
+}
+
 // Ist BRAVE_API_KEY gesetzt, wird Brave zuerst benutzt (Rechenzentrums-IPs
 // wie Hetzner werden von Google/Bing & Co. blockiert, die API nicht).
 // SearXNG bleibt Fallback bei Fehlern. Ohne Key aendert sich nichts.
@@ -259,9 +320,15 @@ export async function webSearch(
     )
 
     if (brave.results) {
-      return brave.results.length
-        ? { query, results: brave.results, engine: 'brave' }
-        : { error: 'No results found', query }
+      if (brave.results.length) {
+        return { query, results: brave.results, engine: 'brave' }
+      }
+
+      return retryEmptyBraveSearch(
+        query,
+        abortSignal,
+        { env, fetchFn }
+      )
     }
 
     if (abortSignal?.aborted) {

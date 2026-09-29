@@ -111,7 +111,11 @@ test('Brave-Ergebnisse: fehlende Beschreibung ok, ohne URL verworfen, max. 5', a
 })
 
 test('lange Anfragen werden auf 75 Wörter und 600 Zeichen gekürzt', async () => {
-  const { calls, fetchFn } = recorder(() => jsonResponse(braveBody([])))
+  const { calls, fetchFn } = recorder(() =>
+    jsonResponse(braveBody([
+      { title: 'T', url: 'https://example.com/', description: 'D' }
+    ]))
+  )
 
   await webSearch(
     Array.from({ length: 120 }, (_, i) => `wort${i}`).join(' '),
@@ -240,4 +244,154 @@ test('Abbruch durch den Aufrufer startet keinen SearXNG-Fallback', async () => {
 
   assert.equal(calls.length, 1)
   assert.deepEqual(result, { error: 'Search timeout', query: 'q' })
+})
+
+const EMPTY = () => jsonResponse(braveBody([]))
+const ONE = () =>
+  jsonResponse(braveBody([
+    { title: 'Treffer', url: 'https://example.com/t', description: 'd' }
+  ]))
+
+function braveQueries(calls) {
+  return calls
+    .filter(call => isBrave(call.url))
+    .map(call => new URL(call.url).searchParams.get('q'))
+}
+
+async function captureLogs(run) {
+  const lines = []
+  const previous = console.log
+  console.log = line => lines.push(String(line))
+  try {
+    return { result: await run(), lines }
+  } finally {
+    console.log = previous
+  }
+}
+
+test('null Treffer: zweiter Versuch ohne Anführungszeichen und Operatoren', async () => {
+  const { calls, fetchFn } = recorder((url, init, count) =>
+    count === 1 ? EMPTY() : ONE()
+  )
+
+  const { result } = await captureLogs(() =>
+    webSearch('"Wien Wetter" site:orf.at -reddit morgen', undefined, {
+      env: ENV,
+      fetchFn
+    })
+  )
+
+  assert.deepEqual(braveQueries(calls), [
+    '"Wien Wetter" site:orf.at -reddit morgen',
+    'Wien Wetter morgen'
+  ])
+  assert.equal(result.engine, 'brave')
+  assert.equal(result.usedQuery, 'Wien Wetter morgen')
+  assert.equal(result.query, '"Wien Wetter" site:orf.at -reddit morgen')
+  assert.equal(result.results.length, 1)
+})
+
+test('null Treffer: lange einfache Anfrage wird auf 8 Wörter gekürzt', async () => {
+  const { calls, fetchFn } = recorder((url, init, count) =>
+    count === 1 ? EMPTY() : ONE()
+  )
+  const words = Array.from({ length: 12 }, (_, i) => `w${i + 1}`)
+
+  const { result } = await captureLogs(() =>
+    webSearch(words.join(' '), undefined, { env: ENV, fetchFn })
+  )
+
+  assert.deepEqual(braveQueries(calls), [
+    words.join(' '),
+    words.slice(0, 8).join(' ')
+  ])
+  assert.equal(result.engine, 'brave')
+})
+
+test('null Treffer bei kurzer einfacher Anfrage: keine zweite Suche', async () => {
+  const { calls, fetchFn } = recorder(EMPTY)
+
+  const { result, lines } = await captureLogs(() =>
+    webSearch('Wetter Wien morgen', undefined, { env: ENV, fetchFn })
+  )
+
+  assert.equal(calls.length, 1)
+  assert.deepEqual(result, {
+    error: 'No results found',
+    query: 'Wetter Wien morgen'
+  })
+  assert.deepEqual(JSON.parse(lines[0]), {
+    level: 'info',
+    event: 'brave_search_empty',
+    words: 3,
+    retried: false,
+    recovered: false
+  })
+})
+
+test('auch der zweite Versuch leer: genau zwei Brave-Suchen, kein SearXNG', async () => {
+  const { calls, fetchFn } = recorder(EMPTY)
+
+  const { result } = await captureLogs(() =>
+    webSearch('"a b c" site:x.de d e f g h i j k', undefined, {
+      env: ENV,
+      fetchFn
+    })
+  )
+
+  assert.equal(calls.length, 2)
+  assert.ok(calls.every(call => isBrave(call.url)))
+  assert.equal(result.error, 'No results found')
+})
+
+test('Fehler im zweiten Versuch: "keine Ergebnisse", kein SearXNG', async () => {
+  const { calls, fetchFn } = recorder((url, init, count) =>
+    count === 1 ? EMPTY() : new Response('boom', { status: 500 })
+  )
+
+  const { result } = await captureLogs(() =>
+    webSearch('"a b" c', undefined, { env: ENV, fetchFn })
+  )
+
+  assert.equal(calls.length, 2)
+  assert.ok(calls.every(call => isBrave(call.url)))
+  assert.equal(result.error, 'No results found')
+})
+
+test('Abbruch nach leerem ersten Versuch startet keinen zweiten', async () => {
+  const controller = new AbortController()
+  const { calls, fetchFn } = recorder(() => {
+    controller.abort()
+    return EMPTY()
+  })
+
+  const { result } = await captureLogs(() =>
+    webSearch('"a b" c', controller.signal, { env: ENV, fetchFn })
+  )
+
+  assert.equal(calls.length, 1)
+  assert.deepEqual(result, { error: 'Search timeout', query: '"a b" c' })
+})
+
+test('das Log zur leeren Suche enthält nur Zähler, nie den Suchbegriff', async () => {
+  const { fetchFn } = recorder((url, init, count) =>
+    count === 1 ? EMPTY() : ONE()
+  )
+
+  const { lines } = await captureLogs(() =>
+    webSearch('"geheimer begriff" site:x.de', undefined, {
+      env: ENV,
+      fetchFn
+    })
+  )
+
+  assert.equal(lines.length, 1)
+  assert.ok(!lines[0].includes('geheimer'))
+  assert.deepEqual(JSON.parse(lines[0]), {
+    level: 'info',
+    event: 'brave_search_empty',
+    words: 3,
+    retried: true,
+    recovered: true
+  })
 })
