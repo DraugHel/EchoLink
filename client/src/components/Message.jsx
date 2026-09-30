@@ -83,7 +83,7 @@ function formatUsageNumber(value) {
   return Math.round(number).toLocaleString('de-DE')
 }
 
-function Message({ role, content, streaming, images, think, toolStatus, actionRequests, onApprove, onDeny, onAlwaysAllow, usage, memoryEvidence, id, createdAt, prevCreatedAt, onDelete, editing, onEdit, onSaveEdit, onCancelEdit, retryFailed, onRetry }) {
+function Message({ role, content, streaming, images, think, toolStatus, actionRequests, onApprove, onDeny, onAlwaysAllow, usage, memoryEvidence, id, createdAt, prevCreatedAt, onDelete, editing, onEdit, onSaveEdit, onCancelEdit, retryFailed, onRetry, onRegenerate }) {
   const [thinkOpen, setThinkOpen] = useState(false)
   const [termOpen, setTermOpen] = useState(false)
   const [usageOpen, setUsageOpen] = useState(false)
@@ -302,14 +302,14 @@ function Message({ role, content, streaming, images, think, toolStatus, actionRe
                 if (state === 'approved') {
                   return (
                     <div key={idx} style={{ ...styles.actionCard, borderLeft: '3px solid var(--green)' }}>
-                      <span style={{ color: 'var(--green)', fontWeight: 600 }}>Approved</span>
+                      <span style={{ color: 'var(--green)', fontWeight: 600 }}>Freigegeben</span>
                     </div>
                   )
                 }
                 if (state === 'denied') {
                   return (
                     <div key={idx} style={{ ...styles.actionCard, borderLeft: '3px solid var(--danger)' }}>
-                      <span style={{ color: 'var(--danger)', fontWeight: 600 }}>Denied</span>
+                      <span style={{ color: 'var(--danger)', fontWeight: 600 }}>Abgelehnt</span>
                     </div>
                   )
                 }
@@ -317,7 +317,7 @@ function Message({ role, content, streaming, images, think, toolStatus, actionRe
                   <div key={idx} style={styles.actionCard}>
                     <div style={styles.actionHeader}>
                       <ShieldIcon />
-                      <span style={styles.actionTitle}>Action requires approval</span>
+                      <span style={styles.actionTitle}>Freigabe erforderlich</span>
                     </div>
                     <p style={styles.actionDesc}>{ar.description}</p>
                     {ar.reason && (
@@ -330,10 +330,10 @@ function Message({ role, content, streaming, images, think, toolStatus, actionRe
                     )}
                     <div style={styles.actionBtns}>
                       <button style={styles.approveBtn} onClick={() => handleApprove(ar.actionId, ar)}>
-                        <CheckIcon2 /> Approve
+                        <CheckIcon2 /> Freigeben
                       </button>
                       <button style={styles.denyBtn} onClick={() => handleDeny(ar.actionId, ar)}>
-                        <XIcon2 /> Deny
+                        <XIcon2 /> Ablehnen
                       </button>
                       {ar.source === 'chat' &&
                         ar.type === 'shell' &&
@@ -353,7 +353,7 @@ function Message({ role, content, streaming, images, think, toolStatus, actionRe
                 <div style={styles.thinkWrap}>
                   <button style={styles.thinkToggle} onClick={() => setThinkOpen(o => !o)}>
                     <span style={{ marginRight: 6 }}>{thinkOpen ? '▾' : '▸'}</span>
-                    Thought process
+                    Denkprozess
                   </button>
                   {thinkOpen && (
                     <div style={styles.thinkContent}>
@@ -421,7 +421,7 @@ function Message({ role, content, streaming, images, think, toolStatus, actionRe
                     cursor: 'pointer', fontWeight: 500
                   }}
                 >
-                  Retry
+                  Erneut versuchen
                 </button>
               )}
               {!streaming && Array.isArray(memoryEvidence) && (
@@ -786,6 +786,16 @@ function Message({ role, content, streaming, images, think, toolStatus, actionRe
                     <div className="msg-assistant-timestamp">{timeStr}</div>
                   )}
                   <div className="msg-actions msg-actions-assistant">
+                    {onRegenerate && (
+                      <button
+                        className="msg-action-btn msg-action-btn-assistant"
+                        onClick={onRegenerate}
+                        title="Antwort neu erzeugen"
+                        aria-label="Antwort neu erzeugen"
+                      >
+                        <RegenIcon />
+                      </button>
+                    )}
                     <button className={`msg-action-btn msg-action-btn-assistant ${copied ? 'is-copied' : ''}`}
                       onClick={async () => {
                         try { await navigator.clipboard.writeText(content) }
@@ -832,6 +842,13 @@ const CheckIcon2 = () => (
 const XIcon2 = () => (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
     <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+  </svg>
+)
+
+const RegenIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points="23 4 23 10 17 10"/>
+    <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
   </svg>
 )
 

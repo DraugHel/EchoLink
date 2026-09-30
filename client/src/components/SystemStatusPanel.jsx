@@ -66,12 +66,9 @@ function formatUsd(value) {
   if (!Number.isFinite(number)) return '–'
 
   const absolute = Math.abs(number)
-  const digits =
-    absolute < 0.01
-      ? 6
-      : absolute < 1
-        ? 4
-        : 2
+  if (number === 0) return '$0'
+
+  const digits = absolute < 0.01 ? 4 : 2
 
   return `$${number
     .toFixed(digits)
@@ -95,7 +92,8 @@ function Metric({
   label,
   value,
   detail,
-  warning = false
+  warning = false,
+  caution = false
 }) {
   return (
     <div style={styles.metric}>
@@ -108,7 +106,9 @@ function Metric({
           ...styles.metricValue,
           color: warning
             ? 'var(--danger)'
-            : 'var(--text1)'
+            : caution
+              ? '#e7b955'
+              : 'var(--text1)'
         }}
       >
         {value}
@@ -312,7 +312,7 @@ export default function SystemStatusPanel({
                 style={{
                   ...styles.watchtowerButton,
                   color: status?.watchtower?.enabled
-                    ? 'var(--danger)'
+                    ? 'var(--text2)'
                     : 'var(--accent)'
                 }}
               >
@@ -357,6 +357,7 @@ export default function SystemStatusPanel({
                   : ''
               }
               warning={Number(status?.disk) >= 90}
+              caution={Number(status?.disk) >= 80}
             />
 
             <Metric
@@ -525,6 +526,7 @@ export default function SystemStatusPanel({
                   key={app.name}
                   type="button"
                   onClick={() => onToggleApp(app.name)}
+                  className="echolink-process-row"
                   style={{
                     ...styles.process,
                     opacity: monitored ? 1 : 0.55
@@ -536,7 +538,9 @@ export default function SystemStatusPanel({
                       background:
                         app.status === 'online'
                           ? 'var(--accent)'
-                          : 'var(--danger)'
+                          : monitored
+                            ? 'var(--danger)'
+                            : 'var(--text3)'
                     }}
                   />
 
@@ -544,7 +548,10 @@ export default function SystemStatusPanel({
                     {app.name}
                   </span>
 
-                  <span style={styles.processMeta}>
+                  <span
+                    className="echolink-process-meta"
+                    style={styles.processMeta}
+                  >
                     {app.status}
                     {' · '}
                     {app.restarts ?? 0} Neustarts

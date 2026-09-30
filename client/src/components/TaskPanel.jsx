@@ -1111,7 +1111,8 @@ export default function TaskPanel({
             <strong
               style={{
                 color: 'var(--text1)',
-                fontFamily: 'var(--font-mono)'
+                fontSize: 18,
+                fontWeight: 700
               }}
             >
               Geplante Aufgaben
@@ -1347,10 +1348,19 @@ export default function TaskPanel({
                               </span>
 
                               <span
-                                style={badgeStyle({
-                                  accent: task.enabled,
-                                  muted: !task.enabled
-                                })}
+                                style={{
+                                  ...badgeStyle({
+                                    accent: task.enabled,
+                                    muted: !task.enabled
+                                  }),
+                                  ...(!task.enabled && !completedOnce
+                                    ? {
+                                        color: '#e7b955',
+                                        borderColor:
+                                          'rgba(231, 185, 85, 0.45)'
+                                      }
+                                    : {})
+                                }}
                               >
                                 {task.enabled
                                   ? 'Aktiv'
@@ -1491,7 +1501,10 @@ export default function TaskPanel({
                               type="button"
                               onClick={() => toggleTask(task)}
                               disabled={busy || activeRun}
-                              style={buttonStyle({ disabled: busy || activeRun })}
+                              style={buttonStyle({
+                                accent: !task.enabled,
+                                disabled: busy || activeRun
+                              })}
                             >
                               {task.enabled
                                 ? 'Deaktivieren'
@@ -1504,7 +1517,6 @@ export default function TaskPanel({
                             onClick={() => runNow(task)}
                             disabled={busy || activeRun}
                             style={buttonStyle({
-                              accent: true,
                               disabled: busy || activeRun
                             })}
                           >

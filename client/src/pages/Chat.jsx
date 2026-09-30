@@ -12,6 +12,7 @@ import CorsnFace from '../components/CorsnFace.jsx'
 import LunaMiniHud from '../components/LunaMiniHud.jsx'
 import TerminalTimeline from '../components/TerminalTimeline.jsx'
 import EchoLinkMark from '../components/EchoLinkMark.jsx'
+import { displayConvoTitle } from '../lib/conversationTitle.js'
 import {
   MAX_CHAT_RECONNECT_RETRIES,
   attachPendingChatActions,
@@ -424,6 +425,47 @@ function createLunaLiveContext({
         ''
     }
   }
+}
+
+// Kompakter Systemstatus fuer die Kopfzeile: ein Punkt plus "online/gesamt".
+function SystemPulse({ apps, monitoredApps }) {
+  const watched = (apps || []).filter(app =>
+    monitoredApps.includes(app.name)
+  )
+
+  if (watched.length === 0) return null
+
+  const online = watched.filter(app =>
+    app.status === 'online'
+  ).length
+  const allOnline = online === watched.length
+
+  return (
+    <span
+      style={styles.systemPulse}
+      role="img"
+      aria-label={`Systemstatus: ${online} von ${watched.length} Prozessen online`}
+    >
+      <span
+        style={{
+          ...styles.systemDot,
+          background: allOnline
+            ? 'var(--accent)'
+            : 'var(--danger)'
+        }}
+      />
+      <span
+        style={{
+          ...styles.systemPulseText,
+          color: allOnline
+            ? 'var(--text2)'
+            : 'var(--danger)'
+        }}
+      >
+        {online}/{watched.length}
+      </span>
+    </span>
+  )
 }
 
 function useIsMobile() {
@@ -2167,12 +2209,11 @@ export default function Chat({ user, onLogout }) {
             ...(mobile
               ? {
                   flex: '1 1 auto',
-                  minWidth: 0,
-                  maxWidth: 110
+                  minWidth: 0
                 }
               : {})
           }}>
-            {activeConvo ? activeConvo.title : 'EchoLink'}
+            {activeConvo ? displayConvoTitle(activeConvo.title) : 'EchoLink'}
           </span>
           {sysStatus && (
             mobile ? (
@@ -2212,26 +2253,10 @@ export default function Chat({ user, onLogout }) {
                   aria-label="Systemstatus"
                   style={styles.systemDotsRight}
                 >
-                  <span style={styles.systemDots}>
-                    {sysStatus.apps
-                      .filter(app =>
-                        monitoredApps.includes(
-                          app.name
-                        )
-                      )
-                      .map(app => (
-                        <span
-                          key={app.name}
-                          style={{
-                            ...styles.systemDot,
-                            background:
-                              app.status === 'online'
-                                ? 'var(--accent)'
-                                : 'var(--danger)'
-                          }}
-                        />
-                      ))}
-                  </span>
+                  <SystemPulse
+                    apps={sysStatus.apps}
+                    monitoredApps={monitoredApps}
+                  />
                 </button>
               </>
             ) : (
@@ -2271,26 +2296,10 @@ export default function Chat({ user, onLogout }) {
                   aria-label="Systemstatus"
                   style={styles.systemDesktopDots}
                 >
-                  <span style={styles.systemDots}>
-                    {sysStatus.apps
-                      .filter(app =>
-                        monitoredApps.includes(
-                          app.name
-                        )
-                      )
-                      .map(app => (
-                        <span
-                          key={app.name}
-                          style={{
-                            ...styles.systemDot,
-                            background:
-                              app.status === 'online'
-                                ? 'var(--accent)'
-                                : 'var(--danger)'
-                          }}
-                        />
-                      ))}
-                  </span>
+                  <SystemPulse
+                    apps={sysStatus.apps}
+                    monitoredApps={monitoredApps}
+                  />
                 </button>
               </div>
             )
@@ -2349,8 +2358,8 @@ export default function Chat({ user, onLogout }) {
                 <EchoLinkMark size={48} title="EchoLink" />
               </div>
               <h2 style={styles.emptyTitle}>Echo<span style={{ color:'var(--green)' }}>Link</span></h2>
-              <p style={styles.emptySub}>Select a conversation or create a new one.</p>
-              <button style={styles.emptyBtn} onClick={createConvo}>+ New Conversation</button>
+              <p style={styles.emptySub}>Wähle eine Unterhaltung oder starte eine neue.</p>
+              <button style={styles.emptyBtn} onClick={createConvo}>+ Neue Unterhaltung</button>
             </div>
           )}
 
@@ -2429,6 +2438,15 @@ export default function Chat({ user, onLogout }) {
                       onCancelEdit={() => setEditingId(null)}
                       retryFailed={m.retryFailed}
                       onRetry={retryMessage}
+                      onRegenerate={
+                        !streaming &&
+                        messages.length >= 2 &&
+                        m.id === lastAssistantMsg?.id &&
+                        !m.pendingActionOnly &&
+                        !m.retryFailed
+                          ? regenerate
+                          : undefined
+                      }
                     />
                     {m.role === 'assistant' && (
                       <ChatHistorySources
@@ -2444,7 +2462,7 @@ export default function Chat({ user, onLogout }) {
           })()}
 
           {activeConvo && !loading && messages.length === 0 && (
-            <div style={styles.emptyChat}><p>Start the conversation below.</p></div>
+            <div style={styles.emptyChat}><p>Schreib unten die erste Nachricht.</p></div>
           )}
 
           <div ref={messagesEndRef} />
@@ -2556,7 +2574,7 @@ export default function Chat({ user, onLogout }) {
             onRegenerate={regenerate}
             onFileSelect={handleFileSelect}
             onRemoveAttachment={removeAttachment}
-            showRegenerate={!streaming && !!lastAssistantMsg && messages.length >= 2}
+            showRegenerate={false}
             inputRef={inputRef}
           />
         )}
@@ -2731,43 +2749,44 @@ const styles = {
   root: { display: 'flex', flex: 1, overflow: 'hidden', minHeight: 0 },
   main: { flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 0 },
   systemFaceCenter: {
-    position: 'absolute',
-    zIndex: 2,
-    left: '50%',
-    top: '50%',
-    width: 44,
-    height: 44,
+    width: 40,
+    height: 40,
+    flexShrink: 0,
     display: 'grid',
     placeItems: 'center',
     padding: 0,
     border: 0,
     borderRadius: 0,
-    background: 'transparent',
-    transform: 'translate(-50%, -50%)'
+    background: 'transparent'
   },
   systemDotsRight: {
-    position: 'absolute',
-    zIndex: 2,
-    left: 'calc(50% + 20px)',
-    top: '50%',
-    width: 'auto',
     height: 40,
+    flexShrink: 0,
     display: 'flex',
     alignItems: 'center',
-    justifyContent: 'flex-start',
-    padding: 0,
+    justifyContent: 'center',
+    padding: '0 2px',
     border: 0,
     background: 'transparent',
-    color: 'var(--text2)',
-    transform: 'translateY(-50%)'
+    color: 'var(--text2)'
   },
   mobileToolsButton: {
-    position: 'absolute',
-    zIndex: 3,
-    right: 8,
-    top: '50%',
-    margin: 0,
-    transform: 'translateY(-50%)'
+    width: 40,
+    height: 40,
+    flexShrink: 0,
+    justifyContent: 'center',
+    margin: 0
+  },
+  systemPulse: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 6
+  },
+  systemPulseText: {
+    fontFamily: 'var(--font-mono)',
+    fontSize: 11,
+    fontWeight: 700,
+    lineHeight: 1
   },
   systemDesktop: {
     height: 42,

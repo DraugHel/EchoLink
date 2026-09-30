@@ -1600,3 +1600,43 @@ a { color: var(--accent); text-decoration: none; }
 .luna-mini-hud-value-stack .luna-mini-hud-note {
   grid-column: auto;
 }
+
+/* EchoLink UI polish 1 */
+:root {
+  --text1: var(--text);
+}
+
+/* Aufgaben: Loeschen-Button zurueckhaltender */
+.echolink-task-actions .echolink-task-delete {
+  border-color: color-mix(in srgb, var(--danger) 45%, var(--border)) !important;
+}
+
+@media (max-width: 767px) {
+  /* Chat: mehr Breite fuer den Text (kein Avatar-Streifen, weniger Rand) */
+  .msg-avatar {
+    display: none !important;
+  }
+
+  .luna-chat-surface {
+    padding: 16px 12px !important;
+  }
+
+  .msg-bubble {
+    padding: 12px 13px !important;
+  }
+
+  .echolink-task-actions .echolink-task-delete {
+    margin-top: 6px;
+  }
+
+  /* Systemstatus: Prozesszeile zweizeilig (Name und Status, darunter die Werte) */
+  .echolink-process-row {
+    grid-template-columns: 10px minmax(0, 1fr) auto !important;
+    row-gap: 3px !important;
+  }
+
+  .echolink-process-row .echolink-process-meta {
+    grid-column: 2 / -1;
+    grid-row: 2;
+  }
+}

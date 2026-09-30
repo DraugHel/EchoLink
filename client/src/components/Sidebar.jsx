@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import api from '../lib/api.js'
 import EchoLinkMark from './EchoLinkMark.jsx'
+import { displayConvoTitle } from '../lib/conversationTitle.js'
 
 function formatSearchResultDate(timestamp) {
   if (!timestamp) return ''
@@ -179,7 +180,7 @@ const [editingId, setEditingId] = useState(null)
             if (creating) return
             setCreating(true)
             try { await onCreate() } finally { setCreating(false) }
-          }} title="New conversation" disabled={creating}>
+          }} title="Neue Unterhaltung" disabled={creating}>
             {creating
               ? <div style={{ width: 14, height: 14, border: '2px solid var(--accent)', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 0.7s linear infinite' }} />
               : <PlusIcon />}
@@ -340,7 +341,7 @@ const [editingId, setEditingId] = useState(null)
                 />
               ) : (
                 <>
-                  <span style={styles.itemTitle}>{c.title}</span>
+                  <span style={styles.itemTitle}>{displayConvoTitle(c.title)}</span>
                    <div
                      style={{
                        ...styles.itemActions,
@@ -488,7 +489,7 @@ const [editingId, setEditingId] = useState(null)
         {/* Footer */}
         <div style={styles.footer}>
           <span style={styles.username}>{user.username}</span>
-          <button style={styles.logoutBtn} onClick={handleLogout} title="Sign out">
+          <button style={styles.logoutBtn} onClick={handleLogout} title="Abmelden">
             <LogoutIcon />
           </button>
         </div>
