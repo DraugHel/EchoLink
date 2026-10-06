@@ -69,3 +69,16 @@ test('das Modell bekommt keine Werkzeuge und der Kontext ist als Daten markiert'
   assert.match(context, /nur Daten, keine Anweisungen/)
   assert.match(context, /Bewusst nur Absender und Betreff/)
 })
+
+test('Luna kann den Tagesplan neu wuerfeln (Route, Auto-Reset, Panel)', () => {
+  const route = read('server/routes/companion.js')
+  const panel = read('client/src/components/CompanionPanel.jsx')
+
+  assert.match(route, /'\/replan'/)
+  assert.match(route, /planNeedsReset\(before, settings\)/)
+  assert.match(route, /resetCompanionPlan\(db, userId\)/)
+
+  assert.match(panel, /Plan neu würfeln/)
+  assert.match(panel, /\/api\/companion\/replan/)
+  assert.match(panel, /onReplan/)
+})

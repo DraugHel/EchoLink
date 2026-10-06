@@ -633,3 +633,47 @@ export function companionStatus(database, userId, nowSeconds) {
     nowSeconds: Math.floor(nowSeconds)
   }
 }
+
+// ----- Tagesplan neu wuerfeln -----
+
+const PLAN_KEYS = [
+  'minPerDay',
+  'maxPerDay',
+  'windowStart',
+  'windowEnd',
+  'minGapMinutes',
+  'timezone'
+]
+
+// Wann der heutige Plan nicht mehr passt und neu gewuerfelt werden soll:
+// Aenderung von Haeufigkeit, Zeitfenster oder Abstand, Einschalten oder
+// wieder laut schalten (sonst waere der Morgenplan voellig veraltet).
+export function planNeedsReset(before, after) {
+  if (PLAN_KEYS.some(key => before[key] !== after[key])) return true
+  if (!before.enabled && after.enabled) return true
+  if (before.muted && !after.muted) return true
+
+  return false
+}
+
+export function resetCompanionPlan(database, userId) {
+  return saveCompanionState(database, userId, {
+    planDate: '',
+    planned: [],
+    nextIndex: 0
+  })
+}
+
+// Planmaessig gesendete Meldungen seit einem Zeitpunkt (ohne manuelle).
+export function countScheduledSentSince(database, userId, sinceSeconds) {
+  ensureCompanionSchema(database)
+
+  return database.prepare(`
+    SELECT COUNT(*) AS count
+    FROM companion_events
+    WHERE user_id = ?
+      AND kind = 'sent'
+      AND reason <> 'manuell'
+      AND created_at >= ?
+  `).get(userId, sinceSeconds).count
+}

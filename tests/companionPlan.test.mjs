@@ -174,3 +174,30 @@ test('Slots werden der Reihe nach faellig, verpasste verworfen', () => {
     { missed: 0, due: false, nextIndex: 3 }
   )
 })
+
+test('bereits gesendete Meldungen zaehlen zum Tageslimit', () => {
+  for (let seed = 1; seed <= 100; seed++) {
+    assert.equal(
+      plan({ minPerDay: 3, maxPerDay: 3, alreadySent: 1 }, seed).count,
+      2
+    )
+  }
+
+  // Schon alles gesendet: nichts mehr planen.
+  assert.equal(plan({ minPerDay: 1, maxPerDay: 2, alreadySent: 2 }).count, 0)
+  assert.equal(plan({ minPerDay: 1, maxPerDay: 4, alreadySent: 9 }).count, 0)
+
+  // Das harte Tageslimit gilt fuer den ganzen Tag, nicht pro Plan.
+  for (let seed = 1; seed <= 50; seed++) {
+    const result = plan(
+      { minPerDay: 8, maxPerDay: 8, minGapMinutes: 15, alreadySent: 3 },
+      seed
+    )
+
+    assert.ok(result.count + 3 <= HARD_MAX_PER_DAY, `Anzahl ${result.count}`)
+  }
+})
+
+test('ohne bereits gesendete Meldungen aendert sich nichts', () => {
+  assert.deepEqual(plan({ alreadySent: 0 }, 11), plan({}, 11))
+})

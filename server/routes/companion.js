@@ -4,6 +4,7 @@ import db, { DEFAULT_MODEL } from '../db.js'
 import { pushConfigured } from '../lib/push.js'
 import {
   defaultCompanionDeps,
+  ensureTodayPlan,
   previewCompanion,
   sendCompanionNow
 } from '../lib/companion.js'
@@ -12,6 +13,8 @@ import {
   ensureCompanionConversation,
   getCompanionSettings,
   listCompanionEvents,
+  planNeedsReset,
+  resetCompanionPlan,
   syncCompanionConversation,
   updateCompanionSettings
 } from '../lib/companionStore.js'
@@ -91,6 +94,18 @@ router.patch(
     const before = getCompanionSettings(db, userId)
     const settings = updateCompanionSettings(db, userId, req.body)
 
+    // Aendern sich Haeufigkeit, Zeitfenster oder Abstand (oder wird Luna
+    // ein- bzw. wieder laut geschaltet), gilt ab sofort ein neuer Tagesplan.
+    if (planNeedsReset(before, settings)) {
+      resetCompanionPlan(db, userId)
+      ensureTodayPlan({
+        database: db,
+        userId,
+        settings,
+        nowMs: Date.now()
+      })
+    }
+
     // Der Chat "Luna" entsteht beim ersten Einschalten und folgt danach
     // Ton und Modell aus den Einstellungen.
     if (settings.enabled && !before.enabled) {
@@ -102,6 +117,30 @@ router.patch(
     syncCompanionConversation(db, userId)
 
     res.json(payload(userId))
+  })
+)
+
+router.post(
+  '/replan',
+  requireAuth,
+  handler((req, res) => {
+    const userId = req.session.userId
+    const settings = getCompanionSettings(db, userId)
+
+    resetCompanionPlan(db, userId)
+
+    const result = ensureTodayPlan({
+      database: db,
+      userId,
+      settings,
+      nowMs: Date.now()
+    })
+
+    res.json({
+      ...payload(userId),
+      replanned: result.created,
+      count: result.state.planned.length
+    })
   })
 )
 

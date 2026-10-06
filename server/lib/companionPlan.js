@@ -131,6 +131,7 @@ export function buildDailyPlan({
   maxPerDay,
   minGapMinutes,
   nowSeconds,
+  alreadySent = 0,
   rng = Math.random
 }) {
   const startEpoch = zonedTimeToEpoch(dateString, windowStart, timeZone)
@@ -138,11 +139,14 @@ export function buildDailyPlan({
   const from = Math.max(startEpoch, Math.floor(nowSeconds) + 60)
   const span = endEpoch - from
   const gap = Math.max(0, Math.floor(minGapMinutes)) * 60
-  const low = Math.max(0, Math.min(minPerDay, HARD_MAX_PER_DAY))
+  // "Zwischen x und y pro Tag" gilt fuer den ganzen Tag: Was heute schon
+  // gesendet wurde, zaehlt mit (wichtig beim Neuwuerfeln mitten am Tag).
+  const sent = Math.max(0, Math.floor(alreadySent))
   const high = Math.max(
-    low,
-    Math.min(maxPerDay, HARD_MAX_PER_DAY)
+    0,
+    Math.min(maxPerDay - sent, HARD_MAX_PER_DAY - sent)
   )
+  const low = Math.max(0, Math.min(minPerDay - sent, high))
 
   let count = randomInt(low, high, rng)
 

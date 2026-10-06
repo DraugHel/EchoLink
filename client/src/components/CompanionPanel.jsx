@@ -129,11 +129,25 @@ export function CompanionPanelView({
   onReset,
   onPreview,
   onSendNow,
+  onReplan,
   onOpenChat
 }) {
   const settings = data?.settings
   const status = data?.status
   const events = data?.events || []
+
+  let localToday = ''
+
+  try {
+    localToday = new Date().toLocaleDateString('sv-SE', {
+      timeZone: settings?.timezone
+    })
+  } catch {
+    localToday = ''
+  }
+
+  const hasTodayPlan =
+    Boolean(status?.planDate) && status.planDate === localToday
 
   const updateDraft = patch =>
     setDraft(current => ({ ...current, ...patch }))
@@ -234,11 +248,11 @@ export function CompanionPanelView({
                 </label>
 
                 <div style={styles.statusLines}>
-                  {status.planned.length > 0 ? (
+                  {hasTodayPlan && status.planned.length > 0 ? (
                     <>
                       <span>
-                        Heute: {status.sentToday} von{' '}
-                        {status.planned.length} gesendet
+                        Heute gesendet: {status.sentToday} · noch offen:{' '}
+                        {status.planned.filter(slot => !slot.done).length}
                       </span>
                       <span style={styles.chips}>
                         {status.planned.map(slot => (
@@ -255,6 +269,11 @@ export function CompanionPanelView({
                         ))}
                       </span>
                     </>
+                  ) : hasTodayPlan ? (
+                    <span>
+                      Heute gesendet: {status.sentToday}. Für den Rest
+                      des Tages ist keine Meldung geplant.
+                    </span>
                   ) : (
                     <span>
                       Noch kein Plan für heute. Er entsteht beim ersten
@@ -294,6 +313,17 @@ export function CompanionPanelView({
                     style={styles.button}
                   >
                     Jetzt eine Nachricht
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={onReplan}
+                    disabled={
+                      busy || !settings.enabled || settings.muted
+                    }
+                    style={styles.button}
+                  >
+                    Plan neu würfeln
                   </button>
                 </div>
               </Section>
@@ -726,6 +756,18 @@ export default function CompanionPanel({
           )
         })
       }
+      onReplan={() =>
+        run(async () => {
+          const next = await api.post('/api/companion/replan', {})
+
+          applyData(next)
+          setNotice(
+            next.replanned
+              ? `Neuer Plan: ${next.count} Meldung(en) für den Rest des Tages.`
+              : 'Es wurde kein Plan erstellt. Luna ist aus, stumm oder gerade außerhalb des Zeitfensters.'
+          )
+        })
+      }
       onOpenChat={() =>
         onOpenConversation?.(data?.status?.conversationId)
       }
@@ -882,7 +924,8 @@ const styles = {
   },
   buttonRow: {
     display: 'grid',
-    gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+    gridTemplateColumns:
+      'repeat(auto-fit, minmax(150px, 1fr))',
     gap: 8
   },
   button: {

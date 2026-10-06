@@ -5,6 +5,7 @@ import Database from 'better-sqlite3'
 import {
   companionGenerationPrompt,
   companionHasActiveUsers,
+  ensureTodayPlan,
   listUpcomingShifts,
   previewCompanion,
   runCompanionCycle,
@@ -14,11 +15,14 @@ import {
 import { zonedTimeToEpoch } from '../server/lib/companionPlan.js'
 import {
   companionStatus,
+  countScheduledSentSince,
   countUnanswered,
   ensureCompanionConversation,
   getCompanionSettings,
   listCompanionEvents,
+  planNeedsReset,
   readCompanionState,
+  resetCompanionPlan,
   syncCompanionConversation,
   updateCompanionSettings
 } from '../server/lib/companionStore.js'
@@ -680,4 +684,151 @@ test('der Worker prueft guenstig, ob ueberhaupt jemand aktiviert ist', () => {
 
   updateCompanionSettings(database, 1, { enabled: true })
   assert.equal(companionHasActiveUsers(database), true)
+})
+
+// ---------- Plan neu wuerfeln ----------
+
+test('wann der Tagesplan neu gewuerfelt wird', () => {
+  const base = {
+    enabled: true,
+    muted: false,
+    minPerDay: 1,
+    maxPerDay: 4,
+    windowStart: '08:00',
+    windowEnd: '22:00',
+    minGapMinutes: 60,
+    timezone: 'Europe/Vienna',
+    tone: 'a',
+    model: '',
+    maxUnanswered: 2,
+    pushPreview: true
+  }
+
+  assert.equal(planNeedsReset(base, { ...base }), false)
+
+  // Ton, Modell, Quellen, Push-Vorschau und Pause-Grenze betreffen den Plan nicht.
+  assert.equal(
+    planNeedsReset(base, {
+      ...base, tone: 'b', model: 'x', maxUnanswered: 5, pushPreview: false
+    }),
+    false
+  )
+
+  for (const change of [
+    { minPerDay: 2 },
+    { maxPerDay: 5 },
+    { windowStart: '09:00' },
+    { windowEnd: '21:00' },
+    { minGapMinutes: 90 },
+    { timezone: 'Europe/Berlin' }
+  ]) {
+    assert.equal(planNeedsReset(base, { ...base, ...change }), true, JSON.stringify(change))
+  }
+
+  // Einschalten und wieder laut schalten: neuer Plan. Ausschalten und stumm: nicht.
+  assert.equal(planNeedsReset({ ...base, enabled: false }, base), true)
+  assert.equal(planNeedsReset(base, { ...base, enabled: false }), false)
+  assert.equal(planNeedsReset({ ...base, muted: true }, base), true)
+  assert.equal(planNeedsReset(base, { ...base, muted: true }), false)
+})
+
+test('Neuwuerfeln beruecksichtigt, was heute schon gesendet wurde', async () => {
+  const database = makeDatabase()
+  const deps = makeDeps()
+
+  enable(database, { minPerDay: 3, maxPerDay: 3, minGapMinutes: 15 })
+  await runCompanionCycle({ database, deps, nowMs: at('09:00'), rng: seeded(5) })
+
+  const first = readCompanionState(database, 1).planned[0] * 1000
+
+  await runCompanionCycle({ database, deps, nowMs: first, rng: seeded(5) })
+  assert.equal(messagesOf(database).length, 1)
+
+  // Die Zeitstempel der Tests laufen in simulierter Zeit.
+  database.prepare(`UPDATE companion_events SET created_at = ? WHERE kind = 'sent'`)
+    .run(Math.floor(first / 1000))
+
+  const later = first + 5 * 60 * 1000
+
+  resetCompanionPlan(database, 1)
+  assert.equal(readCompanionState(database, 1).planDate, '')
+
+  const result = ensureTodayPlan({
+    database,
+    userId: 1,
+    settings: getCompanionSettings(database, 1),
+    nowMs: later,
+    rng: seeded(9)
+  })
+
+  // Maximum 3 pro Tag, eine ging schon raus: hoechstens 2 neue.
+  assert.equal(result.created, true)
+  assert.equal(result.state.planned.length, 2)
+  assert.equal(result.state.sentToday, 1)
+  assert.equal(result.state.nextIndex, 0)
+
+  for (const time of result.state.planned) {
+    assert.ok(time >= Math.floor(later / 1000) + 60)
+  }
+
+  const planned = listCompanionEvents(database, 1, 5).find(event => event.kind === 'planned')
+
+  assert.match(planned.reason, /2 Meldung\(en\) fuer den Rest des Tages geplant \(1 schon gesendet\)/)
+})
+
+test('ein bestehender Plan bleibt, solange nicht zurueckgesetzt wird', async () => {
+  const database = makeDatabase()
+  const deps = makeDeps()
+
+  enable(database)
+  await runCompanionCycle({ database, deps, nowMs: at('09:00'), rng: seeded(3) })
+
+  const before = readCompanionState(database, 1).planned
+
+  const result = ensureTodayPlan({
+    database,
+    userId: 1,
+    settings: getCompanionSettings(database, 1),
+    nowMs: at('10:00'),
+    rng: seeded(99)
+  })
+
+  assert.equal(result.created, false)
+  assert.deepEqual(readCompanionState(database, 1).planned, before)
+})
+
+test('ohne Berechtigung oder ausserhalb des Fensters entsteht kein Plan', () => {
+  const database = makeDatabase()
+  const planFor = (clock, patch = {}) => {
+    resetCompanionPlan(database, 1)
+    updateCompanionSettings(database, 1, { enabled: true, muted: false, ...patch })
+
+    return ensureTodayPlan({
+      database,
+      userId: 1,
+      settings: getCompanionSettings(database, 1),
+      nowMs: at(clock),
+      rng: seeded(1)
+    })
+  }
+
+  assert.equal(planFor('12:00').created, true)
+  assert.equal(planFor('12:00', { muted: true }).created, false)
+  assert.equal(planFor('12:00', { muted: false, enabled: false }).created, false)
+  assert.equal(planFor('07:00', { enabled: true }).created, false)
+  assert.equal(planFor('22:30').created, false)
+  assert.equal(readCompanionState(database, 1).planDate, '')
+})
+
+test('manuell gesendete Meldungen zaehlen nicht zum Tageslimit', async () => {
+  const database = makeDatabase()
+  const deps = makeDeps()
+
+  await sendCompanionNow({ database, userId: 1, deps, nowMs: at('12:00'), rng: seeded(1) })
+  assert.equal(countScheduledSentSince(database, 1, 0), 0)
+
+  enable(database, { minPerDay: 2, maxPerDay: 2 })
+  await runCompanionCycle({ database, deps, nowMs: at('13:00'), rng: seeded(3) })
+  assert.equal(readCompanionState(database, 1).planned.length, 2)
+  assert.equal(readCompanionState(database, 1).sentToday, 0)
 })

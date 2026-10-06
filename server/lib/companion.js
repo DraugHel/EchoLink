@@ -15,6 +15,7 @@ import {
 } from './companionPlan.js'
 import {
   COMPANION_DEFAULT_TONE,
+  countScheduledSentSince,
   countUnanswered,
   ensureCompanionConversation,
   ensureCompanionSchema,
@@ -238,13 +239,15 @@ async function deliverCompanionMessage({
   }
 }
 
-async function runForUser({ database, userId, deps, nowMs, rng }) {
-  const settings = getCompanionSettings(database, userId)
-
-  if (!settings.enabled || settings.muted) {
-    return { sent: 0, skipped: 0 }
-  }
-
+// Erstellt den Tagesplan, falls fuer heute noch keiner existiert und Luna
+// gerade aktiv sein darf. Wird vom Worker-Takt und beim Neuwuerfeln benutzt.
+export function ensureTodayPlan({
+  database,
+  userId,
+  settings,
+  nowMs,
+  rng = Math.random
+}) {
   const nowSeconds = Math.floor(nowMs / 1000)
   const timeZone = settings.timezone
   const today = localDateString(nowSeconds, timeZone)
@@ -258,39 +261,76 @@ async function runForUser({ database, userId, deps, nowMs, rng }) {
     settings.windowEnd,
     timeZone
   )
+  const state = readCompanionState(database, userId)
+  const inWindow = nowSeconds >= windowStart && nowSeconds <= windowEnd
 
-  // Ausserhalb des Zeitfensters passiert nichts.
-  if (nowSeconds < windowStart || nowSeconds > windowEnd) {
+  if (
+    !settings.enabled ||
+    settings.muted ||
+    !inWindow ||
+    state.planDate === today
+  ) {
+    return { state, created: false, inWindow, nowSeconds }
+  }
+
+  const alreadySent = countScheduledSentSince(
+    database,
+    userId,
+    zonedTimeToEpoch(today, '00:00', timeZone)
+  )
+
+  const plan = buildDailyPlan({
+    dateString: today,
+    timeZone,
+    windowStart: settings.windowStart,
+    windowEnd: settings.windowEnd,
+    minPerDay: settings.minPerDay,
+    maxPerDay: settings.maxPerDay,
+    minGapMinutes: settings.minGapMinutes,
+    nowSeconds,
+    alreadySent,
+    rng
+  })
+
+  const next = saveCompanionState(database, userId, {
+    planDate: today,
+    planned: plan.times,
+    nextIndex: 0,
+    sentToday: alreadySent
+  })
+
+  logCompanionEvent(database, userId, {
+    kind: 'planned',
+    reason:
+      `${plan.count} Meldung(en) fuer den Rest des Tages geplant` +
+      (alreadySent > 0 ? ` (${alreadySent} schon gesendet)` : '')
+  })
+
+  return { state: next, created: true, inWindow, nowSeconds }
+}
+
+async function runForUser({ database, userId, deps, nowMs, rng }) {
+  const settings = getCompanionSettings(database, userId)
+
+  if (!settings.enabled || settings.muted) {
     return { sent: 0, skipped: 0 }
   }
 
-  let state = readCompanionState(database, userId)
+  const planned = ensureTodayPlan({
+    database,
+    userId,
+    settings,
+    nowMs,
+    rng
+  })
 
-  if (state.planDate !== today) {
-    const plan = buildDailyPlan({
-      dateString: today,
-      timeZone,
-      windowStart: settings.windowStart,
-      windowEnd: settings.windowEnd,
-      minPerDay: settings.minPerDay,
-      maxPerDay: settings.maxPerDay,
-      minGapMinutes: settings.minGapMinutes,
-      nowSeconds,
-      rng
-    })
-
-    state = saveCompanionState(database, userId, {
-      planDate: today,
-      planned: plan.times,
-      nextIndex: 0,
-      sentToday: 0
-    })
-
-    logCompanionEvent(database, userId, {
-      kind: 'planned',
-      reason: `${plan.count} Meldung(en) fuer heute geplant`
-    })
+  // Ausserhalb des Zeitfensters passiert nichts.
+  if (!planned.inWindow) {
+    return { sent: 0, skipped: 0 }
   }
+
+  const nowSeconds = planned.nowSeconds
+  const state = planned.state
 
   const slot = nextSlotState({
     times: state.planned,
