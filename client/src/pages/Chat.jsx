@@ -1042,7 +1042,8 @@ export default function Chat({ user, onLogout }) {
 
   async function createConvo() {
     if (activeConvo) {
-      try { await api.post(`/api/memory/update/${activeConvo.id}`, {}) } catch {}
+      // Im Hintergrund: der neue Chat muss nicht auf die Memory-Aktualisierung warten.
+      api.post(`/api/memory/update/${activeConvo.id}`, {}).catch(() => {})
     }
     const convo = await api.post('/api/conversations', {})
     setConversations(prev => [convo, ...prev])

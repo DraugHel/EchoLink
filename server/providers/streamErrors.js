@@ -36,6 +36,35 @@ export function streamFailure(error, partialOutput) {
   })
 }
 
+const MAX_ERROR_TEXT = 300
+
+// Provider-Fehler kommen meist als JSON ({"error":{"message":"..."}}).
+// Im Chat soll nur die eigentliche Meldung stehen, nicht das ganze JSON.
+export function providerErrorText(body) {
+  const text = String(body ?? '').trim()
+
+  if (!text) return ''
+
+  try {
+    const data = JSON.parse(text)
+    const message =
+      typeof data?.error === 'string'
+        ? data.error
+        : data?.error?.message ?? data?.message ?? data?.detail
+
+    if (typeof message === 'string' && message.trim()) {
+      return message
+        .trim()
+        .replace(/\s+/g, ' ')
+        .slice(0, MAX_ERROR_TEXT)
+    }
+  } catch {
+    // Kein JSON: Rohtext gekuerzt ausgeben.
+  }
+
+  return text.slice(0, 200)
+}
+
 export async function fetchProviderStream(url, init, label) {
   let response
   try {
@@ -51,7 +80,7 @@ export async function fetchProviderStream(url, init, label) {
       body = await response.text()
     } catch {}
     throw markProviderError(
-      new Error(`${label} ${response.status}: ${body.slice(0, 200)}`),
+      new Error(`${label} ${response.status}: ${providerErrorText(body)}`),
       { retryable: isRetryableStatus(response.status) }
     )
   }
