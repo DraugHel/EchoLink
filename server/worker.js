@@ -21,6 +21,11 @@ import {
   updateTaskRun
 } from './lib/taskRunState.js'
 import { runWatchtowerCycle } from './lib/watchtower.js'
+import {
+  companionHasActiveUsers,
+  defaultCompanionDeps,
+  runCompanionCycle
+} from './lib/companion.js'
 
 const POLL_MS = Math.max(
   5_000,
@@ -32,6 +37,7 @@ const MAX_TASKS_PER_TICK = 25
 
 let ticking = false
 let watchtowerTicking = false
+let companionTicking = false
 let stopping = false
 
 const WATCHTOWER_POLL_MS = Math.max(
@@ -702,6 +708,55 @@ async function watchtowerTick() {
   }
 }
 
+const COMPANION_POLL_MS = Math.max(
+  30_000,
+  Number(process.env.COMPANION_POLL_MS) || 60_000
+)
+
+let companionDepsPromise = null
+
+async function companionTick() {
+  if (companionTicking || stopping) return
+
+  companionTicking = true
+
+  try {
+    // Ohne aktivierte Benutzer wird nichts geladen oder abgefragt.
+    if (!companionHasActiveUsers(db)) return
+
+    if (!companionDepsPromise) {
+      companionDepsPromise = defaultCompanionDeps(db)
+        .catch(error => {
+          companionDepsPromise = null
+          throw error
+        })
+    }
+
+    const result = await runCompanionCycle({
+      database: db,
+      deps: await companionDepsPromise
+    })
+
+    if (result.sent > 0 || result.skipped > 0) {
+      console.log(JSON.stringify({
+        level: 'info',
+        event: 'companion_cycle_completed',
+        users: result.users,
+        sent: result.sent,
+        skipped: result.skipped
+      }))
+    }
+  } catch (error) {
+    console.error(JSON.stringify({
+      level: 'error',
+      event: 'companion_tick_failed',
+      error: error?.message || String(error)
+    }))
+  } finally {
+    companionTicking = false
+  }
+}
+
 function shutdown(signal) {
   stopping = true
 
@@ -717,7 +772,7 @@ function shutdown(signal) {
     } catch {}
 
     process.exit(0)
-  }, ticking || watchtowerTicking ? 1_000 : 0)
+  }, ticking || watchtowerTicking || companionTicking ? 1_000 : 0)
 }
 
 process.on('SIGINT', () => shutdown('SIGINT'))
@@ -734,3 +789,5 @@ tick()
 setInterval(tick, POLL_MS)
 watchtowerTick()
 setInterval(watchtowerTick, WATCHTOWER_POLL_MS)
+companionTick()
+setInterval(companionTick, COMPANION_POLL_MS)

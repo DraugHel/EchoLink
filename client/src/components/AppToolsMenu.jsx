@@ -42,6 +42,15 @@ function ToolIcon({ type }) {
     )
   }
 
+  if (type === 'companion') {
+    return (
+      <svg {...common}>
+        <path d="M4 6.5A2.5 2.5 0 0 1 6.5 4h11A2.5 2.5 0 0 1 20 6.5v7a2.5 2.5 0 0 1-2.5 2.5H12l-4.5 4v-4h-1A2.5 2.5 0 0 1 4 13.5Z" />
+        <path d="M9 9.5v.01M15 9.5v.01M9.5 12.2c.7.7 1.5 1 2.5 1s1.8-.3 2.5-1" />
+      </svg>
+    )
+  }
+
   if (type === 'system') {
     return (
       <svg {...common}>
@@ -101,6 +110,7 @@ export default function AppToolsMenu({
   onOpenTasks,
   onOpenMemory,
   onOpenSystem,
+  onOpenCompanion,
   onOpenSettings,
   onClose
 }) {
@@ -177,6 +187,13 @@ export default function AppToolsMenu({
                   : 'Prozesse, Ressourcen und Backups'
               }
               onClick={onOpenSystem}
+            />
+
+            <ToolButton
+              icon="companion"
+              title="Luna"
+              description="Meldet sich von sich aus bei dir"
+              onClick={onOpenCompanion}
             />
 
             <ToolButton

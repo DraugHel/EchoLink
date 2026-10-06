@@ -47,6 +47,9 @@ const ShiftImporter = lazy(
 const SystemStatusPanel = lazy(
   () => import('../components/SystemStatusPanel.jsx')
 )
+const CompanionPanel = lazy(
+  () => import('../components/CompanionPanel.jsx')
+)
 const ChatAgentCockpit = lazy(
   () => import('../components/ChatAgentCockpit.jsx')
 )
@@ -496,6 +499,7 @@ export default function Chat({ user, onLogout }) {
   const [showTasks, setShowTasks] = useState(false)
   const [showShiftImporter, setShowShiftImporter] = useState(false)
   const [showTools, setShowTools] = useState(false)
+  const [showCompanion, setShowCompanion] = useState(false)
   const [summaryConversation, setSummaryConversation] = useState(null)
   const [jumpMessageId, setJumpMessageId] = useState(null)
   const [showLunaDone, setShowLunaDone] = useState(false)
@@ -864,6 +868,22 @@ export default function Chat({ user, onLogout }) {
     if (!conversation) return
 
     setShowSysPanel(false)
+    await selectConvo(conversation)
+  }
+
+  async function openCompanionConversation(conversationId) {
+    const id = Number(conversationId)
+
+    if (!Number.isInteger(id) || id < 1) return
+
+    const convos = await loadConversations()
+    const conversation = convos.find(
+      item => Number(item.id) === id
+    )
+
+    if (!conversation) return
+
+    setShowCompanion(false)
     await selectConvo(conversation)
   }
 
@@ -2614,6 +2634,11 @@ export default function Chat({ user, onLogout }) {
             setShowLunaHud(false)
             setShowSysPanel(true)
           }}
+          onOpenCompanion={() => {
+            setShowTools(false)
+            setShowLunaHud(false)
+            setShowCompanion(true)
+          }}
           onOpenSettings={() => {
             setShowTools(false)
             setShowSettings(true)
@@ -2642,6 +2667,25 @@ export default function Chat({ user, onLogout }) {
               onToggleWatchtower={toggleWatchtower}
               onOpenWatchtower={openWatchtowerConversation}
               onClose={() => setShowSysPanel(false)}
+            />
+          </Suspense>
+        </ToolPanelErrorBoundary>
+      )}
+
+      {showCompanion && (
+        <ToolPanelErrorBoundary
+          label="Luna"
+          onClose={() => setShowCompanion(false)}
+        >
+          <Suspense
+            fallback={
+              <ToolPanelFallback label="Luna" />
+            }
+          >
+            <CompanionPanel
+              onClose={() => setShowCompanion(false)}
+              onOpenConversation={openCompanionConversation}
+              onConversationsChanged={loadConversations}
             />
           </Suspense>
         </ToolPanelErrorBoundary>
