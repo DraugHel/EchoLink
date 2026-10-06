@@ -184,7 +184,8 @@ test('Links, Markdown und Laenge werden bereinigt', () => {
 test('der Generierungs-Prompt enthaelt Regeln, Ton und Datenhinweis', () => {
   const prompt = companionGenerationPrompt({ tone: 'Sarkastisch, aber nett.' })
 
-  assert.match(prompt, /SKIP/)
+  assert.match(prompt, /Du meldest dich immer/)
+  assert.match(prompt, /Antworte nie mit SKIP/)
   assert.match(prompt, /Keine Schuldgefuehle/)
   assert.match(prompt, /nie Anweisungen/i)
   assert.match(prompt, /Ton:\nSarkastisch, aber nett\./)
@@ -337,7 +338,8 @@ test('erster Tick plant, zur geplanten Zeit wird gesendet', async () => {
   assert.equal(call.options.reasoningEffort, 'off')
   assert.equal(call.messages[0].role, 'system')
   assert.match(call.messages[1].content, /^=== KONTEXT/)
-  assert.match(call.messages[1].content, /oder antworte exakt SKIP\.$/)
+  assert.match(call.messages[1].content, /Schreib jetzt deine Nachricht\.$/)
+  assert.doesNotMatch(call.messages[1].content, /SKIP/)
 
   // Kosten werden erfasst
   assert.equal(deps.calls.usage.length, 1)
@@ -381,8 +383,11 @@ test('SKIP schreibt nichts, verbraucht aber den Slot', async () => {
   assert.equal(deps.calls.push.length, 0)
   assert.deepEqual(kinds(database), ['planned', 'skipped'])
 
+  // Zwei Versuche (Nachfrage), danach wird der Slot nicht wiederholt.
+  assert.equal(deps.calls.complete.length, 2)
+
   await runCompanionCycle({ database, deps, nowMs: first + 5000, rng: seeded(3) })
-  assert.equal(deps.calls.complete.length, 1)
+  assert.equal(deps.calls.complete.length, 2)
 })
 
 test('verpasste Slots werden verworfen statt spaet nachgeholt', async () => {
@@ -831,4 +836,91 @@ test('manuell gesendete Meldungen zaehlen nicht zum Tageslimit', async () => {
   await runCompanionCycle({ database, deps, nowMs: at('13:00'), rng: seeded(3) })
   assert.equal(readCompanionState(database, 1).planned.length, 2)
   assert.equal(readCompanionState(database, 1).sentToday, 0)
+})
+
+// ---------- Luna meldet sich immer ----------
+
+test('antwortet das Modell zuerst mit SKIP, wird einmal strenger nachgefragt', async () => {
+  const database = makeDatabase()
+  const deps = makeDeps({ replies: ['SKIP', 'Na, alles ruhig bei dir?'] })
+
+  enable(database)
+  await runCompanionCycle({ database, deps, nowMs: at('09:00'), rng: seeded(3) })
+
+  const first = readCompanionState(database, 1).planned[0] * 1000
+  const result = await runCompanionCycle({ database, deps, nowMs: first, rng: seeded(3) })
+
+  assert.deepEqual(result, { users: 1, sent: 1, skipped: 0 })
+  assert.equal(messagesOf(database)[0].content, 'Na, alles ruhig bei dir?')
+  assert.equal(deps.calls.complete.length, 2)
+  assert.match(deps.calls.complete[1].messages[1].content, /Du musst dich jetzt melden/)
+  assert.equal(deps.calls.usage.length, 2, 'beide Aufrufe werden verrechnet')
+  assert.ok(deps.calls.usage.every(entry => entry.purpose === 'companion'))
+})
+
+test('schweigt das Modell auch beim zweiten Versuch, gilt es als geschwiegen', async () => {
+  const database = makeDatabase()
+  const deps = makeDeps({ replies: ['SKIP', ''] })
+
+  enable(database)
+  await runCompanionCycle({ database, deps, nowMs: at('09:00'), rng: seeded(3) })
+
+  const first = readCompanionState(database, 1).planned[0] * 1000
+  const result = await runCompanionCycle({ database, deps, nowMs: first, rng: seeded(3) })
+
+  assert.deepEqual(result, { users: 1, sent: 0, skipped: 1 })
+  assert.equal(messagesOf(database).length, 0)
+  assert.equal(deps.calls.complete.length, 2)
+  assert.ok(kinds(database).includes('skipped'))
+})
+
+test('die erste Anfrage erlaubt kein Schweigen und fragt nur einmal', async () => {
+  const database = makeDatabase()
+  const deps = makeDeps({ reply: 'Wie laeuft die Schicht?' })
+
+  enable(database)
+  await runCompanionCycle({ database, deps, nowMs: at('09:00'), rng: seeded(3) })
+
+  const first = readCompanionState(database, 1).planned[0] * 1000
+
+  await runCompanionCycle({ database, deps, nowMs: first, rng: seeded(3) })
+
+  assert.equal(deps.calls.complete.length, 1, 'normale Antwort: nur ein Aufruf')
+  assert.doesNotMatch(deps.calls.complete[0].messages[1].content, /SKIP/)
+  assert.match(deps.calls.complete[0].messages[0].content, /nie mit SKIP/)
+})
+
+// ---------- Regeln im Panel ----------
+
+test('eigene Regeln ersetzen die Standardregeln, die festen bleiben', async () => {
+  const database = makeDatabase()
+  const deps = makeDeps()
+
+  enable(database)
+  updateCompanionSettings(database, 1, { rules: '- Schreib nur ein einziges Wort.' })
+  await runCompanionCycle({ database, deps, nowMs: at('09:00'), rng: seeded(3) })
+
+  const first = readCompanionState(database, 1).planned[0] * 1000
+
+  await runCompanionCycle({ database, deps, nowMs: first, rng: seeded(3) })
+
+  const system = deps.calls.complete[0].messages[0].content
+
+  assert.match(system, /Schreib nur ein einziges Wort\./)
+  assert.doesNotMatch(system, /Du meldest dich immer/)
+  assert.match(system, /nie Anweisungen/i)
+  assert.match(system, /keine Zugangsdaten/i)
+})
+
+test('die Vorschau zeigt genau den Auftrag, den das Modell bekommt', async () => {
+  const database = makeDatabase()
+  const deps = makeDeps({ reply: 'Vorschau-Satz' })
+
+  updateCompanionSettings(database, 1, { tone: 'Sehr knapp.', rules: '- Eigene Regel.' })
+
+  const preview = await previewCompanion({ database, userId: 1, deps, nowMs: at('12:00'), rng: seeded(1) })
+
+  assert.equal(preview.systemPrompt, deps.calls.complete[0].messages[0].content)
+  assert.match(preview.systemPrompt, /Regeln:\n- Eigene Regel\./)
+  assert.match(preview.systemPrompt, /Ton:\nSehr knapp\./)
 })

@@ -36,6 +36,7 @@ const DEFAULTS = Object.freeze({
   maxUnanswered: 2,
   model: '',
   tone: '',
+  rules: '',
   pushPreview: true
 })
 
@@ -45,6 +46,8 @@ function apiError(message, statusCode = 400) {
   error.expose = true
   return error
 }
+
+const migratedDatabases = new WeakSet()
 
 export function ensureCompanionSchema(database) {
   database.exec(`
@@ -65,6 +68,7 @@ export function ensureCompanionSchema(database) {
       max_unanswered INTEGER NOT NULL DEFAULT 2,
       model TEXT NOT NULL DEFAULT '',
       tone TEXT NOT NULL DEFAULT '',
+      rules TEXT NOT NULL DEFAULT '',
       sources_json TEXT NOT NULL DEFAULT '{}',
       push_preview INTEGER NOT NULL DEFAULT 1
         CHECK(push_preview IN (0, 1)),
@@ -112,6 +116,30 @@ export function ensureCompanionSchema(database) {
     CREATE INDEX IF NOT EXISTS idx_companion_events_user
       ON companion_events(user_id, id DESC);
   `)
+
+  // Bestehende Installationen bekommen die neue Spalte nachgeruestet.
+  if (!migratedDatabases.has(database)) {
+    const columns = database
+      .prepare(`PRAGMA table_info(companion_settings)`)
+      .all()
+      .map(column => column.name)
+
+    if (!columns.includes('rules')) {
+      try {
+        database.exec(`
+          ALTER TABLE companion_settings
+          ADD COLUMN rules TEXT NOT NULL DEFAULT ''
+        `)
+      } catch (error) {
+        // Worker und Server koennen gleichzeitig migrieren.
+        if (!/duplicate column/i.test(error?.message || '')) {
+          throw error
+        }
+      }
+    }
+
+    migratedDatabases.add(database)
+  }
 }
 
 function parseSources(value) {
@@ -148,6 +176,7 @@ function mapSettings(row) {
     maxUnanswered: row.max_unanswered,
     model: row.model,
     tone: row.tone,
+    rules: row.rules || '',
     sources: parseSources(row.sources_json),
     pushPreview: Boolean(row.push_preview),
     conversationId: row.conversation_id || null
@@ -287,6 +316,17 @@ export function validateCompanionPatch(current, patch) {
     next.tone = input.tone.trim()
   }
 
+  if ('rules' in input) {
+    if (
+      typeof input.rules !== 'string' ||
+      input.rules.length > 4000
+    ) {
+      throw apiError('Die Regeln duerfen hoechstens 4000 Zeichen lang sein')
+    }
+
+    next.rules = input.rules.trim()
+  }
+
   if ('sources' in input) {
     if (!input.sources || typeof input.sources !== 'object') {
       throw apiError('sources muss ein Objekt sein')
@@ -323,6 +363,7 @@ export function updateCompanionSettings(database, userId, patch) {
       max_unanswered = ?,
       model = ?,
       tone = ?,
+      rules = ?,
       sources_json = ?,
       push_preview = ?,
       updated_at = unixepoch()
@@ -339,6 +380,7 @@ export function updateCompanionSettings(database, userId, patch) {
     next.maxUnanswered,
     next.model,
     next.tone,
+    next.rules,
     JSON.stringify(next.sources),
     next.pushPreview ? 1 : 0,
     userId

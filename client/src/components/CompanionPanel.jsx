@@ -10,6 +10,7 @@ const EDITABLE_KEYS = [
   'maxUnanswered',
   'model',
   'tone',
+  'rules',
   'pushPreview',
   'sources'
 ]
@@ -34,7 +35,7 @@ const EVENT_LABELS = {
   test: 'Vorschau'
 }
 
-export function pickEditable(settings) {
+export function pickEditable(settings, defaults) {
   const draft = {}
 
   for (const key of EDITABLE_KEYS) {
@@ -44,7 +45,18 @@ export function pickEditable(settings) {
         : settings[key]
   }
 
+  // Leer gespeichert heisst "Standardregeln": Im Feld steht dann der Standardtext.
+  draft.rules = settings.rules || defaults?.rules || ''
+
   return draft
+}
+
+// Entspricht der Text den Standardregeln, wird "leer" gespeichert, damit
+// spaetere Verbesserungen der Standardregeln automatisch gelten.
+export function normalizeRules(rules, defaultRules) {
+  const text = String(rules ?? '').trim()
+
+  return text === String(defaultRules ?? '').trim() ? '' : text
 }
 
 function sameDraft(left, right) {
@@ -135,6 +147,9 @@ export function CompanionPanelView({
   const settings = data?.settings
   const status = data?.status
   const events = data?.events || []
+  const defaults = data?.defaults
+  const rulesAreDefault =
+    normalizeRules(draft?.rules, defaults?.rules) === ''
 
   let localToday = ''
 
@@ -468,6 +483,57 @@ export function CompanionPanelView({
                 </span>
               </Section>
 
+              <Section title="Regeln für Luna">
+                <span style={styles.rowHint}>
+                  So lautet der Auftrag an das Modell bei jeder Meldung.
+                  {rulesAreDefault
+                    ? ' Aktuell gelten die Standardregeln.'
+                    : ' Aktuell gelten deine eigenen Regeln.'}
+                </span>
+
+                <textarea
+                  value={draft.rules}
+                  maxLength={4000}
+                  rows={10}
+                  onChange={event =>
+                    updateDraft({ rules: event.target.value })
+                  }
+                  style={{
+                    ...styles.input,
+                    ...styles.rulesInput
+                  }}
+                  aria-label="Regeln für Luna"
+                />
+
+                <div style={styles.buttonRow}>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      updateDraft({ rules: defaults?.rules || '' })
+                    }
+                    disabled={busy || rulesAreDefault || !defaults}
+                    style={styles.button}
+                  >
+                    Standard wiederherstellen
+                  </button>
+                </div>
+
+                <span style={styles.rowHint}>
+                  Luna meldet sich immer: Antwortet das Modell trotzdem
+                  mit SKIP, fragt EchoLink einmal nach. Das lässt sich
+                  über diesen Text nicht abschalten.
+                </span>
+
+                {defaults?.fixedRules && (
+                  <details style={styles.details}>
+                    <summary style={styles.summary}>
+                      Immer aktiv (nicht änderbar)
+                    </summary>
+                    <pre style={styles.pre}>{defaults.fixedRules}</pre>
+                  </details>
+                )}
+              </Section>
+
               <Section title="Ton und Modell">
                 <label style={styles.field}>
                   <span style={styles.fieldLabel}>Wie Luna schreibt</span>
@@ -586,6 +652,16 @@ export function CompanionPanelView({
                       </summary>
                       <pre style={styles.pre}>{preview.context}</pre>
                     </details>
+                    {preview.systemPrompt && (
+                      <details style={styles.details}>
+                        <summary style={styles.summary}>
+                          Auftrag an das Modell (Regeln und Ton)
+                        </summary>
+                        <pre style={styles.pre}>
+                          {preview.systemPrompt}
+                        </pre>
+                      </details>
+                    )}
                   </>
                 )}
               </Section>
@@ -646,7 +722,7 @@ export default function CompanionPanel({
 
   const applyData = useCallback(next => {
     setData(next)
-    setDraft(pickEditable(next.settings))
+    setDraft(pickEditable(next.settings, next.defaults))
   }, [])
 
   useEffect(() => {
@@ -677,7 +753,7 @@ export default function CompanionPanel({
 
   const dirty =
     Boolean(data && draft) &&
-    !sameDraft(draft, pickEditable(data.settings))
+    !sameDraft(draft, pickEditable(data.settings, data.defaults))
 
   async function run(task, successNotice = '') {
     setBusy(true)
@@ -730,8 +806,18 @@ export default function CompanionPanel({
       onToggleMuted={muted =>
         patch({ muted }, muted ? 'Luna ist stumm.' : 'Luna ist wieder da.')
       }
-      onSave={() => patch(draft, 'Gespeichert.')}
-      onReset={() => setDraft(pickEditable(data.settings))}
+      onSave={() =>
+        patch(
+          {
+            ...draft,
+            rules: normalizeRules(draft.rules, data?.defaults?.rules)
+          },
+          'Gespeichert.'
+        )
+      }
+      onReset={() =>
+        setDraft(pickEditable(data.settings, data.defaults))
+      }
       onPreview={() =>
         run(async () => {
           setPreview(await api.post('/api/companion/preview', {}))
@@ -745,6 +831,7 @@ export default function CompanionPanel({
           applyData({
             settings: result.settings,
             status: result.status,
+            defaults: result.defaults,
             events: result.events
           })
 
@@ -969,6 +1056,12 @@ const styles = {
     color: 'var(--text1)',
     fontSize: 13,
     fontFamily: 'inherit'
+  },
+  rulesInput: {
+    resize: 'vertical',
+    fontFamily: 'var(--font-mono)',
+    fontSize: 12,
+    lineHeight: 1.5
   },
   saveBar: {
     display: 'grid',

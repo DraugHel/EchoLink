@@ -9,6 +9,7 @@ import {
   sendCompanionNow
 } from '../lib/companion.js'
 import {
+  COMPANION_DEFAULT_TONE,
   companionStatus,
   ensureCompanionConversation,
   getCompanionSettings,
@@ -19,6 +20,10 @@ import {
   updateCompanionSettings
 } from '../lib/companionStore.js'
 import { isValidTimeZone } from '../lib/companionPlan.js'
+import {
+  DEFAULT_COMPANION_RULES,
+  FIXED_COMPANION_RULES
+} from '../lib/companionPrompt.js'
 
 const router = Router()
 
@@ -63,6 +68,11 @@ function payload(userId) {
       ...companionStatus(db, userId, now / 1000),
       pushConfigured: pushConfigured(),
       timezoneValid: isValidTimeZone(settings.timezone)
+    },
+    defaults: {
+      rules: DEFAULT_COMPANION_RULES,
+      fixedRules: FIXED_COMPANION_RULES,
+      tone: COMPANION_DEFAULT_TONE
     },
     events: listCompanionEvents(db, userId, 20)
   }

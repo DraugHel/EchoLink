@@ -82,3 +82,21 @@ test('Luna kann den Tagesplan neu wuerfeln (Route, Auto-Reset, Panel)', () => {
   assert.match(panel, /\/api\/companion\/replan/)
   assert.match(panel, /onReplan/)
 })
+
+test('Luna-Regeln: Panel, Route und Auftrag sind verbunden', () => {
+  const panel = read('client/src/components/CompanionPanel.jsx')
+  const route = read('server/routes/companion.js')
+  const companion = read('server/lib/companion.js')
+
+  assert.match(panel, /Regeln für Luna/)
+  assert.match(panel, /Standard wiederherstellen/)
+  assert.match(panel, /normalizeRules\(draft\.rules/)
+  assert.match(panel, /Auftrag an das Modell/)
+  assert.match(panel, /Immer aktiv \(nicht änderbar\)/)
+
+  assert.match(route, /DEFAULT_COMPANION_RULES/)
+  assert.match(route, /defaults: \{/)
+
+  assert.match(companion, /from '\.\/companionPrompt\.js'/)
+  assert.match(companion, /systemPrompt,\n    model/)
+})
