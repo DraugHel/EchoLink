@@ -10,6 +10,21 @@ import {
 const ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages'
 export const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY || ''
 
+// Neuere Claude-Modelle lehnen Sampling-Parameter wie temperature mit HTTP 400 ab
+// ("`temperature` is deprecated for this model"). Dann wird einmal ohne den
+// Parameter wiederholt und das Modell gemerkt, damit spaetere Anfragen ihn
+// gar nicht erst senden.
+const MODELS_WITHOUT_TEMPERATURE = new Set()
+
+function isTemperatureRejected(error) {
+  const message = String(error?.message || '')
+
+  return (
+    /temperature/i.test(message) &&
+    /deprecated|not supported|unsupported|not allowed/i.test(message)
+  )
+}
+
 function anthropicTools(tools = ALL_TOOLS) {
   return tools.map(t => ({
     name: t.function.name,
@@ -154,9 +169,9 @@ export async function streamAnthropic(model, messages, options, res, abortSignal
     // Thinking an: adaptive + effort; temperature ist dann nicht erlaubt
     ...(thinkingOn
       ? { thinking: { type: 'adaptive', display: 'summarized' }, output_config: { effort: RE } }
-      : (options?.temperature != null ? { temperature: Math.min(options.temperature, 1) } : {}))
+      : (options?.temperature != null && !MODELS_WITHOUT_TEMPERATURE.has(model) ? { temperature: Math.min(options.temperature, 1) } : {}))
   }
-  const r = await fetchProviderStream(ANTHROPIC_URL, {
+  const sendRequest = () => fetchProviderStream(ANTHROPIC_URL, {
     method: 'POST',
     headers: {
       'content-type': 'application/json',
@@ -166,6 +181,27 @@ export async function streamAnthropic(model, messages, options, res, abortSignal
     body: JSON.stringify(body),
     signal: abortSignal
   }, 'Anthropic')
+
+  let r
+  try {
+    r = await sendRequest()
+  } catch (error) {
+    if (body.temperature === undefined || !isTemperatureRejected(error)) {
+      throw error
+    }
+
+    if (!MODELS_WITHOUT_TEMPERATURE.has(model)) {
+      MODELS_WITHOUT_TEMPERATURE.add(model)
+      console.warn(JSON.stringify({
+        level: 'warn',
+        event: 'anthropic_temperature_rejected',
+        model
+      }))
+    }
+
+    delete body.temperature
+    r = await sendRequest()
+  }
 
   let fullContent = '', fullThinking = ''
   const toolBlocks = {}
