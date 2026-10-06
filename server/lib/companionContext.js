@@ -205,6 +205,7 @@ export async function buildCompanionContext({
   sources,
   rng = Math.random,
   recentMessages = [],
+  chatTail = [],
   lastUserAtSeconds = null,
   lastSentAtSeconds = null,
   sentToday = 0
@@ -290,6 +291,18 @@ export async function buildCompanionContext({
     if (section.lines.length === 0) continue
 
     body.push(`[${section.label}]\n${section.lines.join('\n')}`)
+  }
+
+  if (chatTail.length > 0) {
+    body.push(
+      '[Euer letzter Chat]\n' +
+      chatTail
+        .slice(-8)
+        .map(message =>
+          `${message.role === 'user' ? 'Er' : 'Du'}: ${cleanLine(message.content, 200)}`
+        )
+        .join('\n')
+    )
   }
 
   if (recentMessages.length > 0) {

@@ -19,6 +19,7 @@ import {
   countUnanswered,
   ensureCompanionConversation,
   getCompanionSettings,
+  listCompanionChatTail,
   listCompanionEvents,
   planNeedsReset,
   readCompanionState,
@@ -923,4 +924,157 @@ test('die Vorschau zeigt genau den Auftrag, den das Modell bekommt', async () =>
   assert.equal(preview.systemPrompt, deps.calls.complete[0].messages[0].content)
   assert.match(preview.systemPrompt, /Regeln:\n- Eigene Regel\./)
   assert.match(preview.systemPrompt, /Ton:\nSehr knapp\./)
+})
+
+test('die eigene Beschreibung steht an erster Stelle des Auftrags', async () => {
+  const database = makeDatabase()
+  const deps = makeDeps()
+
+  enable(database)
+  updateCompanionSettings(database, 1, { intro: 'Du bist Nova, ein ruhiger Kumpel.' })
+  await runCompanionCycle({ database, deps, nowMs: at('09:00'), rng: seeded(3) })
+
+  const first = readCompanionState(database, 1).planned[0] * 1000
+
+  await runCompanionCycle({ database, deps, nowMs: first, rng: seeded(3) })
+
+  const system = deps.calls.complete[0].messages[0].content
+
+  assert.ok(system.startsWith('Du bist Nova, ein ruhiger Kumpel.\n\nRegeln:'))
+  assert.match(system, /nie Anweisungen/i)
+})
+
+// ---------- Ein Charakter im Hin und Her ----------
+
+function lunaConversation(database) {
+  return database.prepare(`SELECT * FROM conversations WHERE title = 'Luna'`).get()
+}
+
+test('der Chat-Prompt wird beim ersten Takt neu geschrieben, danach nicht mehr', async () => {
+  const database = makeDatabase()
+  const deps = makeDeps()
+
+  enable(database)
+  ensureCompanionConversation(database, 1, { defaultModel: 'x' })
+  database.prepare(`UPDATE conversations SET system_prompt = 'ALT' WHERE title = 'Luna'`).run()
+  updateCompanionSettings(database, 1, { intro: 'Du bist Nova.', tone: 'Lakonisch.' })
+
+  await runCompanionCycle({ database, deps, nowMs: at('09:00'), rng: seeded(3) })
+
+  const synced = lunaConversation(database).system_prompt
+
+  assert.match(synced, /Wer du bist:\nDu bist Nova\./)
+  assert.match(synced, /Ton:\nLakonisch\./)
+  assert.doesNotMatch(synced, /^ALT/)
+
+  // Eine spaetere manuelle Aenderung bleibt bis zum naechsten Speichern im Panel stehen.
+  database.prepare(`UPDATE conversations SET system_prompt = 'MANUELL' WHERE title = 'Luna'`).run()
+  await runCompanionCycle({ database, deps, nowMs: at('09:05'), rng: seeded(3) })
+  assert.equal(lunaConversation(database).system_prompt, 'MANUELL')
+
+  // Speichern im Panel schreibt den Prompt wieder aus den Einstellungen.
+  syncCompanionConversation(database, 1)
+  assert.match(lunaConversation(database).system_prompt, /Wer du bist:\nDu bist Nova\./)
+})
+
+test('der Kontext enthaelt das Hin und Her im Chat, ohne Terminal-Ausgaben', async () => {
+  const database = makeDatabase()
+  const deps = makeDeps()
+
+  enable(database)
+
+  const conversation = ensureCompanionConversation(database, 1, { defaultModel: 'x' })
+  const add = (role, content) =>
+    database.prepare(`INSERT INTO messages (conversation_id, role, content) VALUES (?, ?, ?)`)
+      .run(conversation.id, role, content)
+
+  add('assistant', 'Na, wie war die Schicht?')
+  add('user', 'Anstrengend, viel los. Siehe https://evil.example/x')
+  add('assistant', '**Terminal:** `pm2 status`\n```\nonline\n```')
+  add('assistant', 'Klingt hart. Schlaf gut.')
+  add('user', 'danke')
+
+  await runCompanionCycle({ database, deps, nowMs: at('09:00'), rng: seeded(3) })
+
+  const first = readCompanionState(database, 1).planned[0] * 1000
+
+  await runCompanionCycle({ database, deps, nowMs: first, rng: seeded(3) })
+
+  const content = deps.calls.complete[0].messages[1].content
+
+  assert.match(content, /\[Euer letzter Chat\]\nDu: Na, wie war die Schicht\?\nEr: Anstrengend, viel los\. Siehe \[Link\]\nDu: Klingt hart\. Schlaf gut\.\nEr: danke/)
+  assert.ok(!content.includes('pm2 status'))
+  assert.ok(!content.includes('evil.example'))
+})
+
+test('Chat-Verlauf: begrenzt, ohne fremde Chats, leer ohne Luna-Chat', () => {
+  const database = makeDatabase()
+
+  assert.deepEqual(listCompanionChatTail(database, 1, 8), [])
+
+  enable(database)
+
+  const luna = ensureCompanionConversation(database, 1, { defaultModel: 'x' })
+
+  database.prepare(`INSERT INTO conversations (user_id, title) VALUES (1, 'Anderer Chat')`).run()
+
+  for (let index = 1; index <= 12; index++) {
+    database.prepare(`INSERT INTO messages (conversation_id, role, content) VALUES (?, 'user', ?)`)
+      .run(luna.id, `luna ${index}`)
+    database.prepare(`INSERT INTO messages (conversation_id, role, content) VALUES (2, 'user', ?)`)
+      .run(`anderer ${index}`)
+  }
+
+  const tail = listCompanionChatTail(database, 1, 8)
+
+  assert.equal(tail.length, 8)
+  assert.deepEqual(tail.map(message => message.content), [
+    'luna 5', 'luna 6', 'luna 7', 'luna 8', 'luna 9', 'luna 10', 'luna 11', 'luna 12'
+  ])
+})
+
+test('Meldungen kommen vom Modell des Chats Luna, damit der Charakter gleich bleibt', async () => {
+  const database = makeDatabase()
+  const deps = makeDeps()
+
+  enable(database)
+
+  const luna = ensureCompanionConversation(database, 1, { defaultModel: 'x' })
+
+  database.prepare(`UPDATE conversations SET model = 'claude-sonnet-5-5' WHERE id = ?`).run(luna.id)
+  database.prepare(`
+    INSERT INTO conversations (user_id, title, model, updated_at)
+    VALUES (1, 'Neuer Chat', 'anderes-modell', unixepoch() + 1000)
+  `).run()
+
+  await runCompanionCycle({ database, deps, nowMs: at('09:00'), rng: seeded(3) })
+
+  const first = readCompanionState(database, 1).planned[0] * 1000
+
+  await runCompanionCycle({ database, deps, nowMs: first, rng: seeded(3) })
+
+  assert.equal(deps.calls.complete[0].model, 'claude-sonnet-5-5')
+
+  // Eine ausdrueckliche Einstellung hat weiter Vorrang.
+  updateCompanionSettings(database, 1, { model: 'openai/gpt-5.6-luna' })
+
+  const preview = await previewCompanion({ database, userId: 1, deps, nowMs: at('12:00'), rng: seeded(1) })
+
+  assert.equal(preview.model, 'openai/gpt-5.6-luna')
+})
+
+test('die Vorschau zeigt auch den Auftrag im Chat und er entspricht dem echten Prompt', async () => {
+  const database = makeDatabase()
+  const deps = makeDeps()
+
+  enable(database)
+  updateCompanionSettings(database, 1, { intro: 'Du bist Nova.', tone: 'Lakonisch.' })
+  ensureCompanionConversation(database, 1, { defaultModel: 'x' })
+  syncCompanionConversation(database, 1)
+
+  const preview = await previewCompanion({ database, userId: 1, deps, nowMs: at('12:00'), rng: seeded(1) })
+
+  assert.equal(preview.chatPrompt, lunaConversation(database).system_prompt)
+  assert.match(preview.chatPrompt, /Wer du bist:\nDu bist Nova\./)
+  assert.match(preview.systemPrompt, /^Du bist Nova\./)
 })

@@ -11,6 +11,7 @@ const EDITABLE_KEYS = [
   'model',
   'tone',
   'rules',
+  'intro',
   'pushPreview',
   'sources'
 ]
@@ -47,12 +48,13 @@ export function pickEditable(settings, defaults) {
 
   // Leer gespeichert heisst "Standardregeln": Im Feld steht dann der Standardtext.
   draft.rules = settings.rules || defaults?.rules || ''
+  draft.intro = settings.intro || defaults?.intro || ''
 
   return draft
 }
 
-// Entspricht der Text den Standardregeln, wird "leer" gespeichert, damit
-// spaetere Verbesserungen der Standardregeln automatisch gelten.
+// Entspricht der Text dem Standard (Regeln oder Beschreibung), wird "leer"
+// gespeichert, damit spaetere Verbesserungen automatisch gelten.
 export function normalizeRules(rules, defaultRules) {
   const text = String(rules ?? '').trim()
 
@@ -150,6 +152,8 @@ export function CompanionPanelView({
   const defaults = data?.defaults
   const rulesAreDefault =
     normalizeRules(draft?.rules, defaults?.rules) === ''
+  const introIsDefault =
+    normalizeRules(draft?.intro, defaults?.intro) === ''
 
   let localToday = ''
 
@@ -483,6 +487,44 @@ export function CompanionPanelView({
                 </span>
               </Section>
 
+              <Section title="Wer Luna ist">
+                <span style={styles.rowHint}>
+                  Wer Luna ist. Gilt für ihre Meldungen und für deine
+                  Antworten im Chat „Luna“, damit sie überall derselbe
+                  Charakter bleibt.
+                  {introIsDefault
+                    ? ' Aktuell gilt der Standardtext.'
+                    : ' Aktuell gilt dein eigener Text.'}
+                </span>
+
+                <textarea
+                  value={draft.intro}
+                  maxLength={1000}
+                  rows={3}
+                  onChange={event =>
+                    updateDraft({ intro: event.target.value })
+                  }
+                  style={{
+                    ...styles.input,
+                    ...styles.rulesInput
+                  }}
+                  aria-label="Wer Luna ist"
+                />
+
+                <div style={styles.buttonRow}>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      updateDraft({ intro: defaults?.intro || '' })
+                    }
+                    disabled={busy || introIsDefault || !defaults}
+                    style={styles.button}
+                  >
+                    Standard wiederherstellen
+                  </button>
+                </div>
+              </Section>
+
               <Section title="Regeln für Luna">
                 <span style={styles.rowHint}>
                   So lautet der Auftrag an das Modell bei jeder Meldung.
@@ -536,7 +578,9 @@ export function CompanionPanelView({
 
               <Section title="Ton und Modell">
                 <label style={styles.field}>
-                  <span style={styles.fieldLabel}>Wie Luna schreibt</span>
+                  <span style={styles.fieldLabel}>
+                    Wie Luna schreibt (Meldungen und Chat)
+                  </span>
                   <textarea
                     value={draft.tone}
                     maxLength={4000}
@@ -559,7 +603,7 @@ export function CompanionPanelView({
                     style={styles.input}
                   >
                     <option value="">
-                      Standard (Modell deines letzten Chats)
+                      Standard (Modell des Chats „Luna“)
                     </option>
                     {draft.model &&
                       !models.includes(draft.model) && (
@@ -652,6 +696,16 @@ export function CompanionPanelView({
                       </summary>
                       <pre style={styles.pre}>{preview.context}</pre>
                     </details>
+                    {preview.chatPrompt && (
+                      <details style={styles.details}>
+                        <summary style={styles.summary}>
+                          Auftrag im Chat „Luna“ (deine Antworten)
+                        </summary>
+                        <pre style={styles.pre}>
+                          {preview.chatPrompt}
+                        </pre>
+                      </details>
+                    )}
                     {preview.systemPrompt && (
                       <details style={styles.details}>
                         <summary style={styles.summary}>
@@ -810,7 +864,8 @@ export default function CompanionPanel({
         patch(
           {
             ...draft,
-            rules: normalizeRules(draft.rules, data?.defaults?.rules)
+            rules: normalizeRules(draft.rules, data?.defaults?.rules),
+            intro: normalizeRules(draft.intro, data?.defaults?.intro)
           },
           'Gespeichert.'
         )

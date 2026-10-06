@@ -21,6 +21,7 @@ import {
 } from '../lib/companionStore.js'
 import { isValidTimeZone } from '../lib/companionPlan.js'
 import {
+  DEFAULT_COMPANION_INTRO,
   DEFAULT_COMPANION_RULES,
   FIXED_COMPANION_RULES
 } from '../lib/companionPrompt.js'
@@ -70,6 +71,7 @@ function payload(userId) {
       timezoneValid: isValidTimeZone(settings.timezone)
     },
     defaults: {
+      intro: DEFAULT_COMPANION_INTRO,
       rules: DEFAULT_COMPANION_RULES,
       fixedRules: FIXED_COMPANION_RULES,
       tone: COMPANION_DEFAULT_TONE

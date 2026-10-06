@@ -18,15 +18,18 @@ import {
   companionGenerationPrompt
 } from './companionPrompt.js'
 import {
+  companionSystemPrompt,
   countScheduledSentSince,
   countUnanswered,
   ensureCompanionConversation,
   ensureCompanionSchema,
   getCompanionSettings,
   lastUserMessageAt,
+  listCompanionChatTail,
   logCompanionEvent,
   readCompanionState,
-  saveCompanionState
+  saveCompanionState,
+  syncCompanionConversation
 } from './companionStore.js'
 
 const MAX_MESSAGE_CHARS = 500
@@ -61,8 +64,20 @@ export function sanitizeCompanionMessage(raw) {
     : { skip: false, text }
 }
 
+// Meldungen und Chat sollen vom selben Modell kommen, sonst wirkt der
+// Charakter uneinheitlich: Erst die Einstellung, dann das Modell des Chats
+// "Luna", dann das des letzten Chats.
 function resolveModel(database, userId, settings, defaultModel) {
   if (settings.model) return settings.model
+
+  if (settings.conversationId) {
+    const luna = database.prepare(`
+      SELECT model FROM conversations
+      WHERE id = ? AND user_id = ?
+    `).get(settings.conversationId, userId)
+
+    if (luna?.model) return luna.model
+  }
 
   const latest = database.prepare(`
     SELECT model FROM conversations
@@ -102,6 +117,7 @@ export async function generateCompanionMessage({
     sources: deps.sources,
     rng,
     recentMessages: recentCompanionMessages(database, userId),
+    chatTail: listCompanionChatTail(database, userId, 8),
     lastUserAtSeconds: lastUserMessageAt(database, userId),
     lastSentAtSeconds: state.lastSentAt,
     sentToday: state.sentToday
@@ -412,6 +428,34 @@ export function companionHasActiveUsers(database) {
   `).get().count > 0
 }
 
+// Pro Prozess und Datenbank einmal: Der Prompt des Chats "Luna" wird aus den
+// Einstellungen neu geschrieben (z.B. nach einem Update oder Deploy).
+const syncedDatabases = new WeakMap()
+
+function syncChatPromptOnce(database, userId) {
+  let users = syncedDatabases.get(database)
+
+  if (!users) {
+    users = new Set()
+    syncedDatabases.set(database, users)
+  }
+
+  if (users.has(userId)) return
+
+  users.add(userId)
+
+  try {
+    syncCompanionConversation(database, userId)
+  } catch (error) {
+    console.error(JSON.stringify({
+      level: 'error',
+      event: 'companion_chat_sync_failed',
+      userId,
+      error: cleanLine(error?.message || String(error), 200)
+    }))
+  }
+}
+
 export async function runCompanionCycle({
   database,
   deps,
@@ -428,6 +472,8 @@ export async function runCompanionCycle({
   let skipped = 0
 
   for (const { user_id: userId } of users) {
+    syncChatPromptOnce(database, userId)
+
     try {
       const result = await runForUser({
         database,
@@ -496,6 +542,7 @@ export async function previewCompanion({
     message: generated.text,
     skipped: generated.skipped,
     systemPrompt: generated.systemPrompt,
+    chatPrompt: companionSystemPrompt(database, userId, settings),
     model: generated.model
   }
 }

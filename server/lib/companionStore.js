@@ -6,6 +6,12 @@ import {
   isValidTimeZone,
   parseClock
 } from './companionPlan.js'
+import {
+  COMPANION_DEFAULT_TONE,
+  companionChatPrompt
+} from './companionPrompt.js'
+
+export { COMPANION_DEFAULT_TONE }
 
 export const COMPANION_SOURCES = [
   'memory',
@@ -14,15 +20,6 @@ export const COMPANION_SOURCES = [
   'mail',
   'server'
 ]
-
-export const COMPANION_DEFAULT_TONE =
-  'Kurz, trocken, freundlich. Wie ein Freund, der sich einfach meldet. ' +
-  'Kein Assistenten-Sound, keine Floskeln.'
-
-const COMPANION_CHAT_GUIDE =
-  'Dies ist der Chat "Luna": Hier meldest du dich von dir aus, und er ' +
-  'antwortet dir. Antworte wie ein Freund: kurz, direkt, ohne ' +
-  'Assistenten-Floskeln. Alles andere im Chat funktioniert wie sonst.'
 
 const DEFAULTS = Object.freeze({
   enabled: false,
@@ -37,6 +34,7 @@ const DEFAULTS = Object.freeze({
   model: '',
   tone: '',
   rules: '',
+  intro: '',
   pushPreview: true
 })
 
@@ -69,6 +67,7 @@ export function ensureCompanionSchema(database) {
       model TEXT NOT NULL DEFAULT '',
       tone TEXT NOT NULL DEFAULT '',
       rules TEXT NOT NULL DEFAULT '',
+      intro TEXT NOT NULL DEFAULT '',
       sources_json TEXT NOT NULL DEFAULT '{}',
       push_preview INTEGER NOT NULL DEFAULT 1
         CHECK(push_preview IN (0, 1)),
@@ -124,11 +123,13 @@ export function ensureCompanionSchema(database) {
       .all()
       .map(column => column.name)
 
-    if (!columns.includes('rules')) {
+    for (const column of ['rules', 'intro']) {
+      if (columns.includes(column)) continue
+
       try {
         database.exec(`
           ALTER TABLE companion_settings
-          ADD COLUMN rules TEXT NOT NULL DEFAULT ''
+          ADD COLUMN ${column} TEXT NOT NULL DEFAULT ''
         `)
       } catch (error) {
         // Worker und Server koennen gleichzeitig migrieren.
@@ -177,6 +178,7 @@ function mapSettings(row) {
     model: row.model,
     tone: row.tone,
     rules: row.rules || '',
+    intro: row.intro || '',
     sources: parseSources(row.sources_json),
     pushPreview: Boolean(row.push_preview),
     conversationId: row.conversation_id || null
@@ -327,6 +329,17 @@ export function validateCompanionPatch(current, patch) {
     next.rules = input.rules.trim()
   }
 
+  if ('intro' in input) {
+    if (
+      typeof input.intro !== 'string' ||
+      input.intro.length > 1000
+    ) {
+      throw apiError('Die Beschreibung darf hoechstens 1000 Zeichen lang sein')
+    }
+
+    next.intro = input.intro.trim()
+  }
+
   if ('sources' in input) {
     if (!input.sources || typeof input.sources !== 'object') {
       throw apiError('sources muss ein Objekt sein')
@@ -364,6 +377,7 @@ export function updateCompanionSettings(database, userId, patch) {
       model = ?,
       tone = ?,
       rules = ?,
+      intro = ?,
       sources_json = ?,
       push_preview = ?,
       updated_at = unixepoch()
@@ -381,6 +395,7 @@ export function updateCompanionSettings(database, userId, patch) {
     next.model,
     next.tone,
     next.rules,
+    next.intro,
     JSON.stringify(next.sources),
     next.pushPreview ? 1 : 0,
     userId
@@ -551,11 +566,7 @@ export function companionSystemPrompt(database, userId, settings) {
     ''
   ).trim()
 
-  return [
-    base,
-    COMPANION_CHAT_GUIDE,
-    `Ton:\n${settings.tone || COMPANION_DEFAULT_TONE}`
-  ].filter(Boolean).join('\n\n')
+  return companionChatPrompt({ basePrompt: base, settings })
 }
 
 function companionConversationRow(database, userId, settings) {
@@ -625,8 +636,8 @@ export function ensureCompanionConversation(
   `).get(conversationId)
 }
 
-// Haelt Ton und Modell des Chats "Luna" mit den Einstellungen gleich,
-// damit Antworten im selben Charakter bleiben.
+// Haelt Charakter (Beschreibung, Ton) und Modell des Chats "Luna" mit den
+// Einstellungen gleich, damit Antworten im selben Charakter bleiben.
 export function syncCompanionConversation(database, userId) {
   const settings = getCompanionSettings(database, userId)
   const conversation = companionConversationRow(
@@ -718,4 +729,28 @@ export function countScheduledSentSince(database, userId, sinceSeconds) {
       AND reason <> 'manuell'
       AND created_at >= ?
   `).get(userId, sinceSeconds).count
+}
+
+// Die letzten Nachrichten im Chat "Luna" (ohne Terminal-Ausgaben), aelteste
+// zuerst. Damit knuepft eine neue Meldung an das Hin und Her an.
+export function listCompanionChatTail(database, userId, limit = 8) {
+  const settings = getCompanionSettings(database, userId)
+
+  if (!settings.conversationId) return []
+
+  return database.prepare(`
+    SELECT m.role, m.content
+    FROM messages m
+    INNER JOIN conversations c ON c.id = m.conversation_id
+    WHERE c.id = ?
+      AND c.user_id = ?
+      AND m.role IN ('user', 'assistant')
+      AND m.content NOT LIKE '**Terminal:** %'
+    ORDER BY m.id DESC
+    LIMIT ?
+  `).all(
+    settings.conversationId,
+    userId,
+    Math.min(Math.max(Number(limit) || 8, 1), 20)
+  ).reverse()
 }

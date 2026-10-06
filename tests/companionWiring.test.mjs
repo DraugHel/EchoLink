@@ -100,3 +100,30 @@ test('Luna-Regeln: Panel, Route und Auftrag sind verbunden', () => {
   assert.match(companion, /from '\.\/companionPrompt\.js'/)
   assert.match(companion, /systemPrompt,\n    model/)
 })
+
+test('Luna-Beschreibung: Panel und Route sind verbunden', () => {
+  const panel = read('client/src/components/CompanionPanel.jsx')
+  const route = read('server/routes/companion.js')
+
+  assert.match(panel, /Wer Luna ist/)
+  assert.match(panel, /normalizeRules\(draft\.intro/)
+  assert.match(route, /DEFAULT_COMPANION_INTRO/)
+  assert.match(route, /intro: DEFAULT_COMPANION_INTRO/)
+})
+
+test('ein Charakter: Panel, Chat-Prompt und Meldungen sind verbunden', () => {
+  const panel = read('client/src/components/CompanionPanel.jsx')
+  const store = read('server/lib/companionStore.js')
+  const companion = read('server/lib/companion.js')
+  const context = read('server/lib/companionContext.js')
+
+  assert.match(panel, /Antworten im Chat „Luna“/)
+  assert.match(panel, /Auftrag im Chat „Luna“ \(deine Antworten\)/)
+  assert.match(panel, /Standard \(Modell des Chats „Luna“\)/)
+
+  assert.match(store, /companionChatPrompt\(\{ basePrompt: base, settings \}\)/)
+  assert.match(store, /export function listCompanionChatTail/)
+  assert.match(companion, /syncChatPromptOnce\(database, userId\)/)
+  assert.match(companion, /chatTail: listCompanionChatTail\(database, userId, 8\)/)
+  assert.match(context, /\[Euer letzter Chat\]/)
+})

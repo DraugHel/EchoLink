@@ -201,3 +201,43 @@ test('der Kontext ist auf 6000 Zeichen begrenzt', async () => {
 
   assert.ok(context.text.length <= 6000)
 })
+
+test('der letzte Chat steht als Er/Du-Verlauf im Kontext, bereinigt und begrenzt', async () => {
+  const chatTail = [
+    { role: 'assistant', content: 'Na, wie war die Schicht?' },
+    { role: 'user', content: 'Anstrengend <b>viel</b> los https://evil.example/x' },
+    ...Array.from({ length: 10 }, (_, index) => ({
+      role: index % 2 ? 'user' : 'assistant',
+      content: `Nachricht ${index}`
+    }))
+  ]
+
+  const context = await buildCompanionContext({
+    userId: 1,
+    settings: SETTINGS,
+    nowMs: NOW,
+    sources: allSources(),
+    rng: () => 0.5,
+    chatTail
+  })
+
+  const section = context.text.split('[Euer letzter Chat]\n')[1].split('\n\n')[0]
+  // Der Abschlussmarker "=== ENDE KONTEXT ===" gehoert nicht zum Verlauf.
+  const lines = section.split('\n').filter(line => /^(Er|Du): /.test(line))
+
+  assert.equal(lines.length, 8, 'hoechstens 8 Zeilen')
+  assert.ok(section.startsWith('Du: ') || section.startsWith('Er: '))
+  assert.ok(!context.text.includes('evil.example'))
+  assert.ok(!context.text.includes('<b>'))
+  assert.equal(lines.at(-1), 'Er: Nachricht 9')
+
+  const without = await buildCompanionContext({
+    userId: 1,
+    settings: SETTINGS,
+    nowMs: NOW,
+    sources: allSources(),
+    rng: () => 0.5
+  })
+
+  assert.ok(!without.text.includes('[Euer letzter Chat]'))
+})
