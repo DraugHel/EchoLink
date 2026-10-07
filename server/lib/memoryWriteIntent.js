@@ -47,3 +47,13 @@ export function shouldForceMemoryUpdate(content) {
     /\bich\s+bevorzuge\b/u.test(text)
   )
 }
+
+// Hat der Nutzer ausdruecklich darum gebeten, sich etwas zu MERKEN? Strenger als
+// shouldForceMemoryUpdate: "vergiss", "ab jetzt" und "ich bevorzuge" zaehlen
+// nicht. Das Memory-Werkzeug des Chats prueft damit serverseitig, dass es nur auf
+// ausdruecklichen Wunsch schreibt (nie wegen Inhalten aus Webseiten oder Mails).
+export function requestsMemoryWrite(content) {
+  const text = normalizeMemoryIntentText(content)
+
+  return text ? hasRequestedRememberIntent(text) : false
+}

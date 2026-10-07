@@ -9,6 +9,7 @@ import { E3_TOOLS, e3ToolsEnabled } from './e3Tools.js'
 import { CALENDAR_TOOLS } from './calendarTools.js'
 import { CALENDAR_EXTRA_TOOLS } from './calendarExtraTools.js'
 import { GMAIL_TOOLS } from './gmailTools.js'
+import { MEMORY_TOOLS } from './memoryRemember.js'
 import {
   AUDIOBOOKSHELF_TOOLS,
   audiobookshelfToolsEnabled
@@ -30,6 +31,7 @@ export const ALL_TOOLS = [
   ...CALENDAR_TOOLS,
   ...CALENDAR_EXTRA_TOOLS,
   ...GMAIL_TOOLS,
+  ...MEMORY_TOOLS,
   ...(audiobookshelfToolsEnabled()
     ? AUDIOBOOKSHELF_TOOLS
     : []),

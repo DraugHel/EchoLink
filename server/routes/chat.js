@@ -21,6 +21,19 @@ import {
   createMemoryEvidence,
   serializeMemoryEvidence
 } from '../lib/memoryEvidence.js'
+import {
+  createMemoryItem,
+  listMemoryItems,
+  updateMemoryItem
+} from '../lib/memoryItems.js'
+import {
+  refreshMemoryEmbeddingsByIds
+} from '../lib/memoryEmbeddings.js'
+import {
+  MEMORY_POLICY,
+  MEMORY_REMEMBER_TOOL_NAME,
+  rememberFact
+} from '../lib/memoryRemember.js'
 import { extractUrls, fetchAllUrls } from '../lib/fetchUrl.js'
 import { UPLOAD_DIR, extractTextFromFile } from './uploads.js'
 import {
@@ -634,6 +647,39 @@ async function executeTool(
         error?.code || 'E3_CHAT_INTERNAL'
       }]: ${error?.message || String(error)}`
     }
+  }
+
+  if (name === MEMORY_REMEMBER_TOOL_NAME) {
+    res.write(`data: ${JSON.stringify({
+      tool: name,
+      status: 'running',
+      query: String(args.content || '').slice(0, 120)
+    })}\n\n`)
+
+    const outcome = await rememberFact(
+      {
+        listMemoryItems,
+        createMemoryItem,
+        updateMemoryItem,
+        refreshEmbeddings: refreshMemoryEmbeddingsByIds
+      },
+      {
+        userId: requestContext.userId,
+        conversationId,
+        sourceMessageId: requestContext.currentUserMessageId,
+        userMessage: requestContext.userMessage,
+        content: args.content,
+        type: args.type
+      }
+    )
+
+    res.write(`data: ${JSON.stringify({
+      tool: name,
+      status: outcome.ok ? 'done' : 'error',
+      ...(outcome.ok ? {} : { error: outcome.code })
+    })}\n\n`)
+
+    return outcome.text
   }
 
   if (name === 'web_search') {
@@ -2296,6 +2342,9 @@ Use these as background context. If these memories fully answer the request, ans
 
   const requestHistory =
     fullHistory.map(message => ({ ...message }))
+  const memoryPolicy = recallOnlyRequest
+    ? ''
+    : MEMORY_POLICY
   const terminalLogPolicy = hasTerminalLog(fullHistory)
     ? TERMINAL_LOG_POLICY
     : ''
@@ -2304,6 +2353,7 @@ Use these as background context. If these memories fully answer the request, ans
     recallRuntimeBlock,
     historyRuntimeBlock,
     terminalLogPolicy,
+    memoryPolicy,
     `[${timeNote}]`
   ].filter(Boolean).join('\n\n')
 
@@ -2733,6 +2783,7 @@ Use these as background context. If these memories fully answer the request, ans
               requestId,
               allowedToolNames,
               currentUserMessageId,
+              userMessage: content,
               chatHistoryState,
               isRequestActive: () => (
                 !clientDisconnected &&
