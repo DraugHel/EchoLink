@@ -669,7 +669,10 @@ async function executeTool(
         sourceMessageId: requestContext.currentUserMessageId,
         userMessage: requestContext.userMessage,
         content: args.content,
-        type: args.type
+        type: args.type,
+        replaces: args.replaces,
+        source: args.source,
+        state: requestContext.memoryAutoState
       }
     )
 
@@ -2608,6 +2611,8 @@ Use these as background context. If these memories fully answer the request, ans
       .filter(Boolean)
   )
 
+  // Zaehler fuer eigenstaendige Memory-Aktualisierungen in dieser Antwort.
+  const memoryAutoState = { count: 0 }
   let allContent = ''
   let accThinking = ''
   let aggregateTokenUsage = null
@@ -2784,6 +2789,7 @@ Use these as background context. If these memories fully answer the request, ans
               allowedToolNames,
               currentUserMessageId,
               userMessage: content,
+              memoryAutoState,
               chatHistoryState,
               isRequestActive: () => (
                 !clientDisconnected &&
