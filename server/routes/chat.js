@@ -167,6 +167,11 @@ import {
 import {
   applyDeepSeekUserFacingPolicy
 } from '../lib/deepseekPresentation.js'
+import {
+  TERMINAL_LOG_POLICY,
+  hasTerminalLog,
+  loadModelHistory
+} from '../lib/terminalHistory.js'
 
 const router = Router()
 const MAX_PROVIDER_STREAM_RETRIES = 3
@@ -2254,15 +2259,10 @@ Use these as background context. If these memories fully answer the request, ans
     }
   }
 
-  const fullHistory = db.prepare(`
-    SELECT role, content, images FROM messages
-    WHERE conversation_id = ?
-      AND NOT (
-        role = 'assistant' AND
-        content LIKE '**Terminal:** %'
-      )
-    ORDER BY id ASC
-  `).all(convo.id)
+  // Terminal-Ausfuehrungen bleiben als kompaktes Protokoll im Verlauf. Sonst
+  // weiss das Modell in spaeteren Nachrichten nicht mehr, dass es diese
+  // Befehle wirklich ausgefuehrt hat, und zweifelt seine eigenen Messwerte an.
+  const fullHistory = loadModelHistory(db, convo.id)
 
   let ollamaMessages = []
 
@@ -2287,10 +2287,14 @@ Use these as background context. If these memories fully answer the request, ans
 
   const requestHistory =
     fullHistory.map(message => ({ ...message }))
+  const terminalLogPolicy = hasTerminalLog(fullHistory)
+    ? TERMINAL_LOG_POLICY
+    : ''
   const runtimeContext = [
     structuredRuntimeBlock,
     recallRuntimeBlock,
     historyRuntimeBlock,
+    terminalLogPolicy,
     `[${timeNote}]`
   ].filter(Boolean).join('\n\n')
 
