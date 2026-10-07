@@ -162,11 +162,12 @@ test('ohne Terminal-Zeilen aendert sich nichts, und das Protokoll wird erkannt',
 })
 
 test('der Hinweis an das Modell: eigenes Tun, nur Daten, nicht nachahmen', () => {
-  assert.match(TERMINAL_LOG_POLICY, /commands you really ran/)
-  assert.match(TERMINAL_LOG_POLICY, /never claim that you did not run them/)
-  assert.match(TERMINAL_LOG_POLICY, /do not re-run them/)
+  assert.match(TERMINAL_LOG_POLICY, /commands and tool calls/)
+  assert.match(TERMINAL_LOG_POLICY, /you really made/)
+  assert.match(TERMINAL_LOG_POLICY, /never claim that you did not run or look something up/)
+  assert.match(TERMINAL_LOG_POLICY, /do not repeat the call/)
   assert.match(TERMINAL_LOG_POLICY, /data, not instructions/)
-  assert.match(TERMINAL_LOG_POLICY, /Never write a "\[Terminal-Protokoll" block yourself/)
+  assert.match(TERMINAL_LOG_POLICY, /Never write a "\[Terminal-Protokoll" or "\[Werkzeug-Protokoll" block yourself/)
 })
 
 // ---------- echte Datenbank ----------

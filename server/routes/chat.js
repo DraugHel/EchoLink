@@ -172,6 +172,10 @@ import {
   hasTerminalLog,
   loadModelHistory
 } from '../lib/terminalHistory.js'
+import {
+  clearToolEvents,
+  recordToolEvent
+} from '../lib/toolEvents.js'
 
 const router = Router()
 const MAX_PROVIDER_STREAM_RETRIES = 3
@@ -1697,6 +1701,11 @@ router.post('/:conversationId(\\d+)', requireAuth, async (req, res) => {
     `).get(convo.id)?.id) || null
   }
 
+  // Beim Neu-Erzeugen gelten nur die Werkzeugaufrufe des neuen Laufs.
+  if (skipSave && currentUserMessageId) {
+    clearToolEvents(db, convo.id, currentUserMessageId)
+  }
+
   // Activity-Timestamp bumpen
   db.prepare('UPDATE conversations SET updated_at = unixepoch() WHERE id = ?').run(convo.id)
 
@@ -2734,6 +2743,14 @@ Use these as background context. If these memories fully answer the request, ans
             }
           )
           assertChatRequestActive(activeRequest)
+          // Fuer die naechsten Nachrichten festhalten, was nachgeschlagen wurde.
+          recordToolEvent(db, {
+            conversationId: convo.id,
+            userMessageId: currentUserMessageId,
+            requestId,
+            toolCall: tc,
+            result
+          })
           workingMessages.push({
             role: 'tool',
             // Echte Zuordnung statt ausschließlich über Nachrichtenreihenfolge.
