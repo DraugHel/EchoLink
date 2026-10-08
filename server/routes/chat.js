@@ -33,8 +33,10 @@ import {
   MEMORY_MERGE_TOOL_NAME,
   MEMORY_POLICY,
   MEMORY_REMEMBER_TOOL_NAME,
+  MEMORY_SEARCH_TOOL_NAME,
   mergeMemories,
-  rememberFact
+  rememberFact,
+  searchMemories
 } from '../lib/memoryRemember.js'
 import { extractUrls, fetchAllUrls } from '../lib/fetchUrl.js'
 import { UPLOAD_DIR, extractTextFromFile } from './uploads.js'
@@ -649,6 +651,35 @@ async function executeTool(
         error?.code || 'E3_CHAT_INTERNAL'
       }]: ${error?.message || String(error)}`
     }
+  }
+
+  if (name === MEMORY_SEARCH_TOOL_NAME) {
+    res.write(`data: ${JSON.stringify({
+      tool: name,
+      status: 'running',
+      query: String(
+        args.query || (args.duplicates === true ? 'duplicates' : '')
+      ).slice(0, 120)
+    })}\n\n`)
+
+    const outcome = searchMemories(
+      { listMemoryItems },
+      {
+        userId: requestContext.userId,
+        query: args.query,
+        type: args.type,
+        duplicates: args.duplicates === true,
+        limit: args.limit
+      }
+    )
+
+    res.write(`data: ${JSON.stringify({
+      tool: name,
+      status: outcome.ok ? 'done' : 'error',
+      ...(outcome.ok ? {} : { error: outcome.code })
+    })}\n\n`)
+
+    return outcome.text
   }
 
   if (name === MEMORY_MERGE_TOOL_NAME) {

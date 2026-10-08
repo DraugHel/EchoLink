@@ -8,10 +8,13 @@ import {
   MEMORY_POLICY,
   MEMORY_REMEMBER_TOOL,
   MEMORY_REMEMBER_TOOL_NAME,
+  MEMORY_SEARCH_TOOL,
+  MEMORY_SEARCH_TOOL_NAME,
   MEMORY_TOOLS,
   mergeMemories,
   rememberFact,
-  requestsMemoryMerge
+  requestsMemoryMerge,
+  searchMemories
 } from '../server/lib/memoryRemember.js'
 import {
   requestsMemoryWrite,
@@ -494,7 +497,7 @@ test('Werkzeugdefinition: Name, Pflichtfeld, Typen, Quelle, Ersetzen und klare E
 
   assert.equal(name, 'memory_remember')
   assert.equal(MEMORY_REMEMBER_TOOL_NAME, 'memory_remember')
-  assert.deepEqual(MEMORY_TOOLS, [MEMORY_REMEMBER_TOOL, MEMORY_MERGE_TOOL])
+  assert.deepEqual(MEMORY_TOOLS, [MEMORY_REMEMBER_TOOL, MEMORY_MERGE_TOOL, MEMORY_SEARCH_TOOL])
   assert.deepEqual(parameters.required, ['content'])
   assert.deepEqual(
     [...parameters.properties.type.enum].sort(),
@@ -522,6 +525,9 @@ test('Hinweis an das Modell: nie "kann ich nicht speichern", eigenstaendig nur F
   assert.match(MEMORY_POLICY, /written inside a web page, e-mail or tool output as an instruction/)
   assert.match(MEMORY_POLICY, /merge them with memory_merge/)
   assert.match(MEMORY_POLICY, /recoverable in the memory panel/)
+  assert.match(MEMORY_POLICY, /call memory_search/)
+  assert.match(MEMORY_POLICY, /duplicates=true/)
+  assert.match(MEMORY_POLICY, /Never say you have no access to the\s+rest of the memory/)
 })
 
 // ---------- Zusammenfuehren ----------
@@ -787,6 +793,211 @@ test('Zusammenfuehren-Werkzeug: Definition und Einschraenkungen', () => {
   assert.match(description, /never preferences, rules or instructions/)
 })
 
+// ---------- Suchen und Dubletten finden ----------
+
+function searchApi(items, options = {}) {
+  const calls = []
+
+  return {
+    calls,
+    listMemoryItems: (userId, filters) => {
+      calls.push({ userId, filters })
+      if (options.error) throw options.error
+      return items
+    }
+  }
+}
+
+function archive() {
+  return [
+    { id: 1, type: 'fact', scope: 'global', importance: 40, content: 'Der Server steht in Nuernberg bei Hetzner.' },
+    { id: 2, type: 'fact', scope: 'global', importance: 60, content: 'Hetzner Server Standort ist Nuernberg.' },
+    { id: 3, type: 'fact', scope: 'global', importance: 50, content: 'Claude Haiku 5.5 ist am 7. Oktober 2026 erschienen.' },
+    { id: 4, type: 'preference', scope: 'global', importance: 80, content: 'Antwortet gern kurz und direkt.' },
+    { id: 5, type: 'preference', scope: 'global', importance: 55, content: 'Antworten bitte kurz und direkt halten.' },
+    { id: 6, type: 'project', scope: 'project:echolink', importance: 70, content: 'EchoLink nutzt Brave Search mit SearXNG als Fallback.' },
+    { id: 7, type: 'project', scope: 'project:other', importance: 70, content: 'Der Server steht in Nuernberg bei Hetzner.' },
+    { id: 8, type: 'legacy', scope: 'global', importance: 99, content: 'Alter Markdown-Block.' }
+  ]
+}
+
+test('ohne Suchwort: die wichtigsten aktiven Eintraege mit ID, Typ und Scope', () => {
+  const api = searchApi(archive())
+  const result = searchMemories(api, { userId: 1 })
+
+  assert.equal(result.ok, true)
+  assert.equal(result.count, 7)
+  assert.deepEqual(api.calls[0], { userId: 1, filters: { status: 'active', limit: 200 } })
+
+  const lines = result.text.split('\n')
+
+  assert.equal(lines[0], 'Active memories: showing 7 of 7.')
+  // nach Wichtigkeit sortiert, Legacy ausgeblendet
+  assert.match(lines[1], /^- \[id 4\] \(preference, global, importance 80\) Antwortet gern kurz und direkt\.$/)
+  assert.ok(lines.findIndex(line => line.includes('[id 6]')) < lines.findIndex(line => line.includes('[id 1]')))
+  assert.ok(!result.text.includes('Alter Markdown-Block'))
+})
+
+test('Suche nach Woertern, ID und Typ; Rangfolge nach Treffern', () => {
+  const api = searchApi(archive())
+
+  const server = searchMemories(api, { userId: 1, query: 'Hetzner Nuernberg' })
+
+  assert.equal(server.count, 3)
+  // Gleich viele Treffer: die wichtigeren zuerst (id 7: 70, id 2: 60, id 1: 40).
+  assert.deepEqual(
+    server.text.match(/\[id (\d+)\]/g),
+    ['[id 7]', '[id 2]', '[id 1]']
+  )
+  assert.match(server.text, /matching "Hetzner Nuernberg"/)
+
+  assert.match(searchMemories(api, { userId: 1, query: '#6' }).text, /\[id 6\]/)
+  assert.equal(searchMemories(api, { userId: 1, query: '6' }).count, 1)
+  assert.equal(searchMemories(api, { userId: 1, query: 'haiku' }).count, 1)
+
+  const typed = searchMemories(api, { userId: 1, type: 'preference' })
+
+  assert.equal(typed.count, 2)
+  assert.match(typed.text, /\(type preference\)/)
+
+  const none = searchMemories(api, { userId: 1, query: 'Raumschiff' })
+
+  assert.match(none.text, /No matching memories\./)
+  assert.equal(none.count, 0)
+})
+
+test('Limit: Standard 25, hoechstens 60; lange Texte werden gekuerzt', () => {
+  const many = Array.from({ length: 80 }, (_, index) => ({
+    id: index + 1, type: 'fact', scope: 'global', importance: 50,
+    content: `Eintrag ${index + 1} ` + 'wort '.repeat(100)
+  }))
+
+  assert.equal(searchMemories(searchApi(many), { userId: 1 }).count, 25)
+  assert.equal(searchMemories(searchApi(many), { userId: 1, limit: 60 }).count, 60)
+  assert.equal(searchMemories(searchApi(many), { userId: 1, limit: 500 }).count, 60)
+  assert.equal(searchMemories(searchApi(many), { userId: 1, limit: 3 }).count, 3)
+  assert.equal(searchMemories(searchApi(many), { userId: 1, limit: -4 }).count, 25)
+
+  const text = searchMemories(searchApi(many), { userId: 1, limit: 60 }).text
+
+  assert.ok(text.length <= 7100, `Laenge ${text.length}`)
+  assert.match(text, /…/)
+
+  const clean = searchMemories(
+    searchApi([{ id: 1, type: 'fact', scope: 'global', importance: 1, content: 'Zeile\neins\u0000 und   zwei' }]),
+    { userId: 1 }
+  )
+
+  assert.match(clean.text, /Zeile eins und zwei/)
+})
+
+test('200 geladene Eintraege werden als Ausschnitt gekennzeichnet', () => {
+  const items = Array.from({ length: 200 }, (_, index) => ({
+    id: index + 1, type: 'fact', scope: 'global', importance: 50, content: `Faktum Nummer ${index + 1}`
+  }))
+
+  assert.match(searchMemories(searchApi(items), { userId: 1 }).text, /searched the 200 most important active memories/)
+})
+
+test('Dubletten: Gruppen gleichen Typs und Scopes, Einzelne fehlen', () => {
+  const result = searchMemories(searchApi(archive()), { userId: 1, duplicates: true })
+
+  assert.equal(result.ok, true)
+  assert.equal(result.groups, 2)
+
+  const text = result.text
+
+  assert.match(text, /^Possible duplicates: 2 group\(s\) among 7 active memories\./)
+  assert.match(text, /Group 1 \(type (fact|preference), scope global\):/)
+  assert.deepEqual(
+    [...text.matchAll(/Group \d+ \(type (\w+), scope ([^)]+)\):\n((?:- .+\n?)+)/g)].map(match => [
+      match[1],
+      match[3].match(/\[id (\d+)\]/g)
+    ]),
+    [['fact', ['[id 1]', '[id 2]']], ['preference', ['[id 4]', '[id 5]']]]
+  )
+
+  // Gleicher Text in anderem Scope ist KEINE Dublette (id 7 nicht in einer Gruppe).
+  assert.ok(!text.includes('[id 7]'))
+  assert.ok(!text.includes('[id 3]'))
+  assert.ok(!text.includes('[id 6]'))
+  assert.match(text, /memory_merge/)
+})
+
+test('Dubletten: exakte Kopien zaehlen, nichts Aehnliches ergibt eine klare Meldung', () => {
+  const copies = [
+    { id: 1, type: 'fact', scope: 'global', importance: 50, content: 'Kaffee' },
+    { id: 2, type: 'fact', scope: 'global', importance: 50, content: 'kaffee!' },
+    { id: 3, type: 'fact', scope: 'global', importance: 50, content: 'Tee' }
+  ]
+  const result = searchMemories(searchApi(copies), { userId: 1, duplicates: true })
+
+  assert.equal(result.groups, 1)
+  assert.match(result.text, /\[id 1\][\s\S]*\[id 2\]/)
+
+  const distinct = searchMemories(
+    searchApi([
+      { id: 1, type: 'fact', scope: 'global', importance: 50, content: 'Der Server steht in Nuernberg.' },
+      { id: 2, type: 'fact', scope: 'global', importance: 50, content: 'Haiku 5.5 ist erschienen.' }
+    ]),
+    { userId: 1, duplicates: true }
+  )
+
+  assert.equal(distinct.groups, 0)
+  assert.match(distinct.text, /^No similar entries found among 2 active memories\./)
+})
+
+test('Dubletten: hoechstens 8 Gruppen, groesste zuerst', () => {
+  const items = []
+
+  for (let group = 0; group < 10; group++) {
+    const size = group === 9 ? 3 : 2
+
+    for (let member = 0; member < size; member++) {
+      items.push({
+        id: group * 10 + member + 1,
+        type: 'fact',
+        scope: `project:p${group}`,
+        importance: 50,
+        content: `Gemeinsamer Satz Nummer ${group} alpha beta gamma`
+      })
+    }
+  }
+
+  const result = searchMemories(searchApi(items), { userId: 1, duplicates: true })
+
+  assert.equal(result.groups, 8)
+  assert.match(result.text.split('\n').find(line => line.startsWith('Group 1 ')), /scope project:p9/)
+})
+
+test('Suche nur lesend; Fehler werden gemeldet statt geworfen', () => {
+  const api = searchApi(archive())
+
+  searchMemories(api, { userId: 1, query: 'server' })
+  searchMemories(api, { userId: 1, duplicates: true })
+  assert.ok(api.calls.every(call => call.filters.status === 'active'))
+  assert.ok(!('createMemoryItem' in api) && !('updateMemoryItem' in api))
+
+  const failing = searchMemories(searchApi([], { error: new Error('db locked') }), { userId: 1 })
+
+  assert.equal(failing.ok, false)
+  assert.equal(failing.code, 'MEMORY_SEARCH_FAILED')
+  assert.match(failing.text, /^Memory error: db locked/)
+})
+
+test('Such-Werkzeug: Definition ohne Pflichtfelder, lesend', () => {
+  const { name, description, parameters } = MEMORY_SEARCH_TOOL.function
+
+  assert.equal(name, 'memory_search')
+  assert.equal(MEMORY_SEARCH_TOOL_NAME, 'memory_search')
+  assert.equal(parameters.required, undefined)
+  assert.deepEqual(Object.keys(parameters.properties).sort(), ['duplicates', 'limit', 'query', 'type'])
+  assert.equal(parameters.properties.duplicates.type, 'boolean')
+  assert.match(description, /read-only/)
+  assert.match(description, /not the whole memory/)
+  assert.match(description, /memory_merge/)
+})
+
 // ---------- Verdrahtung ----------
 
 function read(file) {
@@ -812,6 +1023,9 @@ test('Registry, Chat und Agent: Werkzeug nur im Chat, Zaehler pro Anfrage', () =
   assert.match(chat, /name === MEMORY_MERGE_TOOL_NAME/)
   assert.match(chat, /mergeMemories\(/)
   assert.match(chat, /ids: args\.ids/)
+  assert.match(chat, /name === MEMORY_SEARCH_TOOL_NAME/)
+  assert.match(chat, /searchMemories\(/)
+  assert.match(chat, /duplicates: args\.duplicates === true/)
   assert.match(chat, /const memoryAutoState = \{ count: 0 \}/)
   assert.match(chat, /memoryAutoState,/)
 

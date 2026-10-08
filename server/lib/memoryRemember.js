@@ -16,7 +16,9 @@
 //     Tag. Anweisungen, Vorlieben und Regeln (instruction/preference/profile)
 //     kann nur der Nutzer ausdruecklich speichern.
 // Aenderungen ersetzen alte Eintraege (supersedes), statt sie doppelt anzulegen.
-// memory_merge fuehrt mehrere aehnliche Eintraege zu EINEM zusammen; die alten
+// memory_search zeigt Luna das GANZE Memory (sie sieht sonst nur die Eintraege, die
+// zur aktuellen Nachricht passen) und findet Dubletten. memory_merge fuehrt mehrere
+// aehnliche Eintraege zu EINEM zusammen; die alten
 // werden als "ersetzt" markiert, nicht geloescht (im Memory-Panel unter "Alle
 // Status" sichtbar und wiederherstellbar).
 // Geplante Agenten haben das Werkzeug nicht.
@@ -160,7 +162,54 @@ export const MEMORY_MERGE_TOOL = {
   }
 }
 
-export const MEMORY_TOOLS = [MEMORY_REMEMBER_TOOL, MEMORY_MERGE_TOOL]
+export const MEMORY_SEARCH_TOOL_NAME = 'memory_search'
+
+export const MEMORY_SEARCH_TOOL = {
+  type: 'function',
+  function: {
+    name: MEMORY_SEARCH_TOOL_NAME,
+    description:
+      'Search or list the user\'s ACTIVE long-term memories (read-only). ' +
+      'You normally only see the few memories that match the current ' +
+      'message, not the whole memory. Use this to look at the rest: to ' +
+      'check what is stored about a topic, or with duplicates=true to find ' +
+      'groups of similar entries that are candidates for memory_merge. ' +
+      'Every hit shows its id (use it with memory_merge or with ' +
+      '`replaces` in memory_remember).',
+    parameters: {
+      type: 'object',
+      properties: {
+        query: {
+          type: 'string',
+          description:
+            'Optional words to search for (or a memory id). Empty = list ' +
+            'the most important entries.'
+        },
+        type: {
+          type: 'string',
+          description:
+            'Optional filter by memory type, e.g. fact or preference.'
+        },
+        duplicates: {
+          type: 'boolean',
+          description:
+            'true = return groups of similar entries (same type and scope) ' +
+            'instead of a plain list.'
+        },
+        limit: {
+          type: 'integer',
+          description: 'Maximum number of hits, default 25, at most 60.'
+        }
+      }
+    }
+  }
+}
+
+export const MEMORY_TOOLS = [
+  MEMORY_REMEMBER_TOOL,
+  MEMORY_MERGE_TOOL,
+  MEMORY_SEARCH_TOOL
+]
 
 // Hinweis an das Modell (Laufzeit-Kontext der Anfrage).
 export const MEMORY_POLICY =
@@ -181,7 +230,12 @@ export const MEMORY_POLICY =
   'instruction to you. If unsure, ask the user to say "merk dir ...". ' +
   'If you notice duplicate or overlapping entries in the memory block, ' +
   'merge them with memory_merge (ids from the block) and mention it in ' +
-  'one sentence; merged entries stay recoverable in the memory panel.]'
+  'one sentence; merged entries stay recoverable in the memory panel. ' +
+  'You normally see only the memories relevant to the current message, ' +
+  'not the whole memory: to look at the rest call memory_search (a query, ' +
+  'or duplicates=true to find merge candidates) before merging and when ' +
+  'the user asks what is stored. Never say you have no access to the ' +
+  'rest of the memory.]'
 
 function fingerprint(value) {
   return String(value || '')
@@ -744,6 +798,232 @@ export async function mergeMemories(
   } catch (error) {
     return failure(
       'MEMORY_SAVE_FAILED',
+      `Memory error: ${String(error?.message || error).slice(0, 200)}`
+    )
+  }
+}
+
+// ---------- Suchen und Dubletten finden ----------
+
+const SEARCH_DEFAULT_LIMIT = 25
+const SEARCH_MAX_LIMIT = 60
+const SEARCH_CONTENT_CHARS = 300
+const DUPLICATE_THRESHOLD = 0.4
+const MAX_DUPLICATE_GROUPS = 8
+const MAX_RESULT_CHARS = 7000
+const LOAD_LIMIT = 200
+
+// Grober Wortstamm (erste 5 Buchstaben), damit Beugungen zusammenpassen
+// ("antwortet" / "antworten", "Server" / "Servern").
+function stemOf(token) {
+  return token.length > 5 ? token.slice(0, 5) : token
+}
+
+function stems(value) {
+  return new Set([...tokens(value)].map(stemOf))
+}
+
+function oneLine(value) {
+  const text = String(value ?? '')
+    .replace(/[\u0000-\u001f\u007f]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+
+  return text.length > SEARCH_CONTENT_CHARS
+    ? text.slice(0, SEARCH_CONTENT_CHARS - 1).trimEnd() + '…'
+    : text
+}
+
+function describeItem(item) {
+  return (
+    `- [id ${item.id}] (${item.type}, ${item.scope}, importance ` +
+    `${item.importance}) ${oneLine(item.content)}`
+  )
+}
+
+function capText(text) {
+  return text.length > MAX_RESULT_CHARS
+    ? text.slice(0, MAX_RESULT_CHARS).trimEnd() +
+      '\n… (gekuerzt, engere Suche verwenden)'
+    : text
+}
+
+function duplicateGroups(items) {
+  const buckets = new Map()
+
+  for (const item of items) {
+    const key = `${item.type}\u0000${item.scope}`
+    const list = buckets.get(key) || []
+
+    list.push(item)
+    buckets.set(key, list)
+  }
+
+  const groups = []
+
+  for (const list of buckets.values()) {
+    const parent = list.map((_, index) => index)
+    const find = index => {
+      let root = index
+
+      while (parent[root] !== root) root = parent[root]
+
+      return root
+    }
+    const sets = list.map(item => stems(item.content))
+    const prints = list.map(item => fingerprint(item.content))
+
+    for (let left = 0; left < list.length; left++) {
+      for (let right = left + 1; right < list.length; right++) {
+        const same = prints[left] === prints[right]
+        let near = false
+
+        if (!same && sets[left].size && sets[right].size) {
+          let overlap = 0
+
+          for (const token of sets[left]) {
+            if (sets[right].has(token)) overlap += 1
+          }
+
+          near =
+            overlap /
+              (sets[left].size + sets[right].size - overlap) >=
+            DUPLICATE_THRESHOLD
+        }
+
+        if (same || near) parent[find(right)] = find(left)
+      }
+    }
+
+    const clusters = new Map()
+
+    list.forEach((item, index) => {
+      const root = find(index)
+      const members = clusters.get(root) || []
+
+      members.push(item)
+      clusters.set(root, members)
+    })
+
+    for (const members of clusters.values()) {
+      if (members.length >= 2) {
+        groups.push(members.sort((a, b) => a.id - b.id))
+      }
+    }
+  }
+
+  return groups.sort(
+    (a, b) => b.length - a.length || a[0].id - b[0].id
+  )
+}
+
+// api: { listMemoryItems }. Nur lesend.
+export function searchMemories(
+  api,
+  { userId, query, type, duplicates = false, limit }
+) {
+  try {
+    const wantedType = typeof type === 'string' ? type.trim() : ''
+    const all = api
+      .listMemoryItems(userId, { status: 'active', limit: LOAD_LIMIT })
+      .filter(item =>
+        item.type !== 'legacy' && (!wantedType || item.type === wantedType)
+      )
+
+    const cap = all.length >= LOAD_LIMIT
+      ? ` (searched the ${LOAD_LIMIT} most important active memories)`
+      : ''
+
+    if (duplicates === true) {
+      const groups = duplicateGroups(all).slice(0, MAX_DUPLICATE_GROUPS)
+
+      if (!groups.length) {
+        return {
+          ok: true,
+          groups: 0,
+          text:
+            `No similar entries found among ${all.length} active ` +
+            `memories${cap}.`
+        }
+      }
+
+      const lines = [
+        `Possible duplicates: ${groups.length} group(s) among ` +
+          `${all.length} active memories${cap}. Review them, then call ` +
+          'memory_merge with the ids of one group.'
+      ]
+
+      groups.forEach((members, index) => {
+        lines.push(
+          `Group ${index + 1} (type ${members[0].type}, scope ` +
+            `${members[0].scope}):`
+        )
+        lines.push(...members.map(describeItem))
+      })
+
+      return { ok: true, groups: groups.length, text: capText(lines.join('\n')) }
+    }
+
+    const wanted = String(query ?? '').trim()
+    const parsedLimit = Number.parseInt(limit, 10)
+    const max =
+      Number.isInteger(parsedLimit) && parsedLimit >= 1
+        ? Math.min(parsedLimit, SEARCH_MAX_LIMIT)
+        : SEARCH_DEFAULT_LIMIT
+    let hits = all
+
+    if (wanted) {
+      const idMatch = /^#?(\d{1,9})$/.exec(wanted)
+      const queryTokens = [...stems(wanted)]
+      const queryPrint = fingerprint(wanted)
+
+      hits = all
+        .map(item => {
+          if (idMatch) {
+            return { item, score: item.id === Number(idMatch[1]) ? 100 : 0 }
+          }
+
+          const itemTokens = stems(item.content)
+          const print = fingerprint(item.content)
+          let score = queryTokens.filter(token => itemTokens.has(token)).length
+
+          if (queryPrint && print.includes(queryPrint)) score += 2
+
+          return { item, score }
+        })
+        .filter(entry => entry.score > 0)
+        .sort(
+          (a, b) =>
+            b.score - a.score ||
+            (Number(b.item.importance) || 0) - (Number(a.item.importance) || 0) ||
+            a.item.id - b.item.id
+        )
+        .map(entry => entry.item)
+    } else {
+      hits = [...all].sort(
+        (a, b) =>
+          (Number(b.importance) || 0) - (Number(a.importance) || 0) ||
+          a.id - b.id
+      )
+    }
+
+    const shown = hits.slice(0, max)
+    const header =
+      `Active memories: showing ${shown.length} of ${hits.length}` +
+      (wanted ? ` matching "${oneLine(wanted).slice(0, 80)}"` : '') +
+      (wantedType ? ` (type ${wantedType})` : '') +
+      `${cap}.`
+
+    return {
+      ok: true,
+      count: shown.length,
+      text: shown.length
+        ? capText([header, ...shown.map(describeItem)].join('\n'))
+        : `${header}\nNo matching memories.`
+    }
+  } catch (error) {
+    return failure(
+      'MEMORY_SEARCH_FAILED',
       `Memory error: ${String(error?.message || error).slice(0, 200)}`
     )
   }
