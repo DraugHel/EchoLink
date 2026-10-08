@@ -4,6 +4,10 @@ import {
   useState
 } from 'react'
 import api from '../lib/api.js'
+import {
+  matchesSearch,
+  searchTerms
+} from '../lib/memorySearch.js'
 
 const TYPE_OPTIONS = [
   ['profile', 'Profil'],
@@ -326,6 +330,9 @@ export default function MemoryPanel({
   const [itemSort, setItemSort] =
     useState('created-desc')
 
+  const [itemSearch, setItemSearch] =
+    useState('')
+
   const [itemsLoading, setItemsLoading] =
     useState(true)
 
@@ -382,8 +389,11 @@ export default function MemoryPanel({
 
   const visibleItems =
     useMemo(() => {
+      const terms = searchTerms(itemSearch)
       const filtered = items.filter(
-        item => item.type !== 'legacy'
+        item =>
+          item.type !== 'legacy' &&
+          matchesSearch(item, terms, TYPE_LABELS)
       )
 
       return filtered.sort((a, b) => {
@@ -400,7 +410,7 @@ export default function MemoryPanel({
         return (Number(b.createdAt) || 0) -
           (Number(a.createdAt) || 0)
       })
-    }, [items, itemSort])
+    }, [items, itemSort, itemSearch])
 
   async function createItem() {
     setActionId('create')
@@ -686,6 +696,61 @@ export default function MemoryPanel({
         >
           <>
               <div
+                className="echolink-memory-search"
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  marginBottom: 10
+                }}
+              >
+                <input
+                  type="search"
+                  value={itemSearch}
+                  onChange={event =>
+                    setItemSearch(event.target.value)
+                  }
+                  placeholder="Memories durchsuchen …"
+                  aria-label="Memories durchsuchen"
+                  style={{
+                    ...fieldStyle(),
+                    flex: 1
+                  }}
+                />
+
+                {itemSearch && (
+                  <button
+                    type="button"
+                    onClick={() => setItemSearch('')}
+                    style={buttonStyle()}
+                  >
+                    Leeren
+                  </button>
+                )}
+              </div>
+
+              {itemSearch.trim() && (
+                <div
+                  style={{
+                    marginBottom: 10,
+                    color: 'var(--text3)',
+                    fontFamily: 'var(--font-mono)',
+                    fontSize: 10
+                  }}
+                >
+                  {visibleItems.length} Treffer von{' '}
+                  {
+                    items.filter(
+                      item => item.type !== 'legacy'
+                    ).length
+                  }
+                  {items.length >= 200
+                    ? ' (es werden höchstens 200 Memories geladen)'
+                    : ''}
+                </div>
+              )}
+
+              <div
                 className="echolink-memory-toolbar"
                 style={{
                   display: 'flex',
@@ -956,6 +1021,32 @@ export default function MemoryPanel({
                             }}
                           >
                             <span>
+                              ID: {item.id}
+                            </span>
+
+                            {Array.isArray(
+                              item.metadata?.mergedFrom
+                            ) &&
+                              item.metadata.mergedFrom
+                                .length > 0 && (
+                                <span>
+                                  Zusammengeführt aus ID{' '}
+                                  {item.metadata.mergedFrom.join(
+                                    ', '
+                                  )}
+                                </span>
+                              )}
+
+                            {item.metadata?.autoSaved && (
+                              <span>
+                                Von Luna gespeichert
+                                {item.metadata.source
+                                  ? ` · Quelle: ${item.metadata.source}`
+                                  : ''}
+                              </span>
+                            )}
+
+                            <span>
                               Erstellt: {
                                 dateText(item.createdAt)
                               }
@@ -1131,8 +1222,9 @@ export default function MemoryPanel({
                     color: 'var(--text3)'
                   }}
                 >
-                  Noch keine strukturierten
-                  Einzel-Memories vorhanden.
+                  {itemSearch.trim()
+                    ? 'Keine Treffer für diese Suche.'
+                    : 'Noch keine strukturierten Einzel-Memories vorhanden.'}
                 </div>
               )}
 
