@@ -1,9 +1,19 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
+  DOUBLE_TAP_SCALE,
+  IDENTITY_VIEW,
+  clampScale,
+  clampView,
+  distance,
   galleryLayout,
-  swipeDirection,
-  wrapIndex
+  isDoubleTap,
+  isZoomed,
+  midpoint,
+  pinchView,
+  swipeGesture,
+  wrapIndex,
+  zoomAtPoint
 } from '../lib/imageGallery.js'
 import './MessageImages.css'
 
@@ -33,24 +43,106 @@ const ExternalIcon = () => (
   </svg>
 )
 
-// Vollbildansicht. Wird per Portal an <body> gehaengt, damit weder
-// Animationen noch overflow der Nachricht die Ansicht beschneiden.
+const TAP_SLOP = 10
+const TAP_MS = 320
+
+// Vollbildansicht mit Pinch-to-zoom. Wird per Portal an <body> gehaengt, damit
+// weder Animationen noch overflow der Nachricht die Ansicht beschneiden.
+//
+// Bedienung:
+//  - zwei Finger: zoomen und verschieben (Pinch)
+//  - ein Finger bei Zoom: verschieben
+//  - Doppeltipp: auf 2,5x zoomen / zuruecksetzen
+//  - Mausrad oder Trackpad-Pinch (Strg+Rad): zoomen am Mauszeiger
+//  - normal gezoomt (1x): waagerecht wischen = naechstes/vorheriges Bild,
+//    nach unten wischen = schliessen
+//  - Tipp neben das Bild schliesst, Tasten + - 0 zoomen
 export function ImageLightbox({
   images,
   index,
   onClose,
   onIndexChange
 }) {
-  const [zoomed, setZoomed] = useState(false)
+  const [view, setView] = useState(IDENTITY_VIEW)
+  const [gesturing, setGesturing] = useState(false)
+  const stageRef = useRef(null)
+  const imgRef = useRef(null)
   const closeRef = useRef(null)
-  const touchRef = useRef(null)
+  const viewRef = useRef(IDENTITY_VIEW)
+  const pointers = useRef(new Map())
+  const gesture = useRef(null)
+  const lastTap = useRef(null)
   const count = images.length
   const current = images[wrapIndex(index, count)]
+  const zoomed = isZoomed(view)
+
+  viewRef.current = view
+
+  // Messen: Mitte der Buehne und angezeigte Bildgroesse (ohne Zoom).
+  const measure = useCallback(() => {
+    const stage = stageRef.current
+    const img = imgRef.current
+
+    if (!stage || !img) return null
+
+    const rect = stage.getBoundingClientRect()
+
+    return {
+      stageW: rect.width,
+      stageH: rect.height,
+      imgW: img.offsetWidth,
+      imgH: img.offsetHeight,
+      centerX: rect.left + rect.width / 2,
+      centerY: rect.top + rect.height / 2
+    }
+  }, [])
+
+  const toStage = useCallback((point, metrics) => ({
+    x: point.x - metrics.centerX,
+    y: point.y - metrics.centerY
+  }), [])
+
+  const applyView = useCallback((next, metrics = measure()) => {
+    const clamped = metrics ? clampView(next, metrics) : next
+
+    viewRef.current = clamped
+    setView(clamped)
+  }, [measure])
+
+  const resetView = useCallback(() => {
+    viewRef.current = IDENTITY_VIEW
+    setView(IDENTITY_VIEW)
+  }, [])
+
+  const zoomBy = useCallback((factor, point = { x: 0, y: 0 }) => {
+    const base = viewRef.current
+
+    applyView(zoomAtPoint(base, point, clampScale(base.s * factor)))
+  }, [applyView])
+
+  const toggleZoomAt = useCallback((point = { x: 0, y: 0 }) => {
+    const base = viewRef.current
+
+    if (isZoomed(base)) {
+      resetView()
+    } else {
+      applyView(zoomAtPoint(base, point, DOUBLE_TAP_SCALE))
+    }
+  }, [applyView, resetView])
 
   const go = useCallback(step => {
-    setZoomed(false)
+    resetView()
     onIndexChange(wrapIndex(index + step, count))
-  }, [index, count, onIndexChange])
+  }, [index, count, onIndexChange, resetView])
+
+  // Anderes Bild: Zoom zuruecksetzen.
+  useEffect(() => {
+    resetView()
+    pointers.current.clear()
+    gesture.current = null
+    lastTap.current = null
+    setGesturing(false)
+  }, [current?.src, resetView])
 
   useEffect(() => {
     const previousFocus = document.activeElement
@@ -73,46 +165,246 @@ export function ImageLightbox({
       if (event.key === 'Escape') {
         event.preventDefault()
         onClose()
-      } else if (event.key === 'ArrowRight' && count > 1) {
+      } else if (event.key === 'ArrowRight' && count > 1 && !isZoomed(viewRef.current)) {
         event.preventDefault()
         go(1)
-      } else if (event.key === 'ArrowLeft' && count > 1) {
+      } else if (event.key === 'ArrowLeft' && count > 1 && !isZoomed(viewRef.current)) {
         event.preventDefault()
         go(-1)
+      } else if (event.key === '+' || event.key === '=') {
+        event.preventDefault()
+        zoomBy(1.5)
+      } else if (event.key === '-' || event.key === '_') {
+        event.preventDefault()
+        zoomBy(1 / 1.5)
+      } else if (event.key === '0') {
+        event.preventDefault()
+        resetView()
       }
     }
 
     window.addEventListener('keydown', onKeyDown)
 
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [onClose, go, count])
+  }, [onClose, go, count, zoomBy, resetView])
+
+  // Mausrad und Trackpad-Pinch (Strg+Rad). Muss ein nicht-passiver Listener
+  // sein, sonst zoomt zusaetzlich die ganze Seite.
+  useEffect(() => {
+    const stage = stageRef.current
+
+    if (!stage) return undefined
+
+    function onWheel(event) {
+      const metrics = measure()
+
+      if (!metrics) return
+
+      event.preventDefault()
+
+      const base = viewRef.current
+      const factor = Math.exp(
+        -event.deltaY * (event.ctrlKey ? 0.012 : 0.002)
+      )
+      const point = toStage(
+        { x: event.clientX, y: event.clientY },
+        metrics
+      )
+
+      applyView(
+        zoomAtPoint(base, point, clampScale(base.s * factor)),
+        metrics
+      )
+    }
+
+    stage.addEventListener('wheel', onWheel, { passive: false })
+
+    return () => stage.removeEventListener('wheel', onWheel)
+  }, [measure, toStage, applyView, current?.src])
+
+  // Gedrehtes Geraet / geaenderte Fenstergroesse: Bild neu einpassen.
+  useEffect(() => {
+    function onResize() {
+      applyView(viewRef.current)
+    }
+
+    window.addEventListener('resize', onResize)
+
+    return () => window.removeEventListener('resize', onResize)
+  }, [applyView])
 
   if (!current) return null
 
-  function onTouchStart(event) {
-    const touch = event.touches[0]
+  function onPointerDown(event) {
+    // Knoepfe (Pfeile) und Links behandeln ihre Eingabe selbst.
+    if (event.target.closest?.('button, a')) return
+    if (event.pointerType === 'mouse' && event.button !== 0) return
 
-    touchRef.current =
-      event.touches.length === 1 && touch
-        ? { startX: touch.clientX, startY: touch.clientY }
-        : null
-  }
-
-  function onTouchEnd(event) {
-    const start = touchRef.current
-    const touch = event.changedTouches[0]
-
-    touchRef.current = null
-
-    if (!start || !touch || zoomed || count < 2) return
-
-    const direction = swipeDirection({
-      ...start,
-      endX: touch.clientX,
-      endY: touch.clientY
+    stageRef.current?.setPointerCapture?.(event.pointerId)
+    pointers.current.set(event.pointerId, {
+      x: event.clientX,
+      y: event.clientY
     })
 
-    if (direction !== 0) go(direction)
+    const points = [...pointers.current.values()]
+
+    if (points.length === 1) {
+      gesture.current = {
+        type: 'single',
+        startX: event.clientX,
+        startY: event.clientY,
+        startTime: Date.now(),
+        startView: viewRef.current,
+        moved: false,
+        onImage: event.target === imgRef.current,
+        startTarget: event.target
+      }
+    } else if (points.length === 2) {
+      const metrics = measure()
+
+      if (metrics) {
+        gesture.current = {
+          type: 'pinch',
+          startView: viewRef.current,
+          startDist: distance(points[0], points[1]) || 1,
+          startMid: toStage(midpoint(points[0], points[1]), metrics)
+        }
+      }
+    }
+
+    setGesturing(true)
+  }
+
+  function onPointerMove(event) {
+    if (!pointers.current.has(event.pointerId)) return
+
+    pointers.current.set(event.pointerId, {
+      x: event.clientX,
+      y: event.clientY
+    })
+
+    const active = gesture.current
+
+    if (!active) return
+
+    const metrics = measure()
+
+    if (!metrics) return
+
+    if (active.type === 'pinch') {
+      const points = [...pointers.current.values()]
+
+      if (points.length < 2) return
+
+      applyView(
+        pinchView({
+          start: active.startView,
+          startMid: active.startMid,
+          startDist: active.startDist,
+          mid: toStage(midpoint(points[0], points[1]), metrics),
+          dist: distance(points[0], points[1])
+        }),
+        metrics
+      )
+
+      return
+    }
+
+    const dx = event.clientX - active.startX
+    const dy = event.clientY - active.startY
+
+    if (!active.moved && Math.hypot(dx, dy) > TAP_SLOP) {
+      active.moved = true
+    }
+
+    // Verschieben nur, wenn gezoomt wurde.
+    if (active.moved && isZoomed(active.startView)) {
+      applyView(
+        {
+          s: active.startView.s,
+          tx: active.startView.tx + dx,
+          ty: active.startView.ty + dy
+        },
+        metrics
+      )
+    }
+  }
+
+  function endPointer(event, cancelled = false) {
+    if (!pointers.current.delete(event.pointerId)) return
+
+    stageRef.current?.releasePointerCapture?.(event.pointerId)
+
+    const active = gesture.current
+    const remaining = pointers.current.size
+
+    if (active?.type === 'pinch') {
+      if (remaining === 1) {
+        // Ein Finger bleibt liegen: weiter als Verschieben.
+        const [rest] = [...pointers.current.values()]
+
+        gesture.current = {
+          type: 'single',
+          startX: rest.x,
+          startY: rest.y,
+          startTime: Date.now(),
+          startView: viewRef.current,
+          moved: true,
+          onImage: true,
+          startTarget: null
+        }
+      } else if (remaining === 0) {
+        gesture.current = null
+        setGesturing(false)
+      }
+
+      return
+    }
+
+    if (remaining > 0) return
+
+    gesture.current = null
+    setGesturing(false)
+
+    if (!active || cancelled) return
+
+    const isTap =
+      !active.moved && Date.now() - active.startTime < TAP_MS
+
+    // Wischen und Schliessen nur im Normalzustand (nicht gezoomt).
+    if (active.moved && !isZoomed(viewRef.current)) {
+      const action = swipeGesture({
+        startX: active.startX,
+        startY: active.startY,
+        endX: event.clientX,
+        endY: event.clientY
+      })
+
+      if (action === 'next' && count > 1) go(1)
+      else if (action === 'prev' && count > 1) go(-1)
+      else if (action === 'close') onClose()
+
+      return
+    }
+
+    if (!isTap) return
+
+    const tap = { x: event.clientX, y: event.clientY, time: Date.now() }
+
+    if (active.onImage && isDoubleTap(lastTap.current, tap)) {
+      lastTap.current = null
+
+      const metrics = measure()
+
+      toggleZoomAt(metrics ? toStage(tap, metrics) : { x: 0, y: 0 })
+
+      return
+    }
+
+    lastTap.current = tap
+
+    // Tipp neben das Bild schliesst; ein Tipp auf das Bild nicht.
+    if (active.startTarget === stageRef.current) onClose()
   }
 
   return createPortal(
@@ -132,7 +424,7 @@ export function ImageLightbox({
         <button
           type="button"
           className={`echolink-lightbox-btn${zoomed ? ' is-active' : ''}`}
-          onClick={() => setZoomed(value => !value)}
+          onClick={() => toggleZoomAt()}
           aria-label={zoomed ? 'Verkleinern' : 'Vergrößern'}
           aria-pressed={zoomed}
           title={zoomed ? 'Verkleinern' : 'Vergrößern'}
@@ -164,13 +456,16 @@ export function ImageLightbox({
       </div>
 
       <div
-        className={`echolink-lightbox-stage${zoomed ? ' is-zoomed' : ''}`}
-        onClick={event => {
-          // Nur ein Tipp neben das Bild schliesst.
-          if (event.target === event.currentTarget) onClose()
-        }}
-        onTouchStart={onTouchStart}
-        onTouchEnd={onTouchEnd}
+        ref={stageRef}
+        className={
+          'echolink-lightbox-stage' +
+          (zoomed ? ' is-zoomed' : '') +
+          (gesturing ? ' is-gesturing' : '')
+        }
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={event => endPointer(event)}
+        onPointerCancel={event => endPointer(event, true)}
       >
         {count > 1 && !zoomed && (
           <>
@@ -195,11 +490,15 @@ export function ImageLightbox({
 
         <img
           key={current.src}
+          ref={imgRef}
           src={current.src}
           alt={current.name || ''}
-          className={zoomed ? 'is-zoomed' : ''}
           draggable={false}
-          onClick={() => setZoomed(value => !value)}
+          style={{
+            transform:
+              `translate3d(${view.tx}px, ${view.ty}px, 0) scale(${view.s})`,
+            transition: gesturing ? 'none' : 'transform 0.18s ease'
+          }}
         />
       </div>
     </div>,

@@ -219,8 +219,10 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  overflow: auto;
-  -webkit-overflow-scrolling: touch;
+  overflow: hidden;
+  /* Pinch und Verschieben macht die Komponente selbst, nicht der Browser. */
+  touch-action: none;
+  overscroll-behavior: contain;
   padding:
     8px
     calc(12px + env(safe-area-inset-right))
@@ -235,22 +237,20 @@
   margin: auto;
   border-radius: 6px;
   object-fit: contain;
+  transform-origin: center center;
+  will-change: transform;
   cursor: zoom-in;
   user-select: none;
   -webkit-user-select: none;
   -webkit-touch-callout: none;
 }
 
-.echolink-lightbox-stage img.is-zoomed {
-  width: 220%;
-  max-width: none;
-  max-height: none;
-  cursor: zoom-out;
+.echolink-lightbox-stage.is-zoomed img {
+  cursor: grab;
 }
 
-.echolink-lightbox-stage.is-zoomed {
-  align-items: flex-start;
-  justify-content: flex-start;
+.echolink-lightbox-stage.is-gesturing img {
+  cursor: grabbing;
 }
 
 .echolink-lightbox-nav {
