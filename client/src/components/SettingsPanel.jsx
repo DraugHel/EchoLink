@@ -448,6 +448,9 @@ export default function SettingsPanel({
                     <option value="openai/gpt-5.6-luna">
                       GPT-5.6 Luna
                     </option>
+                    <option value="claude-haiku-5-5">
+                      Claude Haiku 5.5
+                    </option>
                   </select>
                 </Field>
 

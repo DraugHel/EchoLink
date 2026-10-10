@@ -12,13 +12,65 @@ import {
 const DEEPSEEK =
   'deepseek/deepseek-v4-flash-vision-exp'
 const LUNA = 'openai/gpt-5.6-luna'
+const HAIKU = 'claude-haiku-5-5'
 
-test('vision allowlist contains exactly the two supported models', () => {
+test('vision allowlist contains exactly the three supported models', () => {
   assert.deepEqual(
     [...ALLOWED_VISION_MODELS],
-    [DEEPSEEK, LUNA]
+    [DEEPSEEK, LUNA, HAIKU]
   )
   assert.equal(DEFAULT_VISION_MODEL, LUNA)
+})
+
+test('Claude Haiku 5.5 can be selected as the vision model', () => {
+  assert.equal(isAllowedVisionModel(HAIKU), true)
+  assert.equal(isAllowedVisionModel(` ${HAIKU} `), true)
+  assert.equal(resolveVisionModel(HAIKU, DEEPSEEK), HAIKU)
+  assert.equal(resolveVisionModel('', HAIKU), HAIKU)
+
+  // Nur die genaue ID ist erlaubt, keine Verwandten.
+  for (const other of [
+    'claude-haiku-5',
+    'claude-haiku-4-5',
+    'claude-sonnet-5-5',
+    'claude-haiku-5-5-preview',
+    'anthropic/claude-haiku-5-5'
+  ]) {
+    assert.equal(isAllowedVisionModel(other), false, other)
+    assert.equal(resolveVisionModel(other, ''), LUNA, other)
+  }
+})
+
+test('image messages use Haiku when it is selected, text messages keep the chat model', () => {
+  assert.equal(
+    resolveActiveModel({
+      hasImages: true,
+      chatModel: 'deepseek/deepseek-v4-flash',
+      userVisionModel: HAIKU,
+      envVisionModel: LUNA
+    }),
+    HAIKU
+  )
+  assert.equal(
+    resolveActiveModel({
+      hasImages: false,
+      chatModel: 'claude-sonnet-5-5',
+      userVisionModel: HAIKU,
+      envVisionModel: ''
+    }),
+    'claude-sonnet-5-5'
+  )
+})
+
+test('the Anthropic provider sends images as base64 image blocks', () => {
+  const source = fs.readFileSync(
+    new URL('../server/providers/anthropic.js', import.meta.url),
+    'utf8'
+  )
+
+  assert.match(source, /type: 'image'/)
+  assert.match(source, /type: 'base64'/)
+  assert.match(source, /imgMediaType\(/)
 })
 
 test('user vision selection overrides the environment', () => {
@@ -135,6 +187,7 @@ test('settings panel loads and immediately saves the global selection', () => {
   assert.match(source, /patch\(\s*'\/api\/auth\/vision-model'/)
   assert.match(source, /DeepSeek V4 Flash Vision Exp/)
   assert.match(source, /GPT-5\.6 Luna/)
+  assert.match(source, /<option value="claude-haiku-5-5">\s*Claude Haiku 5\.5\s*<\/option>/)
   assert.match(
     source,
     /Normale Nachrichten verwenden\s+weiterhin das Chatmodell\./

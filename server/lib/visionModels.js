@@ -1,6 +1,7 @@
 export const ALLOWED_VISION_MODELS = Object.freeze([
   'deepseek/deepseek-v4-flash-vision-exp',
-  'openai/gpt-5.6-luna'
+  'openai/gpt-5.6-luna',
+  'claude-haiku-5-5'
 ])
 
 export const DEFAULT_VISION_MODEL =
