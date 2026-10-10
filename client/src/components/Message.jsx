@@ -16,6 +16,8 @@ import typescript from 'react-syntax-highlighter/dist/esm/languages/prism/typesc
 import yaml from 'react-syntax-highlighter/dist/esm/languages/prism/yaml'
 import { oneDark, oneLight } from 'react-syntax-highlighter/dist/esm/styles/prism'
 import EchoLinkMark from './EchoLinkMark.jsx'
+import MessageImageGrid, { ZoomableImage } from './MessageImages.jsx'
+import { attachmentImageUrl } from '../lib/imageGallery.js'
 
 // EchoLink UI Phase 3.3: light syntax highlighter
 SyntaxHighlighter.registerLanguage('bash', bash)
@@ -217,11 +219,15 @@ function Message({ role, content, streaming, images, think, toolStatus, actionRe
           ? (
             <>
               {imgAttachments.length > 0 && (
-                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: (content || fileAttachments.length > 0) ? 8 : 0 }}>
-                  {imgAttachments.map(att => (
-                    <img key={att.filename} src={`/api/uploads/${att.filename}`} alt="" style={{ maxWidth: 200, maxHeight: 200, borderRadius: 8, objectFit: 'cover' }} />
-                  ))}
-                </div>
+                <MessageImageGrid
+                  images={imgAttachments.map(att => ({
+                    src: attachmentImageUrl(att.filename),
+                    name: att.originalName || ''
+                  }))}
+                  spaced={Boolean(
+                    content || fileAttachments.length > 0
+                  )}
+                />
               )}
               {fileAttachments.length > 0 && (
                 <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: content ? 8 : 0 }}>
@@ -397,7 +403,7 @@ function Message({ role, content, streaming, images, think, toolStatus, actionRe
                     </blockquote>
                   ),
                   a: ({ href, children }) => <a href={href} target="_blank" rel="noreferrer" style={{ overflowWrap: 'anywhere', wordBreak: 'break-word' }}>{children}</a>,
-                  img: ({ src, alt }) => <img src={src} alt={alt || ''} loading="lazy" style={{ display: 'block', maxWidth: '100%', height: 'auto', objectFit: 'contain', borderRadius: 8, margin: '8px 0' }} />,
+                  img: ({ src, alt }) => <ZoomableImage src={src} alt={alt || ''} />,
                   hr: () => <hr style={{ border: 0, borderTop: '1px solid var(--border)', margin: '16px 0' }} />,
                   table: ({ children }) => (
                     <div style={{ overflowX: 'auto', maxWidth: '100%', marginBottom: 8, WebkitOverflowScrolling: 'touch', overscrollBehaviorX: 'contain' }}>
