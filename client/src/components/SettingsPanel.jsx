@@ -64,7 +64,8 @@ export default function SettingsPanel({
     openai: 'OpenAI',
     zai: 'Z.ai',
     kimi: 'Kimi (Moonshot)',
-    deepseek: 'DeepSeek'
+    deepseek: 'DeepSeek',
+    google: 'Google Gemini'
   }
 
   const [provider, setProvider] = useState(null)
@@ -81,6 +82,8 @@ export default function SettingsPanel({
             ? 'kimi'
             : form.model.startsWith('deepseek/')
               ? 'deepseek'
+            : form.model.startsWith('google/')
+              ? 'google'
             : undefined
   })
 

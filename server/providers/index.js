@@ -15,6 +15,7 @@ import {
   streamZai
 } from './openai-compatible.js'
 import { ANTHROPIC_KEY, streamAnthropic } from './anthropic.js'
+import { GEMINI_KEY, streamGemini } from './gemini.js'
 import { streamResponses } from './openai-responses.js'
 import { streamDeepSeekResponses } from './deepseek-responses.js'
 import { incompleteStreamError } from './streamErrors.js'
@@ -49,6 +50,13 @@ const PREFIXED_PROVIDERS = [
     label: 'OpenAI',
     streamFn: streamResponses,
     configured: () => Boolean(OPENAI_KEY)
+  },
+  {
+    prefix: 'google/',
+    name: 'google',
+    label: 'Google Gemini',
+    streamFn: streamGemini,
+    configured: () => Boolean(GEMINI_KEY)
   },
   {
     prefix: 'llamacpp/',

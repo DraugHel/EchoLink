@@ -124,6 +124,11 @@ import {
 } from '../providers/openai-compatible.js'
 import { ANTHROPIC_KEY } from '../providers/anthropic.js'
 import {
+  GEMINI_BASE_URL,
+  GEMINI_KEY,
+  normalizeGeminiModels
+} from '../providers/gemini.js'
+import {
   incompleteStreamError,
   prepareProviderMessages,
   resolveProvider
@@ -2182,6 +2187,12 @@ Use these as background context. If these memories fully answer the request, ans
           /(?:^|[/_-])gpt-5\.6(?:$|[/_:-])/,
         budgetTokens: 800000,
         source: 'builtin:gpt-5.6'
+      },
+      {
+        pattern:
+          /^google\/gemini-/,
+        budgetTokens: 800000,
+        source: 'builtin:gemini'
       }
     ]
 
@@ -3884,6 +3895,22 @@ export async function loadModelList() {
             name: `deepseek/${id}`,
             provider: 'deepseek'
           }))
+      }
+    },
+    {
+      name: 'google',
+      enabled: Boolean(GEMINI_KEY),
+      load: async () => {
+        const data = await fetchJsonWithTimeout(
+          `${GEMINI_BASE_URL}/models?pageSize=200`,
+          {
+            headers: {
+              'x-goog-api-key': GEMINI_KEY
+            }
+          }
+        )
+
+        return normalizeGeminiModels(data)
       }
     }
   ].filter(provider => provider.enabled)
