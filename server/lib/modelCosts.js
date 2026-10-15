@@ -28,6 +28,7 @@ export function providerForModel(model) {
   if (lower.startsWith('zai/')) return 'zai'
   if (lower.startsWith('deepseek/')) return 'deepseek'
   if (lower.startsWith('kimi/')) return 'kimi'
+  if (lower.startsWith('google/')) return 'google'
   if (lower.startsWith('llamacpp/')) return 'llamacpp'
   if (lower.startsWith('claude')) return 'anthropic'
 
@@ -47,7 +48,8 @@ function providerModelId(model) {
     zai: 'zai/',
     deepseek: 'deepseek/',
     kimi: 'kimi/',
-    llamacpp: 'llamacpp/'
+    llamacpp: 'llamacpp/',
+    google: 'google/'
   }
 
   const prefix = prefixes[provider]
@@ -375,6 +377,85 @@ function kimiPricing(id) {
   return null
 }
 
+// Google Gemini API, Standard-Stufe (bezahlt), USD je 1 Mio. Token.
+// Quelle: https://ai.google.dev/gemini-api/docs/pricing, Stand 2026-10-15.
+// Befristete Einfuehrungspreise haben je Zeitraum einen eigenen Schluessel,
+// damit bereits erfasste Aufrufe ihren damaligen Preis behalten:
+//   gemini-4-argon: bis 2026-11-30, danach doppelt
+//   gemini-3.6-flash / gemini-3.8-flash: bis 2026-12-31, danach doppelt
+// Grenzen: Die Pro-Modelle kosten ab Prompts > 200k Token mehr; hier gilt der
+// Satz fuer Prompts bis 200k. Audio-Eingabe wird nicht unterschieden. Modelle
+// ohne Eintrag (z.B. gemini-3.7-flash, gemini-2.5-flash-lite) bleiben
+// unbepreist, statt geraten zu werden.
+function geminiPricing(id, createdAt) {
+  const lower = String(id || '').toLowerCase()
+  const timestamp = Number(createdAt) || Math.floor(Date.now() / 1000)
+  const before = iso =>
+    timestamp < Math.floor(Date.parse(iso) / 1000)
+  const source = 'Google Gemini API pricing'
+
+  if (lower === 'gemini-4-argon') {
+    return before('2026-12-01T00:00:00Z')
+      ? pricing({
+          key: 'google:gemini-4-argon:intro-until-2026-11-30',
+          input: 2.00,
+          cached: 0.10,
+          output: 10.00,
+          source
+        })
+      : pricing({
+          key: 'google:gemini-4-argon:from-2026-12-01',
+          input: 4.00,
+          cached: 0.20,
+          output: 20.00,
+          source
+        })
+  }
+
+  if (
+    lower === 'gemini-3.8-flash' ||
+    lower === 'gemini-3.6-flash'
+  ) {
+    return before('2027-01-01T00:00:00Z')
+      ? pricing({
+          key: `google:${lower}:intro-until-2026-12-31`,
+          input: 0.75,
+          cached: 0.075,
+          output: 3.75,
+          source
+        })
+      : pricing({
+          key: `google:${lower}:from-2027-01-01`,
+          input: 1.50,
+          cached: 0.15,
+          output: 7.50,
+          source
+        })
+  }
+
+  const fixed = {
+    'gemini-3.5-flash-lite': [0.30, 0.03, 2.50, ''],
+    'gemini-3.1-flash-lite': [0.25, 0.025, 1.50, ''],
+    'gemini-3-flash-preview': [0.50, 0.05, 3.00, ''],
+    'gemini-3.1-pro-preview': [2.00, 0.20, 12.00, 'le200k'],
+    'gemini-3.1-pro-preview-customtools': [2.00, 0.20, 12.00, 'le200k'],
+    'gemini-2.5-pro': [1.25, 0.125, 10.00, 'le200k'],
+    'gemini-2.5-flash': [0.30, 0.03, 2.50, '']
+  }
+
+  const row = fixed[lower]
+
+  if (!row) return null
+
+  return pricing({
+    key: `google:${lower}:standard${row[3] ? `-${row[3]}` : ''}:2026-10-15`,
+    input: row[0],
+    cached: row[1],
+    output: row[2],
+    source
+  })
+}
+
 export function resolveModelPricing(
   model,
   createdAt = Math.floor(Date.now() / 1000)
@@ -421,6 +502,10 @@ export function resolveModelPricing(
 
   if (provider === 'kimi') {
     return kimiPricing(id)
+  }
+
+  if (provider === 'google') {
+    return geminiPricing(id, createdAt)
   }
 
   return null
